@@ -1,0 +1,18 @@
+{
+  "network": "baseSepolia",
+  "chainId": "84532",
+  "deployer": "0x7900F22d8d6b234E87499F1d5b59e868963387EB",
+  "admin": "0x7900F22d8d6b234E87499F1d5b59e868963387EB",
+  "timestamp": "2026-03-07T17:41:44.424Z",
+  "contracts": {
+    "MagnetaPool": "0x819E809D55B3101E3adc3B701c704412E005Af5a",
+    "MagnetaSwap": "0xc987c18869151A8Fa6aAB02a182427740d2Ca08D",
+    "RewardToken": "0xebFd211F02eC94924B40B5172BCCdAcED3f58b99",
+    "MagnetaFarm": "0x11CF3a229fD7a339bC83518884bc43Cd26045c55",
+    "MagnetaLending": "0x2AdB28534959292933619F42fE259d954263d25c",
+    "MagnetaDLMM": "0xF569769ef755484310b9Ca6d83f8a9190461D28B",
+    "MockTokenX": "0xAF21a21E43d572Db09c5F6A72853224CFA1Bd085",
+    "MockTokenY": "0x716B8a28DBaa2b621db69d47e029437b36437d22",
+    "MagnetaFactory": "0xFef295610Be34e097Bf6Ebd0295f7f02D0b8DE5a"
+  }
+}

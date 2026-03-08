@@ -1,0 +1,35 @@
+{
+  "name": "@magneta/contracts",
+  "version": "0.1.0",
+  "description": "Magneta Finance DEX Smart Contracts",
+  "scripts": {
+    "compile": "hardhat compile",
+    "test": "hardhat test",
+    "test:coverage": "hardhat coverage",
+    "deploy:base-sepolia": "hardhat run scripts/deploy/deployAll.ts --network baseSepolia",
+    "deploy:base": "hardhat run scripts/deploy/deployAll.ts --network base",
+    "deploy:optimism-sepolia": "hardhat run scripts/deploy/deployAll.ts --network optimismSepolia",
+    "deploy:arbitrum-sepolia": "hardhat run scripts/deploy/deployAll.ts --network arbitrumSepolia",
+    "deploy:polygon-amoy": "hardhat run scripts/deploy/deployAll.ts --network polygonAmoy",
+    "export:abis": "ts-node scripts/exportABIs.ts",
+    "verify": "hardhat verify --network",
+    "node": "hardhat node",
+    "clean": "hardhat clean"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^4.0.0",
+    "@nomicfoundation/hardhat-verify": "^2.0.0",
+    "@openzeppelin/contracts": "^4.9.6",
+    "@typechain/ethers-v6": "^0.5.0",
+    "@typechain/hardhat": "^9.0.0",
+    "dotenv": "^16.3.1",
+    "hardhat": "^2.19.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.3.3"
+  },
+  "dependencies": {
+    "@layerzerolabs/lz-evm-oapp-v2": "^3.0.145",
+    "@layerzerolabs/lz-evm-protocol-v2": "^3.0.145",
+    "ethers": "^6.9.0"
+  }
+}
