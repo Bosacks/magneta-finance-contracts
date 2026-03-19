@@ -190,14 +190,18 @@ contract MagnetaBundler is ReentrancyGuard, Ownable {
      * @dev Sell one token and use the proceeds to bundle buy another token.
      * @param sellToken Token to sell.
      * @param sellAmount Amount of token to sell.
+     * @param minEthFromSell Minimum ETH to receive from the sell (slippage protection).
      * @param buyToken Token to buy.
+     * @param minTokensPerBuy Minimum tokens per recipient buy (slippage protection).
      * @param recipients List of recipients for the buy.
      * @param buyAmounts List of ETH amounts to spend per recipient (must sum < proceeds).
      */
     function sellAndBundleBuy(
         address sellToken,
         uint256 sellAmount,
+        uint256 minEthFromSell,
         address buyToken,
+        uint256 minTokensPerBuy,
         address[] calldata recipients,
         uint256[] calldata buyAmounts
     ) external nonReentrant {
@@ -213,7 +217,7 @@ contract MagnetaBundler is ReentrancyGuard, Ownable {
 
         uint[] memory amounts = IUniswapV2Router02(router).swapExactTokensForETH(
             sellAmount,
-            0, // Accept any ETH (risky but MVP)
+            minEthFromSell,
             sellPath,
             address(this),
             block.timestamp
@@ -236,7 +240,7 @@ contract MagnetaBundler is ReentrancyGuard, Ownable {
         for (uint i = 0; i < recipients.length; i++) {
             require(recipients[i] != address(0), "Zero address recipient");
             try IUniswapV2Router02(router).swapExactETHForTokens{value: buyAmounts[i]}(
-                0,
+                minTokensPerBuy,
                 buyPath,
                 recipients[i],
                 block.timestamp
