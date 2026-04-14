@@ -20,9 +20,22 @@ contract MagnetaBridgeOApp is OApp, ReentrancyGuard {
 
     using SafeERC20 for IERC20;
 
-    // Bridge fee in basis points (100 = 1%)
-    uint256 public constant BRIDGE_FEE_BPS = 10; // 0.1%
+    // Fee cap (BPS, 10_000 = 100%) — owner cannot exceed
     uint256 public constant MAX_FEE_BPS = 1000; // 10%
+
+    // LayerZero Endpoint ID for Ethereum mainnet — used to auto-bump the fee
+    // on any route that touches Ethereum (source or destination) where LZ
+    // native fees are dramatically higher than pure L2↔L2 routes.
+    uint32 public constant ETHEREUM_EID = 30101;
+
+    // Default protocol fee for L2↔L2 routes (0.1%)
+    uint16 public defaultFeeBps = 10;
+
+    // Higher protocol fee for any route touching Ethereum (0.2%)
+    uint16 public ethereumFeeBps = 20;
+
+    // Per-destination override: 0 means "use default/ethereum logic"
+    mapping(uint32 => uint16) public dstFeeBpsOverride;
 
     // Fee recipient
     address public feeRecipient;
@@ -81,6 +94,9 @@ contract MagnetaBridgeOApp is OApp, ReentrancyGuard {
     event BridgeLiquidityAdded(uint32 endpointId, address indexed token, uint256 amount);
     event BridgeLiquidityRemoved(uint32 endpointId, address indexed token, uint256 amount);
     event BridgeableTokenSet(uint32 endpointId, address indexed token, bool bridgeable);
+    event DefaultFeeBpsUpdated(uint16 oldBps, uint16 newBps);
+    event EthereumFeeBpsUpdated(uint16 oldBps, uint16 newBps);
+    event DstFeeBpsOverrideUpdated(uint32 indexed dstEid, uint16 oldBps, uint16 newBps);
 
 
     modifier whenNotPaused() {
@@ -135,8 +151,16 @@ contract MagnetaBridgeOApp is OApp, ReentrancyGuard {
         // Transfer tokens from user
         IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
 
-        // Calculate fee
-        uint256 fee = (amount * BRIDGE_FEE_BPS) / 10000;
+        // Calculate fee — per-route override takes precedence, otherwise
+        // routes touching Ethereum pay the ethereumFeeBps, all others pay
+        // defaultFeeBps.
+        uint16 feeBps = dstFeeBpsOverride[dstEid];
+        if (feeBps == 0) {
+            feeBps = (dstEid == ETHEREUM_EID || localEid == ETHEREUM_EID)
+                ? ethereumFeeBps
+                : defaultFeeBps;
+        }
+        uint256 fee = (amount * feeBps) / 10000;
         uint256 amountAfterFee = amount - fee;
 
         // Transfer fee to fee recipient
@@ -261,6 +285,44 @@ contract MagnetaBridgeOApp is OApp, ReentrancyGuard {
         address oldRecipient = feeRecipient;
         feeRecipient = _feeRecipient;
         emit FeeRecipientUpdated(oldRecipient, _feeRecipient);
+    }
+
+    /**
+     * @dev Update the default fee (applies to L2↔L2 routes without override)
+     * @param _bps New fee in basis points (capped at MAX_FEE_BPS)
+     */
+    function setDefaultFeeBps(uint16 _bps) external {
+        require(msg.sender == owner(), "MagnetaBridgeOApp: not owner");
+        require(_bps <= MAX_FEE_BPS, "MagnetaBridgeOApp: fee exceeds cap");
+        uint16 old = defaultFeeBps;
+        defaultFeeBps = _bps;
+        emit DefaultFeeBpsUpdated(old, _bps);
+    }
+
+    /**
+     * @dev Update the Ethereum-route fee (applies when srcEid or dstEid is ETHEREUM_EID)
+     * @param _bps New fee in basis points (capped at MAX_FEE_BPS)
+     */
+    function setEthereumFeeBps(uint16 _bps) external {
+        require(msg.sender == owner(), "MagnetaBridgeOApp: not owner");
+        require(_bps <= MAX_FEE_BPS, "MagnetaBridgeOApp: fee exceeds cap");
+        uint16 old = ethereumFeeBps;
+        ethereumFeeBps = _bps;
+        emit EthereumFeeBpsUpdated(old, _bps);
+    }
+
+    /**
+     * @dev Override the fee for a specific destination endpoint.
+     *      Pass 0 to clear the override and fall back to default/ethereum logic.
+     * @param dstEid Destination endpoint ID
+     * @param _bps Fee in basis points (capped at MAX_FEE_BPS; 0 clears override)
+     */
+    function setDstFeeBpsOverride(uint32 dstEid, uint16 _bps) external {
+        require(msg.sender == owner(), "MagnetaBridgeOApp: not owner");
+        require(_bps <= MAX_FEE_BPS, "MagnetaBridgeOApp: fee exceeds cap");
+        uint16 old = dstFeeBpsOverride[dstEid];
+        dstFeeBpsOverride[dstEid] = _bps;
+        emit DstFeeBpsOverrideUpdated(dstEid, old, _bps);
     }
 
     /**

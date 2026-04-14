@@ -34,7 +34,7 @@ describe("MagnetaBridgeOApp", function () {
     const BRIDGE_AMOUNT = ethers.parseEther("100");
     const LIQUIDITY = ethers.parseEther("1000");
     const LZ_FEE = ethers.parseEther("0.001"); // matches MockLayerZeroEndpoint.QUOTE_NATIVE_FEE
-    const FEE_BPS = 10n; // 0.1% — matches MagnetaBridgeOApp.BRIDGE_FEE_BPS
+    const FEE_BPS = 10n; // 0.1% — matches MagnetaBridgeOApp.defaultFeeBps for non-Ethereum routes
 
     beforeEach(async function () {
         [owner, alice, bob, feeRecipient] = await ethers.getSigners();
