@@ -4,6 +4,12 @@
   "description": "Unified cross-chain SDK for Magneta tokens/dex/scope (LP, token ops, swaps, tax claim)",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
   "files": [
     "dist"
   ],
