@@ -92,7 +92,7 @@ describe("MagnetaSwap", function () {
             ethers.parseEther("10"),
             ethers.parseEther("9"),
             user.address,
-            Math.floor(Date.now() / 1000) + 3600
+            (await ethers.provider.getBlock("latest"))!.timestamp + 3600
           )
       ).to.be.revertedWith("MagnetaSwap: token not whitelisted");
     });
@@ -110,7 +110,7 @@ describe("MagnetaSwap", function () {
             ethers.parseEther("10"),
             ethers.parseEther("9"),
             user.address,
-            Math.floor(Date.now() / 1000) + 3600
+            (await ethers.provider.getBlock("latest"))!.timestamp + 3600
           )
       ).to.be.revertedWith("MagnetaSwap: paused");
     });
