@@ -58,6 +58,25 @@ contract MagnetaBridgeOApp is OApp, ReentrancyGuard {
     // Paused state
     bool public paused;
 
+    // Guardian role: can pause but not unpause. Lets ops/SOC kill the bridge
+    // in seconds during an incident without holding owner keys.
+    address public pauseGuardian;
+
+    // Per-tx amount cap: maxAmountPerTx[token]. 0 = no cap.
+    mapping(address => uint256) public maxAmountPerTx;
+
+    // Rolling 24h volume cap per token. 0 = no cap.
+    mapping(address => uint256) public dailyLimit;
+
+    // Tracking for the rolling window: dailyWindowStart resets after 24h,
+    // dailyVolume accumulates within the window.
+    mapping(address => uint256) public dailyWindowStart;
+    mapping(address => uint256) public dailyVolume;
+
+    // Cumulative volume tracking per route (src is always localEid)
+    // routeVolume[dstEid][token] = lifetime volume sent to dstEid
+    mapping(uint32 => mapping(address => uint256)) public routeVolume;
+
     // Bridge transaction structure
     struct BridgeTransaction {
         address token;
@@ -97,10 +116,23 @@ contract MagnetaBridgeOApp is OApp, ReentrancyGuard {
     event DefaultFeeBpsUpdated(uint16 oldBps, uint16 newBps);
     event EthereumFeeBpsUpdated(uint16 oldBps, uint16 newBps);
     event DstFeeBpsOverrideUpdated(uint32 indexed dstEid, uint16 oldBps, uint16 newBps);
+    event PauseGuardianUpdated(address indexed oldGuardian, address indexed newGuardian);
+    event MaxAmountPerTxUpdated(address indexed token, uint256 oldCap, uint256 newCap);
+    event DailyLimitUpdated(address indexed token, uint256 oldLimit, uint256 newLimit);
+    event DailyWindowReset(address indexed token, uint256 newWindowStart);
+    event RouteVolumeUpdated(uint32 indexed dstEid, address indexed token, uint256 added, uint256 cumulative);
 
 
     modifier whenNotPaused() {
         require(!paused, "MagnetaBridgeOApp: paused");
+        _;
+    }
+
+    modifier onlyOwnerOrGuardian() {
+        require(
+            msg.sender == owner() || msg.sender == pauseGuardian,
+            "MagnetaBridgeOApp: not owner or guardian"
+        );
         _;
     }
 
@@ -147,6 +179,25 @@ contract MagnetaBridgeOApp is OApp, ReentrancyGuard {
         require(to != address(0), "MagnetaBridgeOApp: invalid recipient");
         require(supportedTokens[dstEid][token], "MagnetaBridgeOApp: token not supported on destination");
         require(bridgeableTokens[dstEid][token], "MagnetaBridgeOApp: token not bridgeable");
+
+        // Per-tx cap (0 = no cap)
+        uint256 txCap = maxAmountPerTx[token];
+        require(txCap == 0 || amount <= txCap, "MagnetaBridgeOApp: amount exceeds per-tx cap");
+
+        // Rolling 24h volume cap (0 = no cap). Reset window if expired.
+        uint256 dayCap = dailyLimit[token];
+        if (dayCap > 0) {
+            if (block.timestamp >= dailyWindowStart[token] + 1 days) {
+                dailyWindowStart[token] = block.timestamp;
+                dailyVolume[token] = 0;
+                emit DailyWindowReset(token, block.timestamp);
+            }
+            require(
+                dailyVolume[token] + amount <= dayCap,
+                "MagnetaBridgeOApp: amount exceeds 24h cap"
+            );
+            dailyVolume[token] += amount;
+        }
 
         // Transfer tokens from user
         IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
@@ -197,6 +248,10 @@ contract MagnetaBridgeOApp is OApp, ReentrancyGuard {
             timestamp: block.timestamp,
             completed: false
         });
+
+        // Track cumulative volume per route for monitoring/dashboards
+        routeVolume[dstEid][token] += amountAfterFee;
+        emit RouteVolumeUpdated(dstEid, token, amountAfterFee, routeVolume[dstEid][token]);
 
         emit TokenBridged(token, msg.sender, to, amountAfterFee, dstEid, guid);
     }
@@ -326,21 +381,55 @@ contract MagnetaBridgeOApp is OApp, ReentrancyGuard {
     }
 
     /**
-     * @dev Pause the contract
+     * @dev Pause the contract. Owner OR guardian — guardian exists so ops/SOC
+     *      can react in seconds during an incident without holding owner keys.
      */
-    function pause() external {
-        require(msg.sender == owner(), "MagnetaBridgeOApp: not owner");
+    function pause() external onlyOwnerOrGuardian {
         paused = true;
         emit Paused(msg.sender);
     }
 
     /**
-     * @dev Unpause the contract
+     * @dev Unpause the contract. Owner only — guardian can stop the bleeding,
+     *      but resuming the bridge requires a deliberate owner action.
      */
     function unpause() external {
         require(msg.sender == owner(), "MagnetaBridgeOApp: not owner");
         paused = false;
         emit Unpaused(msg.sender);
+    }
+
+    /**
+     * @dev Set the pause guardian (zero address disables the role).
+     */
+    function setPauseGuardian(address _guardian) external {
+        require(msg.sender == owner(), "MagnetaBridgeOApp: not owner");
+        address old = pauseGuardian;
+        pauseGuardian = _guardian;
+        emit PauseGuardianUpdated(old, _guardian);
+    }
+
+    /**
+     * @dev Set the per-tx amount cap for a token (0 = no cap).
+     */
+    function setMaxAmountPerTx(address token, uint256 cap) external {
+        require(msg.sender == owner(), "MagnetaBridgeOApp: not owner");
+        require(token != address(0), "MagnetaBridgeOApp: invalid token");
+        uint256 old = maxAmountPerTx[token];
+        maxAmountPerTx[token] = cap;
+        emit MaxAmountPerTxUpdated(token, old, cap);
+    }
+
+    /**
+     * @dev Set the rolling 24h volume cap for a token (0 = no cap).
+     *      The window is per-token and resets lazily on the next bridge call.
+     */
+    function setDailyLimit(address token, uint256 limit) external {
+        require(msg.sender == owner(), "MagnetaBridgeOApp: not owner");
+        require(token != address(0), "MagnetaBridgeOApp: invalid token");
+        uint256 old = dailyLimit[token];
+        dailyLimit[token] = limit;
+        emit DailyLimitUpdated(token, old, limit);
     }
 
     /**

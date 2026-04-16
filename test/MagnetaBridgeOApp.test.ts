@@ -509,4 +509,201 @@ describe("MagnetaBridgeOApp", function () {
             expect(lzTokenFee).to.equal(0);
         });
     });
+
+    // ─── Pause guardian ────────────────────────────────────────────────────────
+
+    describe("Pause guardian", function () {
+        it("owner can set and clear the guardian", async function () {
+            await expect(bridgeA.setPauseGuardian(bob.address))
+                .to.emit(bridgeA, "PauseGuardianUpdated")
+                .withArgs(ethers.ZeroAddress, bob.address);
+            expect(await bridgeA.pauseGuardian()).to.equal(bob.address);
+
+            await bridgeA.setPauseGuardian(ethers.ZeroAddress);
+            expect(await bridgeA.pauseGuardian()).to.equal(ethers.ZeroAddress);
+        });
+
+        it("guardian can pause but not unpause", async function () {
+            await bridgeA.setPauseGuardian(bob.address);
+
+            await expect(bridgeA.connect(bob).pause())
+                .to.emit(bridgeA, "Paused")
+                .withArgs(bob.address);
+            expect(await bridgeA.paused()).to.equal(true);
+
+            await expect(bridgeA.connect(bob).unpause())
+                .to.be.revertedWith("MagnetaBridgeOApp: not owner");
+
+            await bridgeA.unpause();
+            expect(await bridgeA.paused()).to.equal(false);
+        });
+
+        it("non-guardian non-owner cannot pause", async function () {
+            await bridgeA.setPauseGuardian(bob.address);
+            await expect(bridgeA.connect(alice).pause())
+                .to.be.revertedWith("MagnetaBridgeOApp: not owner or guardian");
+        });
+
+        it("only owner can set the guardian", async function () {
+            await expect(bridgeA.connect(alice).setPauseGuardian(alice.address))
+                .to.be.revertedWith("MagnetaBridgeOApp: not owner");
+        });
+    });
+
+    // ─── Per-tx amount cap ─────────────────────────────────────────────────────
+
+    describe("Per-tx amount cap", function () {
+        it("owner can set the cap and emit an event", async function () {
+            const cap = ethers.parseEther("500");
+            await expect(bridgeA.setMaxAmountPerTx(await token.getAddress(), cap))
+                .to.emit(bridgeA, "MaxAmountPerTxUpdated")
+                .withArgs(await token.getAddress(), 0, cap);
+            expect(await bridgeA.maxAmountPerTx(await token.getAddress())).to.equal(cap);
+        });
+
+        it("rejects bridge calls exceeding the per-tx cap", async function () {
+            const cap = ethers.parseEther("50");
+            await bridgeA.setMaxAmountPerTx(await token.getAddress(), cap);
+            await token.connect(alice).approve(await bridgeA.getAddress(), BRIDGE_AMOUNT);
+
+            await expect(
+                bridgeA.connect(alice).bridgeTokens(
+                    await token.getAddress(),
+                    BRIDGE_AMOUNT,
+                    EID_B,
+                    bob.address,
+                    "0x",
+                    false,
+                    { value: LZ_FEE }
+                )
+            ).to.be.revertedWith("MagnetaBridgeOApp: amount exceeds per-tx cap");
+        });
+
+        it("allows bridges at or below the cap", async function () {
+            const cap = BRIDGE_AMOUNT;
+            await bridgeA.setMaxAmountPerTx(await token.getAddress(), cap);
+            await token.connect(alice).approve(await bridgeA.getAddress(), BRIDGE_AMOUNT);
+
+            await expect(
+                bridgeA.connect(alice).bridgeTokens(
+                    await token.getAddress(),
+                    BRIDGE_AMOUNT,
+                    EID_B,
+                    bob.address,
+                    "0x",
+                    false,
+                    { value: LZ_FEE }
+                )
+            ).to.emit(bridgeA, "TokenBridged");
+        });
+
+        it("zero cap means no cap", async function () {
+            await token.connect(alice).approve(await bridgeA.getAddress(), BRIDGE_AMOUNT);
+            await expect(
+                bridgeA.connect(alice).bridgeTokens(
+                    await token.getAddress(),
+                    BRIDGE_AMOUNT,
+                    EID_B,
+                    bob.address,
+                    "0x",
+                    false,
+                    { value: LZ_FEE }
+                )
+            ).to.emit(bridgeA, "TokenBridged");
+        });
+    });
+
+    // ─── Rolling 24h volume cap ────────────────────────────────────────────────
+
+    describe("Daily volume cap", function () {
+        it("owner can set the daily limit", async function () {
+            const limit = ethers.parseEther("10000");
+            await expect(bridgeA.setDailyLimit(await token.getAddress(), limit))
+                .to.emit(bridgeA, "DailyLimitUpdated")
+                .withArgs(await token.getAddress(), 0, limit);
+            expect(await bridgeA.dailyLimit(await token.getAddress())).to.equal(limit);
+        });
+
+        it("rejects bridges that would breach the daily cap", async function () {
+            const limit = ethers.parseEther("150");
+            await bridgeA.setDailyLimit(await token.getAddress(), limit);
+            await token.connect(alice).approve(await bridgeA.getAddress(), ethers.parseEther("400"));
+
+            // First 100 ok (cumulative 100/150)
+            await bridgeA.connect(alice).bridgeTokens(
+                await token.getAddress(), BRIDGE_AMOUNT, EID_B, bob.address, "0x", false,
+                { value: LZ_FEE }
+            );
+            expect(await bridgeA.dailyVolume(await token.getAddress())).to.equal(BRIDGE_AMOUNT);
+
+            // Second 100 would push to 200 > 150 — must revert
+            await expect(
+                bridgeA.connect(alice).bridgeTokens(
+                    await token.getAddress(), BRIDGE_AMOUNT, EID_B, bob.address, "0x", false,
+                    { value: LZ_FEE }
+                )
+            ).to.be.revertedWith("MagnetaBridgeOApp: amount exceeds 24h cap");
+        });
+
+        it("resets the window after 24h and allows new volume", async function () {
+            const limit = ethers.parseEther("150");
+            await bridgeA.setDailyLimit(await token.getAddress(), limit);
+            await token.connect(alice).approve(await bridgeA.getAddress(), ethers.parseEther("400"));
+
+            await bridgeA.connect(alice).bridgeTokens(
+                await token.getAddress(), BRIDGE_AMOUNT, EID_B, bob.address, "0x", false,
+                { value: LZ_FEE }
+            );
+
+            // Advance time past the rolling window
+            await ethers.provider.send("evm_increaseTime", [86401]);
+            await ethers.provider.send("evm_mine", []);
+
+            await expect(
+                bridgeA.connect(alice).bridgeTokens(
+                    await token.getAddress(), BRIDGE_AMOUNT, EID_B, bob.address, "0x", false,
+                    { value: LZ_FEE }
+                )
+            ).to.emit(bridgeA, "DailyWindowReset");
+
+            // Volume tracker reset to just the new bridge amount
+            expect(await bridgeA.dailyVolume(await token.getAddress())).to.equal(BRIDGE_AMOUNT);
+        });
+
+        it("zero limit means no cap", async function () {
+            await token.connect(alice).approve(await bridgeA.getAddress(), BRIDGE_AMOUNT);
+            await expect(
+                bridgeA.connect(alice).bridgeTokens(
+                    await token.getAddress(), BRIDGE_AMOUNT, EID_B, bob.address, "0x", false,
+                    { value: LZ_FEE }
+                )
+            ).to.emit(bridgeA, "TokenBridged");
+            expect(await bridgeA.dailyVolume(await token.getAddress())).to.equal(0);
+        });
+    });
+
+    // ─── Route volume monitoring ───────────────────────────────────────────────
+
+    describe("Route volume monitoring", function () {
+        it("emits RouteVolumeUpdated and accumulates per (dstEid, token)", async function () {
+            await token.connect(alice).approve(await bridgeA.getAddress(), ethers.parseEther("300"));
+            const tokenAddr = await token.getAddress();
+            const amountAfterFee = BRIDGE_AMOUNT - (BRIDGE_AMOUNT * FEE_BPS) / 10_000n;
+
+            await expect(
+                bridgeA.connect(alice).bridgeTokens(
+                    tokenAddr, BRIDGE_AMOUNT, EID_B, bob.address, "0x", false,
+                    { value: LZ_FEE }
+                )
+            )
+                .to.emit(bridgeA, "RouteVolumeUpdated")
+                .withArgs(EID_B, tokenAddr, amountAfterFee, amountAfterFee);
+
+            await bridgeA.connect(alice).bridgeTokens(
+                tokenAddr, BRIDGE_AMOUNT, EID_B, bob.address, "0x", false,
+                { value: LZ_FEE }
+            );
+            expect(await bridgeA.routeVolume(EID_B, tokenAddr)).to.equal(amountAfterFee * 2n);
+        });
+    });
 });
