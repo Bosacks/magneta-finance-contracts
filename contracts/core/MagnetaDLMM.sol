@@ -306,18 +306,19 @@ contract MagnetaDLMM is Ownable2Step, Pausable, ReentrancyGuard {
         require(amountRemaining == 0, "DLMM: insufficient liquidity depth");
         require(amountOut >= minAmountOut, "DLMM: slippage exceeded");
 
-        if (swapForY) {
-            tokenY.safeTransfer(to, amountOut);
-        } else {
-            tokenX.safeTransfer(to, amountOut);
-        }
-
+        // Effects before the output transfer (CEI)
         if (currentId != activeId) {
             activeId = currentId;
             emit ActiveIdUpdated(currentId);
         }
 
         emit Swap(msg.sender, to, swapForY, amountIn, amountOut, startId, currentId);
+
+        if (swapForY) {
+            tokenY.safeTransfer(to, amountOut);
+        } else {
+            tokenX.safeTransfer(to, amountOut);
+        }
     }
 
     // ── Protocol fee collection ────────────────────────────────────────────────

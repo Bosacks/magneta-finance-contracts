@@ -9,3 +9,7 @@ deployments/local*.json
 !.env.example
 coverage/
 coverage.json
+
+# Foundry build output
+out/
+broadcast/

@@ -355,15 +355,16 @@ contract MagnetaPool is ERC721, ERC721Enumerable, Ownable2Step, Pausable, Reentr
         pool.reserve1 -= amount1;
         pool.liquidity -= liquidity;
 
-        // Transfer tokens to recipient
-        IERC20(pool.token0).safeTransfer(to, amount0);
-        IERC20(pool.token1).safeTransfer(to, amount1);
-
-        // Burn NFT if all liquidity removed
-        if (position.liquidity == 0) {
+        // Effects: burn NFT if all liquidity removed, BEFORE external transfers
+        bool shouldBurn = position.liquidity == 0;
+        if (shouldBurn) {
             _burn(tokenId);
             delete positions[tokenId];
         }
+
+        // Interactions: transfer tokens to recipient last (CEI)
+        IERC20(pool.token0).safeTransfer(to, amount0);
+        IERC20(pool.token1).safeTransfer(to, amount1);
 
         emit LiquidityRemoved(position.poolId, tokenId, to, amount0, amount1, liquidity);
 

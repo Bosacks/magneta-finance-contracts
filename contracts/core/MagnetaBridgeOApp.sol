@@ -273,24 +273,21 @@ contract MagnetaBridgeOApp is OApp, ReentrancyGuard {
     ) internal override {
         (address token, address to, uint256 amount) = abi.decode(_payload, (address, address, uint256));
 
+        require(!bridgeTransactions[_guid].completed, "MagnetaBridgeOApp: guid already processed");
         require(supportedTokens[_origin.srcEid][token], "MagnetaBridgeOApp: token not supported from source");
         require(amount > 0, "MagnetaBridgeOApp: invalid amount");
-        
-        // Check if bridge has enough liquidity for this token on the local endpoint
-        // localEid is the endpoint ID of the current chain (where this contract is deployed)
+        require(to != address(0), "MagnetaBridgeOApp: zero recipient");
+
         require(
             bridgeLiquidity[localEid][token] >= amount,
             "MagnetaBridgeOApp: insufficient bridge liquidity"
         );
 
-        // Transfer tokens to recipient
-        IERC20(token).safeTransfer(to, amount);
-        
-        // Update liquidity tracking
+        // Effects before interactions (CEI)
         bridgeLiquidity[localEid][token] -= amount;
-
-        // Mark transaction as completed
         bridgeTransactions[_guid].completed = true;
+
+        IERC20(token).safeTransfer(to, amount);
 
         emit TokenReceived(token, to, amount, _origin.srcEid, _guid);
     }

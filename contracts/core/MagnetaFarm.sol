@@ -419,20 +419,26 @@ contract MagnetaFarm is Ownable2Step, ReentrancyGuard, IERC721Receiver {
         user.amount = 0;
         user.rewardDebt = 0;
         user.pendingRewards = 0;
+        pool.totalLiquidity -= amount;
 
+        uint256[] memory nfts;
         if (pool.isNFTPool) {
-            uint256[] memory nfts = userNFTs[_poolId][msg.sender];
+            nfts = userNFTs[_poolId][msg.sender];
             delete userNFTs[_poolId][msg.sender];
             for (uint256 i = 0; i < nfts.length; i++) {
                 delete nftOwners[nfts[i]];
+            }
+        }
+
+        emit EmergencyWithdraw(msg.sender, _poolId, amount);
+
+        if (pool.isNFTPool) {
+            for (uint256 i = 0; i < nfts.length; i++) {
                 IERC721(pool.lpToken).safeTransferFrom(address(this), msg.sender, nfts[i]);
             }
         } else {
             IERC20(pool.lpToken).safeTransfer(msg.sender, amount);
         }
-
-        pool.totalLiquidity -= amount;
-        emit EmergencyWithdraw(msg.sender, _poolId, amount);
     }
 
     /**
