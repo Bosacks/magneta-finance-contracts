@@ -54,13 +54,35 @@ contract MagnetaLending is Ownable2Step, Pausable, ReentrancyGuard {
         mapping(address => uint256) debtShares;
     }
 
+    /**
+     * Oracle config per asset.
+     * Defends against the Moonwell-class incident (composite cbETH/ETH × ETH/USD
+     * misconfigured to a flat $1 feed → $1.8M bad debt) and Ribbon-class decimal
+     * mismatches by:
+     *  - caching feed.decimals() at registration (no implicit assumption)
+     *  - enforcing absolute min/max bounds in 18-dec normalized space
+     *  - enforcing per-update max deviation vs lastPrice (anti flash-pump)
+     *  - supporting composite ratio×USD feeds for LSTs/LRTs
+     */
+    struct FeedConfig {
+        address feed;             // USD feed (Chainlink AggregatorV3)
+        address ratioFeed;        // Optional: ratio feed (e.g. cbETH/ETH). 0 = pure USD feed
+        uint8 feedDecimals;       // Cached at registration
+        uint8 ratioDecimals;      // Cached at registration (0 if no ratio feed)
+        uint256 minPrice;         // 18-dec floor (revert if observed < min)
+        uint256 maxPrice;         // 18-dec ceiling (revert if observed > max)
+        uint256 maxDeviationBps;  // Max delta vs lastPrice (0 = disabled)
+        uint256 lastPrice;        // Last validated price (18 dec), updated by mutating ops
+        bool isSet;
+    }
+
     // --- State Variables ---
 
     mapping(address => ReserveData) public reserves;
     address[] public allReserves;
-    
+
     mapping(address => UserData) private users;
-    mapping(address => address) public priceFeeds; // Asset -> Chainlink Price Feed
+    mapping(address => FeedConfig) public priceFeeds; // Asset -> oracle config
 
     uint256 public constant SECONDS_PER_YEAR = 31536000;
     uint256 public constant BASE_RATE = 2e16; // 2% Base APY
@@ -74,6 +96,7 @@ contract MagnetaLending is Ownable2Step, Pausable, ReentrancyGuard {
     uint256 public constant FLASHLOAN_FEE_BPS = 9; // 0.09% fee
     uint256 public constant RESERVE_FACTOR_BPS = 1000; // 10%
     uint256 public constant PRICE_STALENESS_THRESHOLD = 3600; // 1 hour
+    uint256 public constant PRICE_PRECISION = 1e18;
 
     // --- Events ---
 
@@ -83,6 +106,8 @@ contract MagnetaLending is Ownable2Step, Pausable, ReentrancyGuard {
     event Repay(address indexed asset, address indexed user, uint256 amount);
     event FlashLoan(address indexed target, address indexed asset, uint256 amount, uint256 fee);
     event Liquidation(address indexed user, address indexed debtAsset, address indexed collateralAsset, uint256 amountRepaid, uint256 collateralSeized, address liquidator);
+    event PriceFeedSet(address indexed asset, address feed, address ratioFeed, uint256 minPrice, uint256 maxPrice, uint256 maxDeviationBps);
+    event PriceLastUpdated(address indexed asset, uint256 price);
 
     constructor() {}
 
@@ -110,10 +135,53 @@ contract MagnetaLending is Ownable2Step, Pausable, ReentrancyGuard {
         allReserves.push(asset);
     }
 
-    function setPriceFeed(address asset, address feed) external onlyOwner {
+    /**
+     * @dev Register or replace an asset's price feed configuration.
+     *
+     * @param asset           Underlying asset address.
+     * @param feed            Chainlink-style USD feed (or ETH-denominated feed if used with ratioFeed).
+     * @param ratioFeed       Optional ratio feed for LSTs/LRTs (e.g. cbETH/ETH). Pass address(0) for direct USD feeds.
+     *                        When set, getAssetPrice = normalize(feed) * normalize(ratioFeed) / 1e18.
+     *                        This is the protection that would have prevented the Moonwell cbETH incident.
+     * @param minPrice        Sanity floor in 18-dec normalized space. Reverts if observed price < minPrice.
+     * @param maxPrice        Sanity ceiling in 18-dec normalized space. Reverts if observed price > maxPrice.
+     * @param maxDeviationBps Maximum allowed deviation vs lastPrice in basis points. 0 disables the check.
+     *
+     * Decimals are read from the feed(s) at registration so an oracle swap to a feed with different
+     * decimals does not silently break price scaling (Ribbon-class incident).
+     */
+    function setPriceFeed(
+        address asset,
+        address feed,
+        address ratioFeed,
+        uint256 minPrice,
+        uint256 maxPrice,
+        uint256 maxDeviationBps
+    ) external onlyOwner {
         require(asset != address(0), "Invalid asset");
         require(feed != address(0), "Invalid feed");
-        priceFeeds[asset] = feed;
+        require(maxPrice > minPrice, "Invalid bounds");
+        require(maxDeviationBps <= BPS_DIVISOR, "Deviation > 100%");
+
+        uint8 fDec = AggregatorV3Interface(feed).decimals();
+        uint8 rDec = 0;
+        if (ratioFeed != address(0)) {
+            rDec = AggregatorV3Interface(ratioFeed).decimals();
+        }
+
+        priceFeeds[asset] = FeedConfig({
+            feed: feed,
+            ratioFeed: ratioFeed,
+            feedDecimals: fDec,
+            ratioDecimals: rDec,
+            minPrice: minPrice,
+            maxPrice: maxPrice,
+            maxDeviationBps: maxDeviationBps,
+            lastPrice: 0,
+            isSet: true
+        });
+
+        emit PriceFeedSet(asset, feed, ratioFeed, minPrice, maxPrice, maxDeviationBps);
     }
 
     // --- Internal/Interest Functions ---
@@ -154,15 +222,85 @@ contract MagnetaLending is Ownable2Step, Pausable, ReentrancyGuard {
         }
     }
 
-    function getAssetPrice(address asset) public view returns (uint256) {
-        address feedAddress = priceFeeds[asset];
-        require(feedAddress != address(0), "Price feed not set");
+    /**
+     * @dev Read & validate a single Chainlink-style feed. Returns raw int as uint256.
+     */
+    function _readFeed(address feedAddr) internal view returns (uint256) {
         (uint80 roundId, int256 price, , uint256 updatedAt, uint80 answeredInRound) =
-            AggregatorV3Interface(feedAddress).latestRoundData();
+            AggregatorV3Interface(feedAddr).latestRoundData();
         require(price > 0, "Invalid price");
         require(updatedAt > 0 && block.timestamp - updatedAt <= PRICE_STALENESS_THRESHOLD, "Stale price");
         require(answeredInRound >= roundId, "Incomplete round");
         return uint256(price);
+    }
+
+    /**
+     * @dev Normalize an arbitrary-decimal price to 18-dec fixed point.
+     */
+    function _normalize(uint256 price, uint8 dec) internal pure returns (uint256) {
+        if (dec == 18) return price;
+        if (dec < 18) return price * (10 ** (18 - dec));
+        return price / (10 ** (dec - 18));
+    }
+
+    /**
+     * @dev Returns asset price normalized to 18 decimals with all guards applied.
+     *
+     * Guards:
+     *   1. Feed staleness + round completeness (basic Chainlink hygiene)
+     *   2. Composite (ratioFeed × usdFeed) for LSTs — prevents Moonwell-class incidents
+     *      where an LST is priced via a flat USD feed instead of (ratio × ETH/USD)
+     *   3. Decimal normalization read from feed at registration — prevents Ribbon-class
+     *      decimal-mismatch losses
+     *   4. Hard min/max bounds in 18-dec space — sanity floor/ceiling
+     *   5. Max-deviation cap vs lastPrice — defense-in-depth against single-block manipulation
+     *
+     * `view` so it can be called from health-factor calculations. lastPrice is updated by
+     * mutating ops via _refreshLastPrice(). On first call (lastPrice == 0) the deviation
+     * check is skipped — bounds + staleness still apply.
+     */
+    function getAssetPrice(address asset) public view returns (uint256) {
+        FeedConfig storage cfg = priceFeeds[asset];
+        require(cfg.isSet, "Price feed not set");
+
+        uint256 price18 = _normalize(_readFeed(cfg.feed), cfg.feedDecimals);
+
+        if (cfg.ratioFeed != address(0)) {
+            uint256 ratio18 = _normalize(_readFeed(cfg.ratioFeed), cfg.ratioDecimals);
+            price18 = (price18 * ratio18) / PRICE_PRECISION;
+        }
+
+        require(price18 >= cfg.minPrice, "Price below floor");
+        require(price18 <= cfg.maxPrice, "Price above ceiling");
+
+        if (cfg.lastPrice != 0 && cfg.maxDeviationBps != 0) {
+            uint256 diff = price18 > cfg.lastPrice ? price18 - cfg.lastPrice : cfg.lastPrice - price18;
+            uint256 deviationBps = (diff * BPS_DIVISOR) / cfg.lastPrice;
+            require(deviationBps <= cfg.maxDeviationBps, "Price deviation too high");
+        }
+
+        return price18;
+    }
+
+    /**
+     * @dev Refresh lastPrice for an asset. Called by mutating ops so the deviation
+     * cap has a recent reference. No-op if feed not configured.
+     */
+    function _refreshLastPrice(address asset) internal {
+        if (!priceFeeds[asset].isSet) return;
+        uint256 price = getAssetPrice(asset);
+        priceFeeds[asset].lastPrice = price;
+        emit PriceLastUpdated(asset, price);
+    }
+
+    /**
+     * @dev Permissionless: anyone can re-anchor lastPrice for an asset by reading
+     * the validated price now. Useful for keepers to keep the deviation reference
+     * fresh on assets that are sitting as collateral but not actively traded.
+     * Reverts under the same conditions as getAssetPrice (bounds/staleness/round/dev).
+     */
+    function refreshPrice(address asset) external {
+        _refreshLastPrice(asset);
     }
 
     function calculateUserAccountData(address user) public view returns (
@@ -245,8 +383,9 @@ contract MagnetaLending is Ownable2Step, Pausable, ReentrancyGuard {
         uint256 sharesToBurn = (amount * 1e18) / reserve.supplyIndex;
         users[msg.sender].collateralShares[asset] -= sharesToBurn;
         reserve.totalSupplied -= amount;
-        
+
         if (getUserTotalDebt(msg.sender) > 0) {
+            _refreshLastPrice(asset);
             (, , , uint256 healthFactor) = calculateUserAccountData(msg.sender);
             require(healthFactor >= 1e18, "Health factor too low after withdrawal");
         }
@@ -270,7 +409,8 @@ contract MagnetaLending is Ownable2Step, Pausable, ReentrancyGuard {
         uint256 shares = (amount * 1e18) / reserve.borrowIndex;
         users[msg.sender].debtShares[asset] += shares;
         reserve.totalBorrowed += amount;
-        
+
+        _refreshLastPrice(asset);
         (, , , uint256 healthFactor) = calculateUserAccountData(msg.sender);
         require(healthFactor >= 1e18, "Health factor too low to borrow");
 
@@ -331,6 +471,9 @@ contract MagnetaLending is Ownable2Step, Pausable, ReentrancyGuard {
     ) external nonReentrant {
         _updateReserve(debtAsset);
         _updateReserve(collateralAsset);
+
+        _refreshLastPrice(debtAsset);
+        _refreshLastPrice(collateralAsset);
 
         (, , , uint256 healthFactor) = calculateUserAccountData(user);
         require(healthFactor < HEALTH_FACTOR_THRESHOLD, "User is healthy");

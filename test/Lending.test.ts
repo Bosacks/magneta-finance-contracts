@@ -37,10 +37,24 @@ describe("MagnetaLending", function () {
 
         // Initialize reserves
         await lending.initReserve(await token.getAddress(), 7500, 8000);
-        await lending.setPriceFeed(await token.getAddress(), await priceFeed.getAddress());
+        await lending.setPriceFeed(
+            await token.getAddress(),
+            await priceFeed.getAddress(),
+            ethers.ZeroAddress,
+            ethers.parseEther("100"),     // floor $100
+            ethers.parseEther("10000"),   // ceiling $10,000
+            0                              // deviation cap disabled for baseline tests
+        );
 
         await lending.initReserve(await token2.getAddress(), 8000, 8500);
-        await lending.setPriceFeed(await token2.getAddress(), await priceFeed2.getAddress());
+        await lending.setPriceFeed(
+            await token2.getAddress(),
+            await priceFeed2.getAddress(),
+            ethers.ZeroAddress,
+            ethers.parseEther("0.5"),
+            ethers.parseEther("2"),
+            0
+        );
 
         // Give user some tokens
         await token.transfer(user.address, ethers.parseEther("1000"));

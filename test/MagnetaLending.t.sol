@@ -19,7 +19,29 @@ contract MockToken is ERC20 {
 
 contract MockPriceFeed {
     int256 public price;
-    constructor(int256 _price) { price = _price; }
+    uint8 public immutable decimalsOverride;
+    uint256 public updatedAtOverride; // 0 → use block.timestamp (fresh)
+
+    constructor(int256 _price) {
+        price = _price;
+        decimalsOverride = 8; // Chainlink default
+    }
+
+    function decimals() external view returns (uint8) { return decimalsOverride; }
+
+    function latestRoundData() external view returns (uint80, int256, uint256, uint256, uint80) {
+        uint256 ts = updatedAtOverride == 0 ? block.timestamp : updatedAtOverride;
+        return (1, price, ts, ts, 1);
+    }
+    function setPrice(int256 _price) external { price = _price; }
+    function setUpdatedAt(uint256 _ts) external { updatedAtOverride = _ts; }
+}
+
+contract MockPriceFeedWithDecimals {
+    int256 public price;
+    uint8 public immutable feedDec;
+    constructor(int256 _price, uint8 _dec) { price = _price; feedDec = _dec; }
+    function decimals() external view returns (uint8) { return feedDec; }
     function latestRoundData() external view returns (uint80, int256, uint256, uint256, uint80) {
         return (1, price, block.timestamp, block.timestamp, 1);
     }
@@ -84,9 +106,11 @@ contract MagnetaLendingTest is Test {
         lending.initReserve(address(usdc), 8000, 8500); // 80% LTV, 85% liq threshold
         lending.initReserve(address(weth), 7500, 8000); // 75% LTV, 80% liq threshold
 
-        // Set price feeds
-        lending.setPriceFeed(address(usdc), address(usdcFeed));
-        lending.setPriceFeed(address(weth), address(wethFeed));
+        // Set price feeds. Wide bounds + deviation disabled so existing baseline tests
+        // (which crash WETH from $2000 to $1000 in a single tx for liquidation flow)
+        // still pass. Dedicated oracle tests below exercise tighter configs.
+        lending.setPriceFeed(address(usdc), address(usdcFeed), address(0), 0.5e18, 2e18, 0);
+        lending.setPriceFeed(address(weth), address(wethFeed), address(0), 100e18, 10_000e18, 0);
 
         // Fund users
         usdc.mint(alice, 100_000e6);
@@ -114,12 +138,132 @@ contract MagnetaLendingTest is Test {
 
     function test_setPriceFeed_zeroAsset_reverts() public {
         vm.expectRevert("Invalid asset");
-        lending.setPriceFeed(address(0), address(usdcFeed));
+        lending.setPriceFeed(address(0), address(usdcFeed), address(0), 0.5e18, 2e18, 0);
     }
 
     function test_setPriceFeed_zeroFeed_reverts() public {
         vm.expectRevert("Invalid feed");
-        lending.setPriceFeed(address(usdc), address(0));
+        lending.setPriceFeed(address(usdc), address(0), address(0), 0.5e18, 2e18, 0);
+    }
+
+    function test_setPriceFeed_invalidBounds_reverts() public {
+        vm.expectRevert("Invalid bounds");
+        lending.setPriceFeed(address(usdc), address(usdcFeed), address(0), 2e18, 1e18, 0);
+    }
+
+    function test_setPriceFeed_deviationOver100_reverts() public {
+        vm.expectRevert("Deviation > 100%");
+        lending.setPriceFeed(address(usdc), address(usdcFeed), address(0), 0.5e18, 2e18, 10_001);
+    }
+
+    // ── oracle protections ────────────────────────────────────────────────────
+
+    /// Decimal normalization: an 8-dec feed at $2000 must read as 2000e18.
+    function test_oracle_normalizesEightDecimalFeed() public {
+        // wethFeed has decimals=8, price=2000e8 → expect 2000e18
+        assertEq(lending.getAssetPrice(address(weth)), 2000e18);
+    }
+
+    /// Ribbon-class: feed swapped to one with different decimals must still read correctly.
+    /// (Caught at registration time because we cache feed.decimals() then.)
+    function test_oracle_normalizesNonStandardDecimals() public {
+        MockPriceFeedWithDecimals f = new MockPriceFeedWithDecimals(int256(1234e18), 18);
+        MockToken tok = new MockToken("X", "X", 18);
+        lending.initReserve(address(tok), 5000, 6000);
+        lending.setPriceFeed(address(tok), address(f), address(0), 1, type(uint256).max, 0);
+        assertEq(lending.getAssetPrice(address(tok)), 1234e18);
+    }
+
+    /// Sanity floor: feed returning a price below minPrice must revert.
+    function test_oracle_priceBelowFloor_reverts() public {
+        wethFeed.setPrice(50e8); // $50, below 100e18 floor
+        vm.expectRevert("Price below floor");
+        lending.getAssetPrice(address(weth));
+    }
+
+    /// Sanity ceiling: feed returning above maxPrice must revert.
+    function test_oracle_priceAboveCeiling_reverts() public {
+        wethFeed.setPrice(20_000e8); // $20k, above 10_000e18 ceiling
+        vm.expectRevert("Price above ceiling");
+        lending.getAssetPrice(address(weth));
+    }
+
+    /// Deviation cap: jumping 50% in one update must revert when cap is 20%.
+    function test_oracle_deviationCap_blocksLargeJump() public {
+        // Re-register WETH with 20% max deviation
+        lending.setPriceFeed(address(weth), address(wethFeed), address(0), 100e18, 10_000e18, 2000);
+
+        // Seed lastPrice via the permissionless refresh
+        lending.refreshPrice(address(weth));
+
+        // 50% drop, cap is 20% → must revert
+        wethFeed.setPrice(1000e8);
+        vm.expectRevert("Price deviation too high");
+        lending.getAssetPrice(address(weth));
+    }
+
+    /// refreshPrice itself must enforce the deviation cap.
+    function test_oracle_refreshPrice_enforcesDeviation() public {
+        lending.setPriceFeed(address(weth), address(wethFeed), address(0), 100e18, 10_000e18, 2000);
+        lending.refreshPrice(address(weth));   // anchor at $2000
+        wethFeed.setPrice(1000e8);             // 50% drop
+        vm.expectRevert("Price deviation too high");
+        lending.refreshPrice(address(weth));
+    }
+
+    /// Deviation cap is skipped on first read (lastPrice == 0).
+    function test_oracle_deviationCap_skippedOnFirstRead() public {
+        MockPriceFeed f = new MockPriceFeed(int256(2000e8));
+        MockToken tok = new MockToken("X", "X", 18);
+        lending.initReserve(address(tok), 5000, 6000);
+        lending.setPriceFeed(address(tok), address(f), address(0), 100e18, 10_000e18, 1000); // 10% cap
+
+        // No prior refresh → lastPrice = 0 → no deviation enforced.
+        assertEq(lending.getAssetPrice(address(tok)), 2000e18);
+    }
+
+    /// Staleness: feed older than threshold must revert.
+    function test_oracle_stalePrice_reverts() public {
+        vm.warp(100_000);
+        wethFeed.setUpdatedAt(1); // very old
+        vm.expectRevert("Stale price");
+        lending.getAssetPrice(address(weth));
+    }
+
+    /// Composite feed (Moonwell prevention): cbETH = ratio(cbETH/ETH) × ETH/USD.
+    /// If oracle is misconfigured to a flat $1 USD feed, the composite check exposes it.
+    function test_oracle_compositeFeed_reflectsRatioTimesUSD() public {
+        // Mocks: cbETH/ETH ratio = 1.05 (in 18-dec ratio feed), ETH/USD = $2000 (8-dec)
+        MockPriceFeedWithDecimals ratio = new MockPriceFeedWithDecimals(int256(1.05e18), 18);
+        MockPriceFeed eth = new MockPriceFeed(int256(2000e8));
+
+        MockToken cbeth = new MockToken("cbETH", "cbETH", 18);
+        lending.initReserve(address(cbeth), 7000, 7500);
+        lending.setPriceFeed(
+            address(cbeth),
+            address(eth),     // USD feed (ETH/USD)
+            address(ratio),   // Ratio feed (cbETH/ETH)
+            100e18,
+            10_000e18,
+            0
+        );
+
+        // Expected: 2000 * 1.05 = 2100 USD per cbETH (in 18 dec)
+        assertEq(lending.getAssetPrice(address(cbeth)), 2100e18);
+    }
+
+    /// Moonwell-class regression: a misconfig that points cbETH at a flat $1 stable feed
+    /// (no ratio composition) results in a 2000× under-priced asset → bounds catch it.
+    function test_oracle_moonwellMisconfig_caughtByFloor() public {
+        MockPriceFeed flatUsd = new MockPriceFeed(int256(1e8)); // $1 — wrong for cbETH!
+
+        MockToken cbeth = new MockToken("cbETH", "cbETH", 18);
+        lending.initReserve(address(cbeth), 7000, 7500);
+        // Operator forgot ratioFeed but set a sensible floor of $100. Floor catches it.
+        lending.setPriceFeed(address(cbeth), address(flatUsd), address(0), 100e18, 10_000e18, 0);
+
+        vm.expectRevert("Price below floor");
+        lending.getAssetPrice(address(cbeth));
     }
 
     // ── deposit ───────────────────────────────────────────────────────────────
