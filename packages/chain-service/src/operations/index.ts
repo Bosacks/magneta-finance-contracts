@@ -6,6 +6,7 @@ import { buildPlan } from '../routing/plan';
 import { quoteFee, type FeeInputs } from '../fees';
 import { requireChain } from '../chains';
 import { execEvm } from '../adapters/evm/executor';
+import { execEvmCrossChain, execEvmFanOut } from '../adapters/evm/crossChainExecutor';
 
 /**
  * High-level SDK entrypoint. Every op accepts a `dstChain` explicitly; the
@@ -103,6 +104,42 @@ export async function claimTaxFees(args: ClaimTaxArgs): Promise<OpResult> {
   return dispatch(OpType.CLAIM_TAX_FEES, args);
 }
 
+// ─── Fan-out: broadcast an op to multiple chains ───────────────────────
+
+export interface FanOutArgs {
+  wallet: WalletAdapter;
+  dstChains: ChainId[];
+  op: OpType;
+  /** Per-chain module params builder. Receives the chain id, returns params for that chain. */
+  buildParams: (dstChain: ChainId) => OpBaseArgs;
+  /** Total native value to cover LZ fees across all chains. */
+  totalNativeValue: bigint;
+}
+
+export async function fanOut(args: FanOutArgs): Promise<OpResult> {
+  const src = requireChain(args.wallet.chain);
+
+  if (src.kind !== 'evm') {
+    throw new NotSupportedYetError(src.id, args.op);
+  }
+
+  const moduleParamsPerChain: unknown[] = [];
+  for (const dstChain of args.dstChains) {
+    const chainArgs = args.buildParams(dstChain);
+    const { moduleParams } = buildEvmParams(args.op, chainArgs);
+    moduleParamsPerChain.push(moduleParams);
+  }
+
+  return execEvmFanOut({
+    wallet: args.wallet,
+    srcChain: src.id,
+    dstChains: args.dstChains,
+    op: args.op,
+    moduleParamsPerChain,
+    nativeValue: args.totalNativeValue,
+  });
+}
+
 /**
  * Internal dispatcher. For Phase 1 it handles the EVM path end-to-end; other
  * ecosystems throw `NotSupportedYetError` so callers can catch it and prompt
@@ -120,12 +157,25 @@ async function dispatch(op: OpType, args: OpBaseArgs): Promise<OpResult> {
   const plan = buildPlan({ op, srcChain: src.id, dstChain: dst.id, valueUsdc6d: args.valueUsdc6d });
   quoteFee(defaultFeeInputs(op, args.valueUsdc6d ?? 0n));
 
+  const { moduleParams, nativeValue } = buildEvmParams(op, args);
+
   if (plan.sameChain && dst.kind === 'evm') {
-    const { moduleParams, nativeValue } = buildEvmParams(op, args);
     return execEvm({ wallet: args.wallet, dstChain: dst.id, op, moduleParams, nativeValue });
   }
 
-  // Cross-chain and non-EVM paths: staged for Phase 2/3 adapters.
+  // Cross-chain EVM → EVM: send via source Gateway's sendCrossChainOp.
+  if (src.kind === 'evm' && dst.kind === 'evm' && dst.lzEid) {
+    return execEvmCrossChain({
+      wallet: args.wallet,
+      srcChain: src.id,
+      dstChain: dst.id,
+      op,
+      moduleParams,
+      nativeValue,
+    });
+  }
+
+  // Non-EVM paths: staged for Phase 3 adapters.
   throw new NotSupportedYetError(dst.id, op);
 }
 

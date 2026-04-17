@@ -17,6 +17,62 @@ export const MagnetaGatewayAbi = [
   },
   {
     type: 'function',
+    name: 'sendCrossChainOp',
+    stateMutability: 'payable',
+    inputs: [
+      { name: 'dstEid', type: 'uint32' },
+      { name: 'op', type: 'uint8' },
+      { name: 'moduleParams', type: 'bytes' },
+      { name: 'lzOptions', type: 'bytes' },
+    ],
+    outputs: [{ name: 'guid', type: 'bytes32' }],
+  },
+  {
+    type: 'function',
+    name: 'sendFanOut',
+    stateMutability: 'payable',
+    inputs: [
+      { name: 'dstEids', type: 'uint32[]' },
+      { name: 'op', type: 'uint8' },
+      { name: 'moduleParamsPerChain', type: 'bytes[]' },
+      { name: 'lzOptions', type: 'bytes' },
+    ],
+    outputs: [{ name: 'guids', type: 'bytes32[]' }],
+  },
+  {
+    type: 'function',
+    name: 'quoteCrossChainFee',
+    stateMutability: 'view',
+    inputs: [
+      { name: 'dstEid', type: 'uint32' },
+      { name: 'op', type: 'uint8' },
+      { name: 'moduleParams', type: 'bytes' },
+      { name: 'lzOptions', type: 'bytes' },
+      { name: 'payInLzToken', type: 'bool' },
+    ],
+    outputs: [
+      { name: 'nativeFee', type: 'uint256' },
+      { name: 'lzTokenFee', type: 'uint256' },
+    ],
+  },
+  {
+    type: 'function',
+    name: 'quoteFanOutFee',
+    stateMutability: 'view',
+    inputs: [
+      { name: 'dstEids', type: 'uint32[]' },
+      { name: 'op', type: 'uint8' },
+      { name: 'moduleParamsPerChain', type: 'bytes[]' },
+      { name: 'lzOptions', type: 'bytes' },
+      { name: 'payInLzToken', type: 'bool' },
+    ],
+    outputs: [
+      { name: 'totalNativeFee', type: 'uint256' },
+      { name: 'totalLzTokenFee', type: 'uint256' },
+    ],
+  },
+  {
+    type: 'function',
     name: 'moduleFor',
     stateMutability: 'view',
     inputs: [{ name: 'op', type: 'uint8' }],

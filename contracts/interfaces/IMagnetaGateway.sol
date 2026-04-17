@@ -71,4 +71,40 @@ interface IMagnetaGateway {
 
     /// @notice Address of the USDC vault that accumulates Magneta fees on this chain.
     function feeVault() external view returns (address);
+
+    // ───────────────────── cross-chain ─────────────────────
+
+    /// @notice Send a cross-chain op to a sibling gateway via LayerZero.
+    function sendCrossChainOp(
+        uint32 dstEid,
+        OpType op,
+        bytes calldata moduleParams,
+        bytes calldata lzOptions
+    ) external payable returns (bytes32 guid);
+
+    /// @notice Fan-out: broadcast an op to multiple chains in one tx.
+    function sendFanOut(
+        uint32[] calldata dstEids,
+        OpType op,
+        bytes[] calldata moduleParamsPerChain,
+        bytes calldata lzOptions
+    ) external payable returns (bytes32[] memory guids);
+
+    /// @notice Estimate LayerZero fee for a single cross-chain op.
+    function quoteCrossChainFee(
+        uint32 dstEid,
+        OpType op,
+        bytes calldata moduleParams,
+        bytes calldata lzOptions,
+        bool payInLzToken
+    ) external view returns (uint256 nativeFee, uint256 lzTokenFee);
+
+    /// @notice Estimate total LayerZero fees for a fan-out.
+    function quoteFanOutFee(
+        uint32[] calldata dstEids,
+        OpType op,
+        bytes[] calldata moduleParamsPerChain,
+        bytes calldata lzOptions,
+        bool payInLzToken
+    ) external view returns (uint256 totalNativeFee, uint256 totalLzTokenFee);
 }

@@ -11,11 +11,13 @@ import type { ChainInfo, ChainId } from './types';
 export const CHAINS: Record<string, ChainInfo> = {
   abstract: {
     id: 2741, kind: 'evm', name: 'Abstract', shortName: 'abstract',
-    nativeSymbol: 'ETH', gatewayLive: false, explorer: 'https://abscan.org',
+    nativeSymbol: 'ETH', gatewayLive: false, lzEid: 30305,
+    explorer: 'https://abscan.org',
   },
   aptos: {
     id: 'aptos:mainnet', kind: 'aptos', name: 'Aptos', shortName: 'apt',
-    nativeSymbol: 'APT', gatewayLive: false, explorer: 'https://explorer.aptoslabs.com',
+    nativeSymbol: 'APT', gatewayLive: false, lzEid: 30112,
+    explorer: 'https://explorer.aptoslabs.com',
   },
   arbitrum: {
     id: 42161, kind: 'evm', name: 'Arbitrum One', shortName: 'arb',
@@ -39,7 +41,8 @@ export const CHAINS: Record<string, ChainInfo> = {
   },
   berachain: {
     id: 80094, kind: 'evm', name: 'Berachain', shortName: 'bera',
-    nativeSymbol: 'BERA', gatewayLive: false, explorer: 'https://berascan.com',
+    nativeSymbol: 'BERA', gatewayLive: false, lzEid: 30291,
+    explorer: 'https://berascan.com',
   },
   bsc: {
     id: 56, kind: 'evm', name: 'BNB Smart Chain', shortName: 'bsc',
@@ -64,7 +67,8 @@ export const CHAINS: Record<string, ChainInfo> = {
   },
   flare: {
     id: 14, kind: 'evm', name: 'Flare', shortName: 'flr',
-    nativeSymbol: 'FLR', gatewayLive: false, explorer: 'https://flare-explorer.flare.network',
+    nativeSymbol: 'FLR', gatewayLive: false, lzEid: 30295,
+    explorer: 'https://flare-explorer.flare.network',
   },
   gnosis: {
     id: 100, kind: 'evm', name: 'Gnosis', shortName: 'gno',
@@ -117,13 +121,14 @@ export const CHAINS: Record<string, ChainInfo> = {
   },
   solana: {
     id: 'sol:mainnet', kind: 'solana', name: 'Solana', shortName: 'sol',
-    nativeSymbol: 'SOL', gatewayLive: false, cctpDomain: 5,
+    nativeSymbol: 'SOL', gatewayLive: false, lzEid: 30168, cctpDomain: 5,
     usdc: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
     explorer: 'https://explorer.solana.com',
   },
   sonic: {
     id: 146, kind: 'evm', name: 'Sonic', shortName: 'sonic',
-    nativeSymbol: 'S', gatewayLive: false, explorer: 'https://sonicscan.org',
+    nativeSymbol: 'S', gatewayLive: false, lzEid: 30332,
+    explorer: 'https://sonicscan.org',
   },
   starknet: {
     id: 'stark:mainnet', kind: 'starknet', name: 'Starknet', shortName: 'stark',
@@ -131,11 +136,17 @@ export const CHAINS: Record<string, ChainInfo> = {
   },
   sui: {
     id: 'sui:mainnet', kind: 'sui', name: 'Sui', shortName: 'sui',
-    nativeSymbol: 'SUI', gatewayLive: false, explorer: 'https://suiscan.xyz',
+    nativeSymbol: 'SUI', gatewayLive: false, lzEid: 30280,
+    explorer: 'https://suiscan.xyz',
   },
   tron: {
     id: 'tron:mainnet', kind: 'tron', name: 'Tron', shortName: 'trx',
     nativeSymbol: 'TRX', gatewayLive: false, explorer: 'https://tronscan.org',
+  },
+  thorchain: {
+    id: 'thor:mainnet', kind: 'cosmos', name: 'THORChain', shortName: 'thor',
+    nativeSymbol: 'RUNE', gatewayLive: false,
+    explorer: 'https://runescan.io',
   },
   unichain: {
     id: 130, kind: 'evm', name: 'Unichain', shortName: 'uni',

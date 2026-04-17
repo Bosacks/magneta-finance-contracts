@@ -224,6 +224,7 @@ contract TokenOpsModule is IModule, ReentrancyGuard, Ownable {
 
     function _pullUsdc(Context calldata ctx, uint256 amount) internal {
         if (amount == 0) return;
+        if (ctx.originChainId != block.chainid) return;
         IERC20(usdc).safeTransferFrom(ctx.caller, ctx.feeVault, amount);
     }
 }

@@ -144,7 +144,7 @@ describe("MagnetaSwap", function () {
 
     it("Should not allow non-owner to pause", async function () {
       await expect(magnetaSwap.connect(user).pause()).to.be.revertedWith(
-        "Ownable: caller is not the owner"
+        "MagnetaSwap: not owner or guardian"
       );
     });
   });

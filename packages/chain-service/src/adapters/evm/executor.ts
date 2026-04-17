@@ -73,7 +73,7 @@ function opToUint8(op: OpType): number {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const enc = encodeAbiParameters as unknown as (types: any, values: any) => Hex;
 
-function encodeModuleParams(op: OpType, params: unknown): Hex {
+export function encodeModuleParams(op: OpType, params: unknown): Hex {
   switch (op) {
     case OpType.CREATE_LP:
       return prefixWithOp(op, enc([LpCreateParamsType], [params]));

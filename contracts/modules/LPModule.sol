@@ -250,6 +250,7 @@ contract LPModule is IModule, ReentrancyGuard, Ownable {
     ///      Skips on zero to allow owner-sponsored or fee-less future ops.
     function _collectFee(Context calldata ctx, uint256 amount) internal {
         if (amount == 0) return;
+        if (ctx.originChainId != block.chainid) return;
         IERC20(usdc).safeTransferFrom(ctx.caller, ctx.feeVault, amount);
     }
 }

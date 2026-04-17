@@ -100,7 +100,8 @@ describe("Cross-chain integration", function () {
          .and.to.emit(tokenOpsB, "OpForwarded");
 
         expect(await managedB.frozen(bob.address)).to.equal(true);
-        expect(await usdcB.balanceOf(feeVaultB.address) - vaultBefore).to.equal(flat);
+        // Cross-chain: fee is collected on source chain by Gateway, not on destination
+        expect(await usdcB.balanceOf(feeVaultB.address) - vaultBefore).to.equal(0n);
     });
 
     it("rejects replayed GUID on the destination gateway", async () => {
