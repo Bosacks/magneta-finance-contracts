@@ -15,13 +15,24 @@ contract MagnetaFactory is Ownable2Step, Pausable {
     // Registry of all deployed pools
     address[] public multiPools;
     address[] public dlmmPools;
-    
+
     // Existing singleton pool manager for standard V2-style pools
     MagnetaPool public standardPoolManager;
+
+    address public pauseGuardian;
 
     event MultiPoolCreated(address indexed pool, address[] tokens, uint256[] weights, address creator);
     event DLMMPoolCreated(address indexed pool, address tokenX, address tokenY, uint16 binStep, address creator);
     event StandardPoolCreated(uint256 indexed poolId, address token0, address token1, uint24 fee);
+    event PauseGuardianUpdated(address indexed oldGuardian, address indexed newGuardian);
+
+    modifier onlyOwnerOrGuardian() {
+        require(
+            msg.sender == owner() || msg.sender == pauseGuardian,
+            "MagnetaFactory: not owner or guardian"
+        );
+        _;
+    }
 
     constructor(address _standardPoolManager, address _owner) {
         require(_standardPoolManager != address(0), "Invalid pool manager");
@@ -75,12 +86,18 @@ contract MagnetaFactory is Ownable2Step, Pausable {
     }
 
     // Emergency controls
-    function pause() external onlyOwner {
+    function pause() external onlyOwnerOrGuardian {
         _pause();
     }
 
     function unpause() external onlyOwner {
         _unpause();
+    }
+
+    function setPauseGuardian(address _guardian) external onlyOwner {
+        address old = pauseGuardian;
+        pauseGuardian = _guardian;
+        emit PauseGuardianUpdated(old, _guardian);
     }
 
     /**

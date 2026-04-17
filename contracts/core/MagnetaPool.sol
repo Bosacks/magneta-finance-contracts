@@ -106,6 +106,17 @@ contract MagnetaPool is ERC721, ERC721Enumerable, Ownable2Step, Pausable, Reentr
 
     event PoolCreationEnabled(bool enabled);
     event LiquidityAdditionEnabled(bool enabled);
+    event PauseGuardianUpdated(address indexed oldGuardian, address indexed newGuardian);
+
+    address public pauseGuardian;
+
+    modifier onlyOwnerOrGuardian() {
+        require(
+            msg.sender == owner() || msg.sender == pauseGuardian,
+            "MagnetaPool: not owner or guardian"
+        );
+        _;
+    }
     event Swap(
         uint256 indexed poolId,
         address indexed sender,
@@ -533,12 +544,18 @@ contract MagnetaPool is ERC721, ERC721Enumerable, Ownable2Step, Pausable, Reentr
     }
 
     // Emergency controls
-    function pause() external onlyOwner {
+    function pause() external onlyOwnerOrGuardian {
         _pause();
     }
 
     function unpause() external onlyOwner {
         _unpause();
+    }
+
+    function setPauseGuardian(address _guardian) external onlyOwner {
+        address old = pauseGuardian;
+        pauseGuardian = _guardian;
+        emit PauseGuardianUpdated(old, _guardian);
     }
 
     // Helper functions

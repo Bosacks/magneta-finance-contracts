@@ -34,6 +34,17 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
     error SameChainIdRequired();
     error CrossChainDispatchDisabled();
 
+    address public pauseGuardian;
+    event PauseGuardianUpdated(address indexed oldGuardian, address indexed newGuardian);
+
+    modifier onlyOwnerOrGuardian() {
+        require(
+            msg.sender == owner() || msg.sender == pauseGuardian,
+            "MagnetaGateway: not owner or guardian"
+        );
+        _;
+    }
+
     /// @param _endpoint   LayerZero endpoint for this chain
     /// @param _delegate   Delegate (OApp owner on LZ side, usually the deployer)
     /// @param _feeVaultIn USDC vault that collects Magneta markup on this chain
@@ -120,12 +131,18 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
         emit FeeVaultSet(previous, vault);
     }
 
-    function pause() external onlyOwner {
+    function pause() external onlyOwnerOrGuardian {
         _pause();
     }
 
     function unpause() external onlyOwner {
         _unpause();
+    }
+
+    function setPauseGuardian(address _guardian) external onlyOwner {
+        address old = pauseGuardian;
+        pauseGuardian = _guardian;
+        emit PauseGuardianUpdated(old, _guardian);
     }
 
     // ───────────────────────────── views ─────────────────────────────

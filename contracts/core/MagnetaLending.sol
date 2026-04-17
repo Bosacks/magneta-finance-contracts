@@ -108,6 +108,17 @@ contract MagnetaLending is Ownable2Step, Pausable, ReentrancyGuard {
     event Liquidation(address indexed user, address indexed debtAsset, address indexed collateralAsset, uint256 amountRepaid, uint256 collateralSeized, address liquidator);
     event PriceFeedSet(address indexed asset, address feed, address ratioFeed, uint256 minPrice, uint256 maxPrice, uint256 maxDeviationBps);
     event PriceLastUpdated(address indexed asset, uint256 price);
+    event PauseGuardianUpdated(address indexed oldGuardian, address indexed newGuardian);
+
+    address public pauseGuardian;
+
+    modifier onlyOwnerOrGuardian() {
+        require(
+            msg.sender == owner() || msg.sender == pauseGuardian,
+            "MagnetaLending: not owner or guardian"
+        );
+        _;
+    }
 
     constructor() {}
 
@@ -560,12 +571,18 @@ contract MagnetaLending is Ownable2Step, Pausable, ReentrancyGuard {
 
     // --- Admin Functions ---
 
-    function pause() external onlyOwner {
+    function pause() external onlyOwnerOrGuardian {
         _pause();
     }
 
     function unpause() external onlyOwner {
         _unpause();
+    }
+
+    function setPauseGuardian(address _guardian) external onlyOwner {
+        address old = pauseGuardian;
+        pauseGuardian = _guardian;
+        emit PauseGuardianUpdated(old, _guardian);
     }
 
     // --- View Functions ---

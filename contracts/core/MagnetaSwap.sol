@@ -40,10 +40,13 @@ contract MagnetaSwap is IMagnetaSwap, Ownable2Step, ReentrancyGuard {
     // Paused state
     bool public paused;
 
+    address public pauseGuardian;
+
     event TokenWhitelisted(address indexed token, bool whitelisted);
     event FeeRecipientUpdated(address indexed oldRecipient, address indexed newRecipient);
     event Paused(address account);
     event Unpaused(address account);
+    event PauseGuardianUpdated(address indexed oldGuardian, address indexed newGuardian);
     event LiquidityDeposited(address indexed token, uint256 amount, address indexed depositor);
     event LiquidityWithdrawn(address indexed token, uint256 amount, address indexed recipient);
     event EmergencyWithdraw(address indexed token, uint256 amount, address indexed caller);
@@ -167,20 +170,28 @@ contract MagnetaSwap is IMagnetaSwap, Ownable2Step, ReentrancyGuard {
         emit FeeRecipientUpdated(oldRecipient, _feeRecipient);
     }
 
-    /**
-     * @dev Pause the contract
-     */
-    function pause() external onlyOwner {
+    modifier onlyOwnerOrGuardian() {
+        require(
+            msg.sender == owner() || msg.sender == pauseGuardian,
+            "MagnetaSwap: not owner or guardian"
+        );
+        _;
+    }
+
+    function pause() external onlyOwnerOrGuardian {
         paused = true;
         emit Paused(msg.sender);
     }
 
-    /**
-     * @dev Unpause the contract
-     */
     function unpause() external onlyOwner {
         paused = false;
         emit Unpaused(msg.sender);
+    }
+
+    function setPauseGuardian(address _guardian) external onlyOwner {
+        address old = pauseGuardian;
+        pauseGuardian = _guardian;
+        emit PauseGuardianUpdated(old, _guardian);
     }
 
     /**

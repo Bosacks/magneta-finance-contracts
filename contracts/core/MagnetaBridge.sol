@@ -52,9 +52,20 @@ contract MagnetaBridge is Ownable2Step {
     event FeeRecipientUpdated(address indexed oldRecipient, address indexed newRecipient);
     event Paused(address account);
     event Unpaused(address account);
+    event PauseGuardianUpdated(address indexed oldGuardian, address indexed newGuardian);
+
+    address public pauseGuardian;
 
     modifier whenNotPaused() {
         require(!paused, "MagnetaBridge: paused");
+        _;
+    }
+
+    modifier onlyOwnerOrGuardian() {
+        require(
+            msg.sender == owner() || msg.sender == pauseGuardian,
+            "MagnetaBridge: not owner or guardian"
+        );
         _;
     }
 
@@ -160,7 +171,7 @@ contract MagnetaBridge is Ownable2Step {
     /**
      * @dev Pause the contract
      */
-    function pause() external onlyOwner {
+    function pause() external onlyOwnerOrGuardian {
         paused = true;
         emit Paused(msg.sender);
     }
@@ -171,6 +182,12 @@ contract MagnetaBridge is Ownable2Step {
     function unpause() external onlyOwner {
         paused = false;
         emit Unpaused(msg.sender);
+    }
+
+    function setPauseGuardian(address _guardian) external onlyOwner {
+        address old = pauseGuardian;
+        pauseGuardian = _guardian;
+        emit PauseGuardianUpdated(old, _guardian);
     }
 
     /**

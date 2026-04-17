@@ -75,6 +75,17 @@ contract MagnetaDLMM is Ownable2Step, Pausable, ReentrancyGuard {
     event ProtocolFeesCollected(address indexed recipient, uint24 binId, uint256 feeX, uint256 feeY);
     event FeeRecipientUpdated(address indexed oldRecipient, address indexed newRecipient);
     event ActiveIdUpdated(uint24 newActiveId);
+    event PauseGuardianUpdated(address indexed oldGuardian, address indexed newGuardian);
+
+    address public pauseGuardian;
+
+    modifier onlyOwnerOrGuardian() {
+        require(
+            msg.sender == owner() || msg.sender == pauseGuardian,
+            "DLMM: not owner or guardian"
+        );
+        _;
+    }
 
     // ── Constructor ────────────────────────────────────────────────────────────
     constructor(
@@ -345,12 +356,18 @@ contract MagnetaDLMM is Ownable2Step, Pausable, ReentrancyGuard {
     // ── Admin ──────────────────────────────────────────────────────────────────
 
     // Emergency controls
-    function pause() external onlyOwner {
+    function pause() external onlyOwnerOrGuardian {
         _pause();
     }
 
     function unpause() external onlyOwner {
         _unpause();
+    }
+
+    function setPauseGuardian(address _guardian) external onlyOwner {
+        address old = pauseGuardian;
+        pauseGuardian = _guardian;
+        emit PauseGuardianUpdated(old, _guardian);
     }
 
     function setFeeRecipient(address _feeRecipient) external onlyOwner {
