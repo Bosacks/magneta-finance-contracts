@@ -33,7 +33,8 @@ contract Faucet {
         require(block.timestamp >= lastAccessTime[_recipient] + COOLDOWN, "Cooldown active");
 
         lastAccessTime[_recipient] = block.timestamp;
-        _recipient.transfer(DRIP_AMOUNT);
+        (bool ok, ) = _recipient.call{value: DRIP_AMOUNT}("");
+        require(ok, "Faucet: transfer failed");
 
         emit Drip(_recipient, DRIP_AMOUNT);
     }

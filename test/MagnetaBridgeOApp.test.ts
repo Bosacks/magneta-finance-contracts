@@ -175,7 +175,7 @@ describe("MagnetaBridgeOApp", function () {
             await token.connect(alice).approve(await bridgeB.getAddress(), 100);
             await expect(
                 bridgeB.connect(alice).addBridgeLiquidity(EID_B, await token.getAddress(), 100)
-            ).to.be.revertedWith("MagnetaBridgeOApp: not owner");
+            ).to.be.revertedWith("Ownable: caller is not the owner");
         });
     });
 
@@ -493,10 +493,10 @@ describe("MagnetaBridgeOApp", function () {
                 .to.be.reverted;
             await expect(
                 bridgeA.connect(alice).setSupportedToken(EID_B, await token.getAddress(), false)
-            ).to.be.revertedWith("MagnetaBridgeOApp: not owner");
+            ).to.be.revertedWith("Ownable: caller is not the owner");
             await expect(
                 bridgeA.connect(alice).setFeeRecipient(alice.address)
-            ).to.be.revertedWith("MagnetaBridgeOApp: not owner");
+            ).to.be.revertedWith("Ownable: caller is not the owner");
         });
     });
 
@@ -532,7 +532,7 @@ describe("MagnetaBridgeOApp", function () {
             expect(await bridgeA.paused()).to.equal(true);
 
             await expect(bridgeA.connect(bob).unpause())
-                .to.be.revertedWith("MagnetaBridgeOApp: not owner");
+                .to.be.revertedWith("Ownable: caller is not the owner");
 
             await bridgeA.unpause();
             expect(await bridgeA.paused()).to.equal(false);
@@ -546,7 +546,7 @@ describe("MagnetaBridgeOApp", function () {
 
         it("only owner can set the guardian", async function () {
             await expect(bridgeA.connect(alice).setPauseGuardian(alice.address))
-                .to.be.revertedWith("MagnetaBridgeOApp: not owner");
+                .to.be.revertedWith("Ownable: caller is not the owner");
         });
     });
 

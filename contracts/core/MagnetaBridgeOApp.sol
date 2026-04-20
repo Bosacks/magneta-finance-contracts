@@ -302,8 +302,7 @@ contract MagnetaBridgeOApp is OApp, ReentrancyGuard {
         uint32 endpointId,
         address token,
         bool supported
-    ) external {
-        require(msg.sender == owner(), "MagnetaBridgeOApp: not owner");
+    ) external onlyOwner {
         require(token != address(0), "MagnetaBridgeOApp: invalid token");
         supportedTokens[endpointId][token] = supported;
         emit TokenSupported(endpointId, token, supported);
@@ -319,8 +318,7 @@ contract MagnetaBridgeOApp is OApp, ReentrancyGuard {
         uint32 endpointId,
         address token,
         bool bridgeable
-    ) external {
-        require(msg.sender == owner(), "MagnetaBridgeOApp: not owner");
+    ) external onlyOwner {
         require(token != address(0), "MagnetaBridgeOApp: invalid token");
         bridgeableTokens[endpointId][token] = bridgeable;
         emit BridgeableTokenSet(endpointId, token, bridgeable);
@@ -331,8 +329,7 @@ contract MagnetaBridgeOApp is OApp, ReentrancyGuard {
      * @dev Update fee recipient
      * @param _feeRecipient New fee recipient address
      */
-    function setFeeRecipient(address _feeRecipient) external {
-        require(msg.sender == owner(), "MagnetaBridgeOApp: not owner");
+    function setFeeRecipient(address _feeRecipient) external onlyOwner {
         require(_feeRecipient != address(0), "MagnetaBridgeOApp: invalid fee recipient");
         address oldRecipient = feeRecipient;
         feeRecipient = _feeRecipient;
@@ -343,8 +340,7 @@ contract MagnetaBridgeOApp is OApp, ReentrancyGuard {
      * @dev Update the default fee (applies to L2↔L2 routes without override)
      * @param _bps New fee in basis points (capped at MAX_FEE_BPS)
      */
-    function setDefaultFeeBps(uint16 _bps) external {
-        require(msg.sender == owner(), "MagnetaBridgeOApp: not owner");
+    function setDefaultFeeBps(uint16 _bps) external onlyOwner {
         require(_bps <= MAX_FEE_BPS, "MagnetaBridgeOApp: fee exceeds cap");
         uint16 old = defaultFeeBps;
         defaultFeeBps = _bps;
@@ -355,8 +351,7 @@ contract MagnetaBridgeOApp is OApp, ReentrancyGuard {
      * @dev Update the Ethereum-route fee (applies when srcEid or dstEid is ETHEREUM_EID)
      * @param _bps New fee in basis points (capped at MAX_FEE_BPS)
      */
-    function setEthereumFeeBps(uint16 _bps) external {
-        require(msg.sender == owner(), "MagnetaBridgeOApp: not owner");
+    function setEthereumFeeBps(uint16 _bps) external onlyOwner {
         require(_bps <= MAX_FEE_BPS, "MagnetaBridgeOApp: fee exceeds cap");
         uint16 old = ethereumFeeBps;
         ethereumFeeBps = _bps;
@@ -369,8 +364,7 @@ contract MagnetaBridgeOApp is OApp, ReentrancyGuard {
      * @param dstEid Destination endpoint ID
      * @param _bps Fee in basis points (capped at MAX_FEE_BPS; 0 clears override)
      */
-    function setDstFeeBpsOverride(uint32 dstEid, uint16 _bps) external {
-        require(msg.sender == owner(), "MagnetaBridgeOApp: not owner");
+    function setDstFeeBpsOverride(uint32 dstEid, uint16 _bps) external onlyOwner {
         require(_bps <= MAX_FEE_BPS, "MagnetaBridgeOApp: fee exceeds cap");
         uint16 old = dstFeeBpsOverride[dstEid];
         dstFeeBpsOverride[dstEid] = _bps;
@@ -390,8 +384,7 @@ contract MagnetaBridgeOApp is OApp, ReentrancyGuard {
      * @dev Unpause the contract. Owner only — guardian can stop the bleeding,
      *      but resuming the bridge requires a deliberate owner action.
      */
-    function unpause() external {
-        require(msg.sender == owner(), "MagnetaBridgeOApp: not owner");
+    function unpause() external onlyOwner {
         paused = false;
         emit Unpaused(msg.sender);
     }
@@ -399,8 +392,7 @@ contract MagnetaBridgeOApp is OApp, ReentrancyGuard {
     /**
      * @dev Set the pause guardian (zero address disables the role).
      */
-    function setPauseGuardian(address _guardian) external {
-        require(msg.sender == owner(), "MagnetaBridgeOApp: not owner");
+    function setPauseGuardian(address _guardian) external onlyOwner {
         address old = pauseGuardian;
         pauseGuardian = _guardian;
         emit PauseGuardianUpdated(old, _guardian);
@@ -409,8 +401,7 @@ contract MagnetaBridgeOApp is OApp, ReentrancyGuard {
     /**
      * @dev Set the per-tx amount cap for a token (0 = no cap).
      */
-    function setMaxAmountPerTx(address token, uint256 cap) external {
-        require(msg.sender == owner(), "MagnetaBridgeOApp: not owner");
+    function setMaxAmountPerTx(address token, uint256 cap) external onlyOwner {
         require(token != address(0), "MagnetaBridgeOApp: invalid token");
         uint256 old = maxAmountPerTx[token];
         maxAmountPerTx[token] = cap;
@@ -421,8 +412,7 @@ contract MagnetaBridgeOApp is OApp, ReentrancyGuard {
      * @dev Set the rolling 24h volume cap for a token (0 = no cap).
      *      The window is per-token and resets lazily on the next bridge call.
      */
-    function setDailyLimit(address token, uint256 limit) external {
-        require(msg.sender == owner(), "MagnetaBridgeOApp: not owner");
+    function setDailyLimit(address token, uint256 limit) external onlyOwner {
         require(token != address(0), "MagnetaBridgeOApp: invalid token");
         uint256 old = dailyLimit[token];
         dailyLimit[token] = limit;
@@ -434,8 +424,7 @@ contract MagnetaBridgeOApp is OApp, ReentrancyGuard {
      * @param token Address of the token to withdraw
      * @param amount Amount to withdraw
      */
-    function emergencyWithdraw(address token, uint256 amount) external {
-        require(msg.sender == owner(), "MagnetaBridgeOApp: not owner");
+    function emergencyWithdraw(address token, uint256 amount) external onlyOwner {
         IERC20(token).safeTransfer(owner(), amount);
     }
 
@@ -478,8 +467,7 @@ contract MagnetaBridgeOApp is OApp, ReentrancyGuard {
         uint32 endpointId,
         address token,
         uint256 amount
-    ) external {
-        require(msg.sender == owner(), "MagnetaBridgeOApp: not owner");
+    ) external onlyOwner {
         require(token != address(0), "MagnetaBridgeOApp: invalid token");
         require(amount > 0, "MagnetaBridgeOApp: invalid amount");
         require(supportedTokens[endpointId][token], "MagnetaBridgeOApp: token not supported");
@@ -503,8 +491,7 @@ contract MagnetaBridgeOApp is OApp, ReentrancyGuard {
         uint32 endpointId,
         address token,
         uint256 amount
-    ) external {
-        require(msg.sender == owner(), "MagnetaBridgeOApp: not owner");
+    ) external onlyOwner {
         require(token != address(0), "MagnetaBridgeOApp: invalid token");
         require(amount > 0, "MagnetaBridgeOApp: invalid amount");
         require(
