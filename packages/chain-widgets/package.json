@@ -16,7 +16,7 @@
   "peerDependencies": {
     "react": ">=18",
     "react-dom": ">=18",
-    "@magneta/chain-service": "*"
+    "@magneta/chain-service": "workspace:*"
   },
   "devDependencies": {
     "@types/react": "^18.2.0",
