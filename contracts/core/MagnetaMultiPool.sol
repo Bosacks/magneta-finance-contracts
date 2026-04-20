@@ -6,13 +6,14 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/access/Ownable2Step.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/security/Pausable.sol";
 
 /**
  * @title MagnetaMultiPool
  * @dev Multi-Token Liquidity Pool (3+ tokens)
  * Implements a simplified Value Function MM (like Balancer)
  */
-contract MagnetaMultiPool is ERC20, Ownable2Step, ReentrancyGuard {
+contract MagnetaMultiPool is ERC20, Ownable2Step, ReentrancyGuard, Pausable {
     using SafeERC20 for IERC20;
 
     // Pool tokens
@@ -60,7 +61,7 @@ contract MagnetaMultiPool is ERC20, Ownable2Step, ReentrancyGuard {
     /**
      * @dev Add liquidity to the pool (Proportional only for simplicity MVP)
      */
-    function addLiquidity(uint256[] calldata amounts, uint256 minLpAmount) external nonReentrant returns (uint256 lpAmount) {
+    function addLiquidity(uint256[] calldata amounts, uint256 minLpAmount) external nonReentrant whenNotPaused returns (uint256 lpAmount) {
         uint256 length = tokens.length;
         require(amounts.length == length, "Length mismatch");
 
@@ -136,7 +137,7 @@ contract MagnetaMultiPool is ERC20, Ownable2Step, ReentrancyGuard {
      * Using Balancer Formula:
      * Ao = Bi * (1 - (Bi / (Bi + Ai * (1-fee))) ^ (wi / wo))
      */
-    function swap(address tokenIn, address tokenOut, uint256 amountIn, uint256 minAmountOut) external nonReentrant returns (uint256 amountOut) {
+    function swap(address tokenIn, address tokenOut, uint256 amountIn, uint256 minAmountOut) external nonReentrant whenNotPaused returns (uint256 amountOut) {
         require(isTokenInPool[tokenIn] && isTokenInPool[tokenOut], "Invalid token");
         
         IERC20(tokenIn).safeTransferFrom(msg.sender, address(this), amountIn);
@@ -184,5 +185,14 @@ contract MagnetaMultiPool is ERC20, Ownable2Step, ReentrancyGuard {
             if (address(tokens[i]) == token) return weights[i];
         }
         return 0;
+    }
+
+    // Emergency controls — removeLiquidity stays unpaused so LPs can exit anytime.
+    function pause() external onlyOwner {
+        _pause();
+    }
+
+    function unpause() external onlyOwner {
+        _unpause();
     }
 }

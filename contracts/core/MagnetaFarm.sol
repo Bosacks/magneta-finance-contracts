@@ -7,6 +7,7 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/security/Pausable.sol";
 
 // Interface for MagnetaPool positions
 interface IMagnetaPool {
@@ -24,7 +25,7 @@ interface IMagnetaPool {
  * @title MagnetaFarm
  * @dev Farm contract for staking LP tokens (ERC20 or ERC721 positions) and earning rewards
  */
-contract MagnetaFarm is Ownable2Step, ReentrancyGuard, IERC721Receiver {
+contract MagnetaFarm is Ownable2Step, ReentrancyGuard, Pausable, IERC721Receiver {
     using SafeERC20 for IERC20;
 
     // Farm pool structure
@@ -205,7 +206,7 @@ contract MagnetaFarm is Ownable2Step, ReentrancyGuard, IERC721Receiver {
      * @param _poolId Pool ID
      * @param _amount Amount of LP tokens to deposit
      */
-    function deposit(uint256 _poolId, uint256 _amount) external nonReentrant {
+    function deposit(uint256 _poolId, uint256 _amount) external nonReentrant whenNotPaused {
         require(msg.sender != address(0), "Invalid sender");
         PoolInfo storage pool = poolInfo[_poolId];
         require(pool.exists, "MagnetaFarm: pool does not exist");
@@ -299,7 +300,7 @@ contract MagnetaFarm is Ownable2Step, ReentrancyGuard, IERC721Receiver {
     /**
      * @dev Deposit NFT position to farm
      */
-    function depositNFT(uint256 _poolId, uint256 _tokenId) external nonReentrant {
+    function depositNFT(uint256 _poolId, uint256 _tokenId) external nonReentrant whenNotPaused {
         require(msg.sender != address(0), "Invalid sender");
         PoolInfo storage pool = poolInfo[_poolId];
         require(pool.exists, "MagnetaFarm: pool does not exist");
@@ -456,6 +457,15 @@ contract MagnetaFarm is Ownable2Step, ReentrancyGuard, IERC721Receiver {
      */
     function emergencyRewardWithdraw(uint256 _amount) external onlyOwner {
         rewardToken.safeTransfer(owner(), _amount);
+    }
+
+    // Emergency pause — withdraw/emergencyWithdraw/claimRewards stay unpaused so users can always exit.
+    function pause() external onlyOwner {
+        _pause();
+    }
+
+    function unpause() external onlyOwner {
+        _unpause();
     }
 }
 

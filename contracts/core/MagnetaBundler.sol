@@ -2,6 +2,7 @@
 pragma solidity 0.8.20;
 
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/security/Pausable.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
@@ -19,7 +20,7 @@ interface IUniswapV2Router02 {
     function WETH() external pure returns (address);
 }
 
-contract MagnetaBundler is ReentrancyGuard, Ownable {
+contract MagnetaBundler is ReentrancyGuard, Pausable, Ownable {
     using SafeERC20 for IERC20;
 
     address public router;
@@ -48,7 +49,7 @@ contract MagnetaBundler is ReentrancyGuard, Ownable {
         uint256 amountOutMin,
         address[] calldata recipients,
         uint256[] calldata ethAmounts
-    ) external payable nonReentrant {
+    ) external payable nonReentrant whenNotPaused {
         require(recipients.length == ethAmounts.length, "Arrays length mismatch");
         require(token != address(0), "Invalid token");
         
@@ -102,7 +103,7 @@ contract MagnetaBundler is ReentrancyGuard, Ownable {
         address[] calldata tokens,
         uint256[] calldata amounts,
         uint256[] calldata amountsOutMin
-    ) external nonReentrant {
+    ) external nonReentrant whenNotPaused {
         require(msg.sender != address(0), "Invalid sender");
         require(tokens.length == amounts.length && amounts.length == amountsOutMin.length, "Arrays length mismatch");
 
@@ -152,7 +153,7 @@ contract MagnetaBundler is ReentrancyGuard, Ownable {
         uint256 ethAmount,
         uint256 minEthReturned,
         uint256 minTokensExpected
-    ) external payable nonReentrant {
+    ) external payable nonReentrant whenNotPaused {
         require(msg.value >= ethAmount, "Insufficient ETH");
 
         address[] memory buyPath = new address[](2);
@@ -204,8 +205,9 @@ contract MagnetaBundler is ReentrancyGuard, Ownable {
         uint256 minTokensPerBuy,
         address[] calldata recipients,
         uint256[] calldata buyAmounts
-    ) external nonReentrant {
+    ) external nonReentrant whenNotPaused {
         require(msg.sender != address(0), "Invalid sender");
+        require(recipients.length == buyAmounts.length, "Arrays length mismatch");
         // 1. Transfer Sell Token
         IERC20(sellToken).safeTransferFrom(msg.sender, address(this), sellAmount);
         IERC20(sellToken).forceApprove(router, sellAmount);
@@ -263,7 +265,7 @@ contract MagnetaBundler is ReentrancyGuard, Ownable {
      * @param recipients List of recipient addresses.
      * @param values List of ETH amounts (in wei) for each recipient.
      */
-    function disperseEther(address[] calldata recipients, uint256[] calldata values) external payable nonReentrant {
+    function disperseEther(address[] calldata recipients, uint256[] calldata values) external payable nonReentrant whenNotPaused {
         require(msg.sender != address(0), "Invalid sender");
         require(recipients.length == values.length, "Arrays length mismatch");
         
@@ -302,5 +304,13 @@ contract MagnetaBundler is ReentrancyGuard, Ownable {
     function rescueETH() external onlyOwner {
         (bool success, ) = msg.sender.call{value: address(this).balance}("");
         require(success, "Transfer failed");
+    }
+
+    function pause() external onlyOwner {
+        _pause();
+    }
+
+    function unpause() external onlyOwner {
+        _unpause();
     }
 }
