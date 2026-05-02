@@ -1,0 +1,36 @@
+{
+  "version": "1.0",
+  "chainId": "100",
+  "createdAt": 1777553000000,
+  "meta": {
+    "name": "Magneta — OFT setup batch v2 (gnosis, factories only)",
+    "description": "Sprint 9.6 reduced batch: accept ownership of the two OFT factories on Gnosis. The CORRECT Safe on Gnosis is 0xC4c96aF... (NOT the Polygon Safe 0x4AeA...). Skips Gateway.setModule(13, ...) — handled by separate CreateTokenDispatcher (0xA0ea39EC75...).",
+    "txBuilderVersion": "1.17.0",
+    "createdFromSafeAddress": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a",
+    "createdFromOwnerAddress": ""
+  },
+  "transactions": [
+    {
+      "to": "0x714d0Ae0Ba1420D046CD2818697E41EF69448Ff0",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [],
+        "name": "acceptOwnership",
+        "payable": false
+      },
+      "contractInputsValues": {}
+    },
+    {
+      "to": "0x9FF21887b355d06fB0A426E34857567b9D8bbD2a",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [],
+        "name": "acceptOwnership",
+        "payable": false
+      },
+      "contractInputsValues": {}
+    }
+  ]
+}

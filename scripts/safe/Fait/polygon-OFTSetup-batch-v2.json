@@ -1,0 +1,36 @@
+{
+  "version": "1.0",
+  "chainId": "137",
+  "createdAt": 1777547000000,
+  "meta": {
+    "name": "Magneta — OFT setup batch v2 (polygon, factories only)",
+    "description": "Sprint 9.5 reduced batch: accept ownership of the two OFT factories. The original 3-tx batch is replaced by this 2-tx version because Gateway.setModule(13, ...) reverts on Polygon — the deployed Gateway predates Sprint 2 (OpType enum capped at 12). CREATE_TOKEN cross-chain dispatch ships separately via Sprint 9.6 CreateTokenDispatcher (LZ V2 OApp), no Gateway wiring needed.",
+    "txBuilderVersion": "1.17.0",
+    "createdFromSafeAddress": "0x4AeA3A398Db41b45e146c08131aD27c75b02EC2F",
+    "createdFromOwnerAddress": ""
+  },
+  "transactions": [
+    {
+      "to": "0x714d0Ae0Ba1420D046CD2818697E41EF69448Ff0",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [],
+        "name": "acceptOwnership",
+        "payable": false
+      },
+      "contractInputsValues": {}
+    },
+    {
+      "to": "0x9FF21887b355d06fB0A426E34857567b9D8bbD2a",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [],
+        "name": "acceptOwnership",
+        "payable": false
+      },
+      "contractInputsValues": {}
+    }
+  ]
+}

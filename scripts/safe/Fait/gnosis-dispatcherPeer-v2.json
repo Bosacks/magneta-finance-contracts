@@ -1,0 +1,21 @@
+{
+  "version": "1.0",
+  "chainId": "100",
+  "createdAt": 1777591371093,
+  "meta": {
+    "name": "Magneta — dispatcher.setPeer(eid 30109 → polygon) (chain 100)",
+    "description": "Sprint 9.6 v2 — wire new CreateTokenDispatcher (0x3B254e69916d0946B55515c1C982d6e1fD7A72AA).",
+    "txBuilderVersion": "1.17.0",
+    "createdFromSafeAddress": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a",
+    "createdFromOwnerAddress": ""
+  },
+  "transactions": [
+    {
+      "to": "0x3B254e69916d0946B55515c1C982d6e1fD7A72AA",
+      "value": "0",
+      "data": "0x3400288b000000000000000000000000000000000000000000000000000000000000759d000000000000000000000000e7c9be3b890a3132c3172599b434db5305ba3533",
+      "contractMethod": null,
+      "contractInputsValues": null
+    }
+  ]
+}

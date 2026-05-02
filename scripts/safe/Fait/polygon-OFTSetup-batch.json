@@ -1,0 +1,61 @@
+{
+  "version": "1.0",
+  "chainId": "137",
+  "createdAt": 1777544263214,
+  "meta": {
+    "name": "Magneta — OFT setup batch (polygon)",
+    "description": "Sprint 9.5 wiring: accept ownership of MagnetaOFTStandardFactory + MagnetaOFTAutoLiquidityFactory and register TokenCreationModule with the Gateway under OpType.CREATE_TOKEN.",
+    "txBuilderVersion": "1.17.0",
+    "createdFromSafeAddress": "0x4AeA3A398Db41b45e146c08131aD27c75b02EC2F",
+    "createdFromOwnerAddress": ""
+  },
+  "transactions": [
+    {
+      "to": "0x714d0Ae0Ba1420D046CD2818697E41EF69448Ff0",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [],
+        "name": "acceptOwnership",
+        "payable": false
+      },
+      "contractInputsValues": {}
+    },
+    {
+      "to": "0x9FF21887b355d06fB0A426E34857567b9D8bbD2a",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [],
+        "name": "acceptOwnership",
+        "payable": false
+      },
+      "contractInputsValues": {}
+    },
+    {
+      "to": "0x3c21016E57e7A29333f38d200EC8945bfc6BA537",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [
+          {
+            "internalType": "uint8",
+            "name": "op",
+            "type": "uint8"
+          },
+          {
+            "internalType": "address",
+            "name": "module",
+            "type": "address"
+          }
+        ],
+        "name": "setModule",
+        "payable": false
+      },
+      "contractInputsValues": {
+        "op": "13",
+        "module": "0xae78a0d6d7E4536ADD1269f16E4fF28f7DB15Cd4"
+      }
+    }
+  ]
+}

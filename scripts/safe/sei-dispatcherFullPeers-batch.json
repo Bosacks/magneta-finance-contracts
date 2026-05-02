@@ -1,0 +1,140 @@
+{
+  "version": "1.0",
+  "chainId": "1329",
+  "createdAt": 1777663065694,
+  "meta": {
+    "name": "Magneta Sprint 9.6 — Dispatcher peer wiring (sei)",
+    "description": "Wires CreateTokenDispatcher on sei (eid 30280) to 18 sibling dispatchers via setPeer(eid, peer).",
+    "txBuilderVersion": "1.17.0",
+    "createdFromSafeAddress": "0x40ea2908Ea490d58E62D1Fd3364464D8A857b297",
+    "createdFromOwnerAddress": ""
+  },
+  "transactions": [
+    {
+      "to": "0xA74B3610e4EE6b4DF1bd50a59AF4ED1ff02875B4",
+      "value": "0",
+      "data": "0x3400288b000000000000000000000000000000000000000000000000000000000000759e000000000000000000000000520f7e6b31778bfd70c4f73e034d82ab5189e181",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0xA74B3610e4EE6b4DF1bd50a59AF4ED1ff02875B4",
+      "value": "0",
+      "data": "0x3400288b000000000000000000000000000000000000000000000000000000000000759a00000000000000000000000056b1f90e863542e0491b0d5dbfd19c2d27529e88",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0xA74B3610e4EE6b4DF1bd50a59AF4ED1ff02875B4",
+      "value": "0",
+      "data": "0x3400288b00000000000000000000000000000000000000000000000000000000000075e8000000000000000000000000ad0652f4514fe3b5e8c52dfe6bcd3d11cd12a96a",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0xA74B3610e4EE6b4DF1bd50a59AF4ED1ff02875B4",
+      "value": "0",
+      "data": "0x3400288b0000000000000000000000000000000000000000000000000000000000007596000000000000000000000000dbfb571f620f1c9c2dbf23aa065f6f1436bf3ee5",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0xA74B3610e4EE6b4DF1bd50a59AF4ED1ff02875B4",
+      "value": "0",
+      "data": "0x3400288b00000000000000000000000000000000000000000000000000000000000075ad00000000000000000000000056b1f90e863542e0491b0d5dbfd19c2d27529e88",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0xA74B3610e4EE6b4DF1bd50a59AF4ED1ff02875B4",
+      "value": "0",
+      "data": "0x3400288b0000000000000000000000000000000000000000000000000000000000007657000000000000000000000000dbfb571f620f1c9c2dbf23aa065f6f1436bf3ee5",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0xA74B3610e4EE6b4DF1bd50a59AF4ED1ff02875B4",
+      "value": "0",
+      "data": "0x3400288b00000000000000000000000000000000000000000000000000000000000075c10000000000000000000000003b254e69916d0946b55515c1c982d6e1fd7a72aa",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0xA74B3610e4EE6b4DF1bd50a59AF4ED1ff02875B4",
+      "value": "0",
+      "data": "0x3400288b00000000000000000000000000000000000000000000000000000000000075e7000000000000000000000000ae78a0d6d7e4536add1269f16e4ff28f7db15cd4",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0xA74B3610e4EE6b4DF1bd50a59AF4ED1ff02875B4",
+      "value": "0",
+      "data": "0x3400288b00000000000000000000000000000000000000000000000000000000000075e50000000000000000000000000581b673da0730e1adb054fb26d42108f13f62f9",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0xA74B3610e4EE6b4DF1bd50a59AF4ED1ff02875B4",
+      "value": "0",
+      "data": "0x3400288b000000000000000000000000000000000000000000000000000000000000759f000000000000000000000000714d0ae0ba1420d046cd2818697e41ef69448ff0",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0xA74B3610e4EE6b4DF1bd50a59AF4ED1ff02875B4",
+      "value": "0",
+      "data": "0x3400288b000000000000000000000000000000000000000000000000000000000000759d000000000000000000000000e7c9be3b890a3132c3172599b434db5305ba3533",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0xA74B3610e4EE6b4DF1bd50a59AF4ED1ff02875B4",
+      "value": "0",
+      "data": "0x3400288b000000000000000000000000000000000000000000000000000000000000769a0000000000000000000000004c2e7b9ac2d146c8e3942b24bc4da5ff96dc4aef",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0xA74B3610e4EE6b4DF1bd50a59AF4ED1ff02875B4",
+      "value": "0",
+      "data": "0x3400288b00000000000000000000000000000000000000000000000000000000000076a7000000000000000000000000e7c9be3b890a3132c3172599b434db5305ba3533",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0xA74B3610e4EE6b4DF1bd50a59AF4ED1ff02875B4",
+      "value": "0",
+      "data": "0x3400288b00000000000000000000000000000000000000000000000000000000000076b6000000000000000000000000cec322ded6d48d078db2efc34135549e0632d3b4",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0xA74B3610e4EE6b4DF1bd50a59AF4ED1ff02875B4",
+      "value": "0",
+      "data": "0x3400288b00000000000000000000000000000000000000000000000000000000000076af0000000000000000000000000581b673da0730e1adb054fb26d42108f13f62f9",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0xA74B3610e4EE6b4DF1bd50a59AF4ED1ff02875B4",
+      "value": "0",
+      "data": "0x3400288b000000000000000000000000000000000000000000000000000000000000767c000000000000000000000000a0ea39ec7503b4a18018fac8d34450967c69788a",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0xA74B3610e4EE6b4DF1bd50a59AF4ED1ff02875B4",
+      "value": "0",
+      "data": "0x3400288b00000000000000000000000000000000000000000000000000000000000076700000000000000000000000009ff21887b355d06fb0a426e34857567b9d8bbd2a",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0xA74B3610e4EE6b4DF1bd50a59AF4ED1ff02875B4",
+      "value": "0",
+      "data": "0x3400288b0000000000000000000000000000000000000000000000000000000000007674000000000000000000000000cf262e4339659231eb335177fcd8d2a20878a777",
+      "contractMethod": null,
+      "contractInputsValues": null
+    }
+  ]
+}

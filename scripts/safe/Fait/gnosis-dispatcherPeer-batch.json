@@ -1,0 +1,21 @@
+{
+  "version": "1.0",
+  "chainId": "100",
+  "createdAt": 1777589097080,
+  "meta": {
+    "name": "Magneta — CreateTokenDispatcher peer wire (chain 100)",
+    "description": "Sets peer for dst eid 30109 on the local CreateTokenDispatcher.",
+    "txBuilderVersion": "1.17.0",
+    "createdFromSafeAddress": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a",
+    "createdFromOwnerAddress": ""
+  },
+  "transactions": [
+    {
+      "to": "0xA0ea39EC7503b4A18018fAC8d34450967c69788A",
+      "value": "0",
+      "data": "0x3400288b000000000000000000000000000000000000000000000000000000000000759d000000000000000000000000a0ea39ec7503b4a18018fac8d34450967c69788a",
+      "contractMethod": null,
+      "contractInputsValues": null
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "version": "1.0",
+  "chainId": "137",
+  "createdAt": 1777591371092,
+  "meta": {
+    "name": "Magneta — dispatcher.setPeer(eid 30145 → gnosis) (chain 137)",
+    "description": "Sprint 9.6 v2 — wire new CreateTokenDispatcher (0xE7c9bE3B890A3132c3172599b434Db5305Ba3533).",
+    "txBuilderVersion": "1.17.0",
+    "createdFromSafeAddress": "0x4AeA3A398Db41b45e146c08131aD27c75b02EC2F",
+    "createdFromOwnerAddress": ""
+  },
+  "transactions": [
+    {
+      "to": "0xE7c9bE3B890A3132c3172599b434Db5305Ba3533",
+      "value": "0",
+      "data": "0x3400288b00000000000000000000000000000000000000000000000000000000000075c10000000000000000000000003b254e69916d0946b55515c1c982d6e1fd7a72aa",
+      "contractMethod": null,
+      "contractInputsValues": null
+    }
+  ]
+}

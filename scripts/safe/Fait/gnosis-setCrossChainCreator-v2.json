@@ -1,0 +1,28 @@
+{
+  "version": "1.0",
+  "chainId": "100",
+  "createdAt": 1777591371090,
+  "meta": {
+    "name": "Magneta — factories.setCrossChainCreator → v2 dispatcher (chain 100)",
+    "description": "Sprint 9.6 v2 — wire new CreateTokenDispatcher (0x3B254e69916d0946B55515c1C982d6e1fD7A72AA).",
+    "txBuilderVersion": "1.17.0",
+    "createdFromSafeAddress": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a",
+    "createdFromOwnerAddress": ""
+  },
+  "transactions": [
+    {
+      "to": "0x714d0Ae0Ba1420D046CD2818697E41EF69448Ff0",
+      "value": "0",
+      "data": "0x291604e50000000000000000000000003b254e69916d0946b55515c1c982d6e1fd7a72aa",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x9FF21887b355d06fB0A426E34857567b9D8bbD2a",
+      "value": "0",
+      "data": "0x291604e50000000000000000000000003b254e69916d0946b55515c1c982d6e1fd7a72aa",
+      "contractMethod": null,
+      "contractInputsValues": null
+    }
+  ]
+}
