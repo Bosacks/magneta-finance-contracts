@@ -46,6 +46,14 @@ export interface RemovePanelProps {
   onRemove:         (lpAmount: bigint) => void | Promise<void>;
   /** Optional close button on the top-right (e.g. for inline panels). */
   onClose?:         () => void;
+  /**
+   * "remove" (default) → user gets the underlying tokens back. Blue primary
+   * button, red border on the Max shortcut.
+   * "burn" → LP is sent to dead address (irreversible). All buttons red,
+   * primary filled, label says "Burn" / "Burn All", and the panel surfaces
+   * an extra warning banner.
+   */
+  variant?:         "remove" | "burn";
 }
 
 const PCT_CHIPS = [25, 50, 75, 100] as const;
@@ -64,7 +72,10 @@ export function RemovePanel({
   statusHint,
   onRemove,
   onClose,
+  variant = "remove",
 }: RemovePanelProps) {
+  const isBurn = variant === "burn";
+  const verb   = isBurn ? "Burn" : "Remove";
   const [percent, setPercent] = useState(50);
 
   const lpToRemove = useMemo(() => (userLpBalance * BigInt(percent)) / 100n, [userLpBalance, percent]);
@@ -144,6 +155,13 @@ export function RemovePanel({
         <span className="text-gray-500 dark:text-gray-500"> (before fees / slippage)</span>
       </div>
 
+      {/* Burn-only warning */}
+      {isBurn && (
+        <div className="p-2 rounded bg-red-500/10 border border-red-500/30 text-[11px] text-red-400">
+          ⚠ Burning is irreversible. The LP tokens will be sent to a dead address and the underlying liquidity is locked forever.
+        </div>
+      )}
+
       {statusHint && (
         <p className="text-[11px] text-gray-500 dark:text-gray-400 italic">{statusHint}</p>
       )}
@@ -154,17 +172,23 @@ export function RemovePanel({
           type="button"
           onClick={() => onRemove(lpToRemove)}
           disabled={disabled}
-          className="w-full py-2 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium"
+          className={`w-full py-2 rounded-lg text-white text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed ${
+            isBurn ? "bg-red-600 hover:bg-red-700" : "bg-blue-600 hover:bg-blue-700"
+          }`}
         >
-          Remove {percent}%
+          {verb} {percent}%
         </button>
         <button
           type="button"
           onClick={() => { setPercent(100); onRemove(userLpBalance); }}
           disabled={isProcessing || userLpBalance === 0n}
-          className="w-full py-2 rounded-lg border border-red-500/50 text-red-500 hover:bg-red-500/10 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium"
+          className={`w-full py-2 rounded-lg text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed ${
+            isBurn
+              ? "bg-red-700 hover:bg-red-800 text-white"
+              : "border border-red-500/50 text-red-500 hover:bg-red-500/10"
+          }`}
         >
-          Remove All
+          {verb} All
         </button>
       </div>
     </div>
