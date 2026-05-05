@@ -5,10 +5,10 @@
   "gnosisSafe": "0x40ea2908Ea490d58E62D1Fd3364464D8A857b297",
   "feeVault": "0x68109132Ecf7540A0A983e1Aaa7DebC469d9d68b",
   "pauseGuardian": "0x479ED5228DCcef6CD05C98A5fe81aCF08F2f5998",
-  "timestamp": "2026-04-26T20:37:55.902Z",
+  "timestamp": "2026-05-05T22:16:34.295Z",
   "chainConfig": {
-    "lzEndpoint": null,
-    "lzEid": 30040,
+    "lzEndpoint": "0x3A73033C0b1407574C76BdBAc67f126f6b4a9AA9",
+    "lzEid": 30359,
     "cctpDomain": null,
     "usdc": "0xc21223249CA28397B4B6541dfFaEcC539BfF0c59",
     "defaultRouter": "0x145863Eb42Cf62847A6Ca784e6416C1682b1b2Ae",
@@ -20,6 +20,11 @@
     "MagnetaLending": "0xDa43c95Fb2ccf6bDE904Ece558eDeA6B506641B9",
     "MagnetaFactory": "0x2203FE0F92781d7ECdF626b6aD08A9D2e281EFD0",
     "MagnetaBundler": "0xBeb7bB26Efe2c9c8571c83590625d5249755ad27",
-    "MagnetaGateway": "0x4D4AD5B890D3B8882436CB7E5268F1cB95736f92"
+    "MagnetaGateway": "0x4D4AD5B890D3B8882436CB7E5268F1cB95736f92",
+    "MagnetaBridgeOApp": "0x252B47F1818f9f6229Ba939120d113EC81185182",
+    "LPModule": "0xDe2424261258AC1b93104421ce1f6304C0c7890D",
+    "SwapModule": "0x5D3cf6e76e9b9E760d4aFF76aE25bEa303Bd5ba1",
+    "TaxClaimModule": "0xE7F170eD67D73CcdA185a52ECdEd20edD9f39Df4",
+    "TokenOpsModule": "0x49C42f71Bd6eca74BC2139854689EFC68e23C5C8"
   }
 }

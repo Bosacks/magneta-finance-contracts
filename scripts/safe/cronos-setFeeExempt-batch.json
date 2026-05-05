@@ -1,0 +1,31 @@
+{
+  "version": "1.0",
+  "chainId": "25",
+  "createdAt": 1746479000000,
+  "meta": {
+    "name": "Magneta — setFeeExempt LPModule (Cronos backfill)",
+    "description": "Mark the newly-deployed LPModule (0xDe24…890D) fee-exempt on MagnetaSwap so LP ops dispatched through the Gateway don't pay the 0.30% protocol fee on the internal pool side. Owner of MagnetaSwap is the in-house Safe 0x40ea…b297, so the deployer EOA cannot run this directly during deployCronosBackfill.ts — execute via execBatch.ts. Last step to bring Cronos to 11/11 contracts and full operational state.",
+    "txBuilderVersion": "1.17.0",
+    "createdFromSafeAddress": "0x40ea2908Ea490d58E62D1Fd3364464D8A857b297",
+    "createdFromOwnerAddress": ""
+  },
+  "transactions": [
+    {
+      "to": "0xDc6BFf741D5a94c26002268b0228212C71F9C726",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [
+          { "name": "addr",   "type": "address", "internalType": "address" },
+          { "name": "exempt", "type": "bool",    "internalType": "bool" }
+        ],
+        "name": "setFeeExempt",
+        "payable": false
+      },
+      "contractInputsValues": {
+        "addr":   "0xDe2424261258AC1b93104421ce1f6304C0c7890D",
+        "exempt": "true"
+      }
+    }
+  ]
+}

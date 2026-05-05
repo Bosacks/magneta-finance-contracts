@@ -215,13 +215,28 @@ async function main() {
   console.log(`  ✓ Gateway pauseGuardian: ${PAUSE_GUARDIAN}`);
 
   // ─── Mark LPModule fee-exempt on existing MagnetaSwap ────────────────
+  // Cronos's MagnetaSwap is owned by the in-house Safe (transferred at
+  // initial deploy 2026-04-26), so the deployer EOA cannot call this
+  // directly. Detect that case and emit a Safe batch instead of reverting.
   const swap = await ethers.getContractAt("MagnetaSwap", existing.MagnetaSwap);
   const isExempt = (await swap.feeExempt(existing.LPModule)) as boolean;
-  if (!isExempt) {
-    const tx = await swap.setFeeExempt(existing.LPModule, true);
-    await tx.wait();
+  if (isExempt) {
+    console.log(`  ✓ MagnetaSwap: LPModule already fee-exempt`);
+  } else {
+    const swapOwner = (await swap.owner()) as string;
+    const isSafeOwned = swapOwner.toLowerCase() === (deployment.gnosisSafe as string).toLowerCase();
+    if (isSafeOwned) {
+      console.log(`  · MagnetaSwap is Safe-owned (${swapOwner})`);
+      console.log(`  · setFeeExempt batch is at scripts/safe/cronos-setFeeExempt-batch.json`);
+      console.log(`  · execute via: PAUSE_GUARDIAN_PRIVATE_KEY=0x... pnpm hardhat run \\`);
+      console.log(`      scripts/safe/inhouse/execBatch.ts --network cronos -- \\`);
+      console.log(`      scripts/safe/cronos-setFeeExempt-batch.json`);
+    } else {
+      const tx = await swap.setFeeExempt(existing.LPModule, true);
+      await tx.wait();
+      console.log(`  ✓ MagnetaSwap: LPModule fee-exempt`);
+    }
   }
-  console.log(`  ✓ MagnetaSwap: LPModule fee-exempt`);
 
   // ─── Done ────────────────────────────────────────────────────────────
   const spent = balance - (await ethers.provider.getBalance(deployer.address));
