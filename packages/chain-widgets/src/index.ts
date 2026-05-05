@@ -3,3 +3,5 @@ export { CrossChainProgress, type CrossChainProgressProps } from './CrossChainPr
 export { FeeBreakdown, type FeeBreakdownProps } from './FeeBreakdown';
 export { RemovePanel, type RemovePanelProps } from './RemovePanel';
 export { useUserLpPositions, type LpPosition, type UseUserLpPositionsResult } from './useUserLpPositions';
+export { useMultiChainLpPositions, type MultiChainLpPosition, type ChainScanConfig, type UseMultiChainLpPositionsResult } from './useMultiChainLpPositions';
+export { MultiChainBurnPanel, type MultiChainBurnPanelProps, type BurnLeg } from './MultiChainBurnPanel';
