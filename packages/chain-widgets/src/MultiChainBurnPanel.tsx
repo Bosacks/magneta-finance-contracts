@@ -20,7 +20,7 @@
  * caller passes per-leg `progress` (typically from the existing
  * useMultiChainLp dispatcher in the Tokens repo).
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { formatUnits } from 'viem';
 import type { MultiChainLpPosition } from './useMultiChainLpPositions';
 
@@ -52,9 +52,42 @@ export function MultiChainBurnPanel({
   const isBurn = variant === 'burn';
   const verb   = isBurn ? 'Burn' : 'Remove';
 
+  // Group positions by the user-side token's symbol (the non-wnative side
+  // of the pair). Each group represents one logical token deployed across
+  // multiple chains — TT2MF on Polygon+Base+Arbitrum is one group with
+  // 3 rows. Critical for users with 30+ pools to avoid scroll overload.
+  const tokenGroups = useMemo(() => {
+    const groups: Record<string, MultiChainLpPosition[]> = {};
+    for (const p of positions) {
+      const sym = p.tokenSide.toLowerCase() === p.token0.toLowerCase() ? p.symbol0 : p.symbol1;
+      (groups[sym] ??= []).push(p);
+    }
+    return groups;
+  }, [positions]);
+  const groupKeys = useMemo(() => Object.keys(tokenGroups).sort(), [tokenGroups]);
+
+  // Picked group state. When only 1 group exists, auto-pick it.
+  const [pickedSymbol, setPickedSymbol] = useState<string | null>(null);
+  useEffect(() => {
+    if (groupKeys.length === 1 && pickedSymbol !== groupKeys[0]) {
+      setPickedSymbol(groupKeys[0]);
+    } else if (pickedSymbol && !groupKeys.includes(pickedSymbol)) {
+      setPickedSymbol(null);
+    }
+  }, [groupKeys.join(','), pickedSymbol]);
+
+  const visiblePositions = pickedSymbol ? (tokenGroups[pickedSymbol] ?? []) : [];
+
   // Per-pair state: selected + percentage slider.
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [percents, setPercents] = useState<Record<string, number>>({});
+
+  // Reset selection when switching token groups so stale percentages
+  // don't carry over.
+  useEffect(() => {
+    setSelected(new Set());
+    setPercents({});
+  }, [pickedSymbol]);
 
   const fmt = (raw: bigint, decimals: number) =>
     Number(formatUnits(raw, decimals)).toLocaleString(undefined, { maximumFractionDigits: 6 });
@@ -75,14 +108,14 @@ export function MultiChainBurnPanel({
   const selectedCount = selected.size;
   const legs: BurnLeg[] = useMemo(() => {
     const out: BurnLeg[] = [];
-    for (const p of positions) {
+    for (const p of visiblePositions) {
       if (!selected.has(p.pair)) continue;
       const pct = BigInt(percents[p.pair] ?? 0);
       if (pct === 0n) continue;
       out.push({ position: p, lpAmount: (p.userLp * pct) / 100n });
     }
     return out;
-  }, [positions, selected, percents]);
+  }, [visiblePositions, selected, percents]);
 
   if (positions.length === 0) {
     return (
@@ -94,8 +127,42 @@ export function MultiChainBurnPanel({
 
   return (
     <div className="space-y-3">
+      {/* Token group dropdown — narrows the list to one logical token's
+          positions across chains. Hidden when there's only one group
+          (auto-picked) or none. */}
+      {groupKeys.length > 1 && (
+        <div className="space-y-1">
+          <label className="text-xs uppercase tracking-wider text-gray-500">
+            Pick a token to manage across chains
+          </label>
+          <select
+            value={pickedSymbol ?? ''}
+            onChange={(e) => setPickedSymbol(e.target.value || null)}
+            disabled={isProcessing}
+            className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-zinc-700 bg-white dark:bg-zinc-900/50 text-sm text-gray-900 dark:text-white focus:outline-none focus:border-blue-500"
+          >
+            <option value="">— pick a token ({groupKeys.length} available) —</option>
+            {groupKeys.map((sym) => {
+              const cnt = tokenGroups[sym].length;
+              return (
+                <option key={sym} value={sym}>
+                  {sym} ({cnt} chain{cnt > 1 ? 's' : ''})
+                </option>
+              );
+            })}
+          </select>
+        </div>
+      )}
+
+      {!pickedSymbol && groupKeys.length > 1 && (
+        <p className="text-sm text-gray-500 italic text-center py-4">
+          Pick a token above to see its LP positions across chains.
+        </p>
+      )}
+
+      {pickedSymbol && (
       <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/50 divide-y divide-gray-200 dark:divide-gray-700/50">
-        {positions.map((p) => {
+        {visiblePositions.map((p) => {
           const isSelected = selected.has(p.pair);
           const pct = percents[p.pair] ?? 0;
           const lpToBurn = (p.userLp * BigInt(pct)) / 100n;
@@ -184,8 +251,9 @@ export function MultiChainBurnPanel({
           );
         })}
       </div>
+      )}
 
-      {isBurn && (
+      {pickedSymbol && isBurn && (
         <div className="p-2 rounded bg-red-500/10 border border-red-500/30 text-[11px] text-red-400">
           ⚠ Burning is irreversible. The selected LP tokens will be sent to a dead address on each chain — the underlying liquidity becomes permanently locked.
         </div>
@@ -194,7 +262,7 @@ export function MultiChainBurnPanel({
       <button
         type="button"
         onClick={() => onSubmit(legs)}
-        disabled={isProcessing || legs.length === 0}
+        disabled={isProcessing || legs.length === 0 || !pickedSymbol}
         className={`w-full py-2.5 rounded-lg text-white text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed ${
           isBurn ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'
         }`}
