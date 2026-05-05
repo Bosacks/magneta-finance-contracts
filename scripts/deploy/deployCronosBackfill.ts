@@ -61,6 +61,32 @@ async function main() {
   let step = 0;
   const log = (label: string, addr: string) => console.log(`  [${++step}] ${label}: ${addr}`);
 
+  /** Persist the current `existing` map to disk after every successful deploy.
+   *  Cronos RPC sometimes lags on nonce propagation (got 15, expected 16),
+   *  so a mid-script crash is realistic — this lets a re-run skip what's
+   *  already on-chain. */
+  const checkpoint = () => {
+    const updated = {
+      ...deployment,
+      chainConfig: cfg,
+      timestamp: new Date().toISOString(),
+      contracts: existing,
+    };
+    fs.writeFileSync(deploymentsPath, JSON.stringify(updated, null, 2) + "\n");
+  };
+
+  /** Cronos RPC nonce-lag mitigation: wait until the on-chain nonce matches
+   *  the deployer's local view before sending the next tx. */
+  const waitForNonceSync = async () => {
+    for (let i = 0; i < 20; i++) {
+      const onchain = await ethers.provider.getTransactionCount(deployer.address, "latest");
+      const pending = await ethers.provider.getTransactionCount(deployer.address, "pending");
+      if (onchain === pending) return;
+      await new Promise((r) => setTimeout(r, 1500));
+    }
+    console.warn("  · nonce did not converge after 30s, proceeding anyway");
+  };
+
   // ─── Cross-chain (LayerZero V2) ──────────────────────────────────────
   if (!existing.MagnetaGateway) {
     console.log("── Deploying MagnetaGateway ──");
@@ -69,6 +95,8 @@ async function main() {
     await gw.waitForDeployment();
     existing.MagnetaGateway = await gw.getAddress();
     log("MagnetaGateway", existing.MagnetaGateway);
+    checkpoint();
+    await waitForNonceSync();
   } else {
     console.log(`  · MagnetaGateway exists: ${existing.MagnetaGateway}`);
   }
@@ -80,6 +108,8 @@ async function main() {
     await br.waitForDeployment();
     existing.MagnetaBridgeOApp = await br.getAddress();
     log("MagnetaBridgeOApp", existing.MagnetaBridgeOApp);
+    checkpoint();
+    await waitForNonceSync();
   } else {
     console.log(`  · MagnetaBridgeOApp exists: ${existing.MagnetaBridgeOApp}`);
   }
@@ -92,6 +122,8 @@ async function main() {
     await m.waitForDeployment();
     existing.LPModule = await m.getAddress();
     log("LPModule", existing.LPModule);
+    checkpoint();
+    await waitForNonceSync();
   } else {
     console.log(`  · LPModule exists: ${existing.LPModule}`);
   }
@@ -103,6 +135,8 @@ async function main() {
     await m.waitForDeployment();
     existing.SwapModule = await m.getAddress();
     log("SwapModule", existing.SwapModule);
+    checkpoint();
+    await waitForNonceSync();
   } else {
     console.log(`  · SwapModule exists: ${existing.SwapModule}`);
   }
@@ -114,6 +148,8 @@ async function main() {
     await m.waitForDeployment();
     existing.TaxClaimModule = await m.getAddress();
     log("TaxClaimModule", existing.TaxClaimModule);
+    checkpoint();
+    await waitForNonceSync();
   } else {
     console.log(`  · TaxClaimModule exists: ${existing.TaxClaimModule}`);
   }
@@ -125,19 +161,14 @@ async function main() {
     await m.waitForDeployment();
     existing.TokenOpsModule = await m.getAddress();
     log("TokenOpsModule", existing.TokenOpsModule);
+    checkpoint();
+    await waitForNonceSync();
   } else {
     console.log(`  · TokenOpsModule exists: ${existing.TokenOpsModule}`);
   }
 
-  // ─── Checkpoint addresses BEFORE config (resume-safe) ────────────────
-  const updated = {
-    ...deployment,
-    chainConfig: cfg,
-    timestamp: new Date().toISOString(),
-    contracts: existing,
-  };
-  fs.writeFileSync(deploymentsPath, JSON.stringify(updated, null, 2) + "\n");
-  console.log(`\n  (addresses checkpointed to ${deploymentsPath})`);
+  console.log(`\n  (final checkpoint to ${deploymentsPath})`);
+  checkpoint();
 
   // ─── Configure Gateway ───────────────────────────────────────────────
   console.log("\n── Configuring Gateway ──");

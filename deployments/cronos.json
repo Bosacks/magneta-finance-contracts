@@ -1,0 +1,25 @@
+{
+  "network": "cronos",
+  "chainId": "25",
+  "deployer": "0x620684F822da9adF36F41e3554791D889947e25E",
+  "gnosisSafe": "0x40ea2908Ea490d58E62D1Fd3364464D8A857b297",
+  "feeVault": "0x68109132Ecf7540A0A983e1Aaa7DebC469d9d68b",
+  "pauseGuardian": "0x479ED5228DCcef6CD05C98A5fe81aCF08F2f5998",
+  "timestamp": "2026-04-26T20:37:55.902Z",
+  "chainConfig": {
+    "lzEndpoint": null,
+    "lzEid": 30040,
+    "cctpDomain": null,
+    "usdc": "0xc21223249CA28397B4B6541dfFaEcC539BfF0c59",
+    "defaultRouter": "0x145863Eb42Cf62847A6Ca784e6416C1682b1b2Ae",
+    "router": "uniV2"
+  },
+  "contracts": {
+    "MagnetaPool": "0xF4A2890fA65Add269829Bd6E4517BC84E473315c",
+    "MagnetaSwap": "0xDc6BFf741D5a94c26002268b0228212C71F9C726",
+    "MagnetaLending": "0xDa43c95Fb2ccf6bDE904Ece558eDeA6B506641B9",
+    "MagnetaFactory": "0x2203FE0F92781d7ECdF626b6aD08A9D2e281EFD0",
+    "MagnetaBundler": "0xBeb7bB26Efe2c9c8571c83590625d5249755ad27",
+    "MagnetaGateway": "0x4D4AD5B890D3B8882436CB7E5268F1cB95736f92"
+  }
+}
