@@ -1,0 +1,21 @@
+{
+  "version": "1.0",
+  "chainId": "25",
+  "createdAt": 1746479500000,
+  "meta": {
+    "name": "Magneta — acceptOwnership for Cronos backfill (Gateway only)",
+    "description": "After transferOwnership.ts runs on Cronos, MagnetaGateway is the only newly-deployed contract using Ownable2Step (LP/Swap/TaxClaim/TokenOps modules and MagnetaBridgeOApp use plain Ownable, transfer is immediate). Safe must accept Gateway ownership to finalize. Execute via execBatch.ts on the in-house Safe 0x40ea…b297.",
+    "txBuilderVersion": "1.17.0",
+    "createdFromSafeAddress": "0x40ea2908Ea490d58E62D1Fd3364464D8A857b297",
+    "createdFromOwnerAddress": ""
+  },
+  "transactions": [
+    {
+      "to": "0x4D4AD5B890D3B8882436CB7E5268F1cB95736f92",
+      "value": "0",
+      "data": null,
+      "contractMethod": { "inputs": [], "name": "acceptOwnership", "payable": false },
+      "contractInputsValues": {}
+    }
+  ]
+}

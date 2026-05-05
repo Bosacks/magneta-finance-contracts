@@ -1,0 +1,86 @@
+{
+  "version": "1.0",
+  "chainId": "59144",
+  "createdAt": 1778021966076,
+  "meta": {
+    "name": "Magneta — peer wiring Cronos delta (linea)",
+    "description": "Add Cronos (eid 30359, chainId 25) as a peer on linea's MagnetaGateway + MagnetaBridgeOApp. Cronos was wired up post-mesh after the 2026-04-28 full peer wiring (which had Cronos at 5/11). Replaces the full 57-tx peerWiring batch with the 3 Cronos-only calls so already-wired peers aren't redundantly re-set."
+  },
+  "transactions": [
+    {
+      "to": "0x3f5BF77ba60949c4C5B9653159b0A050593B04a8",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [
+          {
+            "internalType": "uint32",
+            "name": "_eid",
+            "type": "uint32"
+          },
+          {
+            "internalType": "bytes32",
+            "name": "_peer",
+            "type": "bytes32"
+          }
+        ],
+        "name": "setPeer",
+        "payable": false
+      },
+      "contractInputsValues": {
+        "_eid": "30359",
+        "_peer": "0x0000000000000000000000004d4ad5b890d3b8882436cb7e5268f1cb95736f92"
+      }
+    },
+    {
+      "to": "0x3c21016E57e7A29333f38d200EC8945bfc6BA537",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [
+          {
+            "internalType": "uint32",
+            "name": "_eid",
+            "type": "uint32"
+          },
+          {
+            "internalType": "bytes32",
+            "name": "_peer",
+            "type": "bytes32"
+          }
+        ],
+        "name": "setPeer",
+        "payable": false
+      },
+      "contractInputsValues": {
+        "_eid": "30359",
+        "_peer": "0x000000000000000000000000252b47f1818f9f6229ba939120d113ec81185182"
+      }
+    },
+    {
+      "to": "0x3f5BF77ba60949c4C5B9653159b0A050593B04a8",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [
+          {
+            "internalType": "uint32",
+            "name": "_eid",
+            "type": "uint32"
+          },
+          {
+            "internalType": "uint256",
+            "name": "_chainId",
+            "type": "uint256"
+          }
+        ],
+        "name": "setEidMapping",
+        "payable": false
+      },
+      "contractInputsValues": {
+        "_eid": "30359",
+        "_chainId": "25"
+      }
+    }
+  ]
+}
