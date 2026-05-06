@@ -1,0 +1,35 @@
+{
+  "network": "polygon",
+  "chainId": "137",
+  "deployer": "0x620684F822da9adF36F41e3554791D889947e25E",
+  "feeVault": "0x68109132Ecf7540A0A983e1Aaa7DebC469d9d68b",
+  "pauseGuardian": "0x479ED5228DCcef6CD05C98A5fe81aCF08F2f5998",
+  "gnosisSafe": "0x4AeA3A398Db41b45e146c08131aD27c75b02EC2F",
+  "timestamp": "2026-04-23T00:00:00.000Z",
+  "chainConfig": {
+    "lzEndpoint": "0x1a44076050125825900e736c501f859c50fE728c",
+    "lzEid": 30109,
+    "cctpDomain": 7,
+    "usdc": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
+    "defaultRouter": "0xa5E0829CaCEd8fFDD4De3c43696c57F7D7A678ff",
+    "router": "uniV2"
+  },
+  "contracts": {
+    "MagnetaPool": "0xDc6BFf741D5a94c26002268b0228212C71F9C726",
+    "MagnetaSwap": "0xDa43c95Fb2ccf6bDE904Ece558eDeA6B506641B9",
+    "MagnetaLending": "0x2203FE0F92781d7ECdF626b6aD08A9D2e281EFD0",
+    "MagnetaFactory": "0xBeb7bB26Efe2c9c8571c83590625d5249755ad27",
+    "MagnetaBundler": "0x3f5BF77ba60949c4C5B9653159b0A050593B04a8",
+    "MagnetaGateway": "0x3c21016E57e7A29333f38d200EC8945bfc6BA537",
+    "MagnetaBridgeOApp": "0xB4f06F01641eFFb376Cc5dcA90F81fed1C6FA76e",
+    "LPModule": "0xe3162944b9D759c23B7D1d99A25075a4313db19c",
+    "SwapModule": "0xDe1752E266C3978240014DFc616dd34EbF9cDF31",
+    "TokenOpsModule": "0xB38e7427D81f755c65AC6bfc865Bfe9918BA7a9b",
+    "TaxClaimModule": "0x9F9A3DC819e5229b63b504d7A0FDE93FA436919E",
+    "MagnetaOFTStandardFactory": "0x714d0Ae0Ba1420D046CD2818697E41EF69448Ff0",
+    "MagnetaOFTAutoLiquidityFactory": "0x9FF21887b355d06fB0A426E34857567b9D8bbD2a",
+    "TokenCreationModule": "0xae78a0d6d7E4536ADD1269f16E4fF28f7DB15Cd4",
+    "MagnetaCurveFactory": "0x3564406Da6475E02c359eD1d55f747299c477837"
+  },
+  "tokenCreationDeployedAt": "2026-04-30T10:17:43.214Z"
+}

@@ -1,0 +1,37 @@
+{
+  "network": "plasma",
+  "chainId": "9745",
+  "deployer": "0x620684F822da9adF36F41e3554791D889947e25E",
+  "gnosisSafe": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a",
+  "feeVault": "0x68109132Ecf7540A0A983e1Aaa7DebC469d9d68b",
+  "pauseGuardian": "0x479ED5228DCcef6CD05C98A5fe81aCF08F2f5998",
+  "timestamp": "2026-04-24T15:51:52.391Z",
+  "uniV2": {
+    "wxpl": "0xF4A2890fA65Add269829Bd6E4517BC84E473315c",
+    "factory": "0xDc6BFf741D5a94c26002268b0228212C71F9C726",
+    "router": "0xDa43c95Fb2ccf6bDE904Ece558eDeA6B506641B9",
+    "pairInitCodeHash": "0xf40783a955a9be9bf11de05e90244c2b6394edc5f348e5dcd168dba8661a95d2"
+  },
+  "chainConfig": {
+    "lzEndpoint": "0x6F475642a6e85809B1c36Fa62763669b1b48DD5B",
+    "lzEid": 30383,
+    "cctpDomain": null,
+    "usdc": "0xB8CE59FC3717ada4C02eaDF9682A9e934F625ebb",
+    "defaultRouter": "0xDa43c95Fb2ccf6bDE904Ece558eDeA6B506641B9",
+    "router": "magnetaV2"
+  },
+  "contracts": {
+    "MagnetaPool": "0x2203FE0F92781d7ECdF626b6aD08A9D2e281EFD0",
+    "MagnetaSwap": "0xBeb7bB26Efe2c9c8571c83590625d5249755ad27",
+    "MagnetaLending": "0x3f5BF77ba60949c4C5B9653159b0A050593B04a8",
+    "MagnetaFactory": "0x3c21016E57e7A29333f38d200EC8945bfc6BA537",
+    "MagnetaBundler": "0xB4f06F01641eFFb376Cc5dcA90F81fed1C6FA76e",
+    "MagnetaGateway": "0xe3162944b9D759c23B7D1d99A25075a4313db19c",
+    "MagnetaBridgeOApp": "0xDe1752E266C3978240014DFc616dd34EbF9cDF31",
+    "LPModule": "0x9F9A3DC819e5229b63b504d7A0FDE93FA436919E",
+    "SwapModule": "0xB38e7427D81f755c65AC6bfc865Bfe9918BA7a9b",
+    "TaxClaimModule": "0x134855A6702c0AF9FBF1b8F4bB576Bef651eF895",
+    "TokenOpsModule": "0x3cA761aa595e6bA0d89f35e9f0af06906b437258",
+    "MagnetaCurveFactory": "0xCeC322deD6D48d078db2EfC34135549e0632d3b4"
+  }
+}

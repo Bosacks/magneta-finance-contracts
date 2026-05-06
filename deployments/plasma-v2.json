@@ -1,0 +1,10 @@
+{
+  "network": "plasma",
+  "chainId": 9745,
+  "deployer": "0x620684F822da9adF36F41e3554791D889947e25E",
+  "weth9": "0xF4A2890fA65Add269829Bd6E4517BC84E473315c",
+  "factory": "0xDc6BFf741D5a94c26002268b0228212C71F9C726",
+  "router": "0xDa43c95Fb2ccf6bDE904Ece558eDeA6B506641B9",
+  "pairInitCodeHash": "0xf40783a955a9be9bf11de05e90244c2b6394edc5f348e5dcd168dba8661a95d2",
+  "deployedAt": "2026-04-24T15:50:33.422Z"
+}
