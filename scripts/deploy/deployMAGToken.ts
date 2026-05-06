@@ -96,8 +96,9 @@ async function main() {
   // Find the TokenCreated event in the receipt
   let mag: string | undefined;
   for (const log of receipt.logs ?? []) {
-    if (log.address.toLowerCase() === factoryAddr.toLowerCase() && log.topics?.length >= 4) {
-      // First indexed arg = token address
+    // TokenCreated has 2 indexed args (token, creator) → topics has 3 entries
+    // (signature + token + creator). Earlier filter required ≥4 which dropped it.
+    if (log.address.toLowerCase() === factoryAddr.toLowerCase() && log.topics?.length >= 3) {
       mag = "0x" + log.topics[1]!.slice(-40);
       break;
     }
