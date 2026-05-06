@@ -29,7 +29,8 @@
     "MagnetaOFTStandardFactory": "0x714d0Ae0Ba1420D046CD2818697E41EF69448Ff0",
     "MagnetaOFTAutoLiquidityFactory": "0x9FF21887b355d06fB0A426E34857567b9D8bbD2a",
     "TokenCreationModule": "0xae78a0d6d7E4536ADD1269f16E4fF28f7DB15Cd4",
-    "MagnetaCurveFactory": "0x3564406Da6475E02c359eD1d55f747299c477837"
+    "MagnetaCurveFactory": "0x3564406Da6475E02c359eD1d55f747299c477837",
+    "MagnetaStakingFactory": "0xc0Bc9150D6d2f64d999072d4263ff87aF0357F4D"
   },
   "tokenCreationDeployedAt": "2026-04-30T10:17:43.214Z"
 }

@@ -1,0 +1,10 @@
+{
+  "network": "polygon",
+  "chainId": 137,
+  "deployer": "0x620684F822da9adF36F41e3554791D889947e25E",
+  "weth9": "0x0cf3481f35338963C86404a6adFE5400330f2E0D",
+  "factory": "0x50db45f761dA06aaC0aD1d7455Be7a1C734ACE52",
+  "router": "0x4aF497dA6012811c1B146B0450CADaFcBcAc0348",
+  "pairInitCodeHash": "0xf40783a955a9be9bf11de05e90244c2b6394edc5f348e5dcd168dba8661a95d2",
+  "deployedAt": "2026-05-06T20:36:17.488Z"
+}

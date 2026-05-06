@@ -26,6 +26,7 @@
     "SwapModule": "0x5D3cf6e76e9b9E760d4aFF76aE25bEa303Bd5ba1",
     "TaxClaimModule": "0xE7F170eD67D73CcdA185a52ECdEd20edD9f39Df4",
     "TokenOpsModule": "0x49C42f71Bd6eca74BC2139854689EFC68e23C5C8",
-    "MagnetaCurveFactory": "0x603c95Ca27dA7f164ebD736aB63c7dA6363fa056"
+    "MagnetaCurveFactory": "0x603c95Ca27dA7f164ebD736aB63c7dA6363fa056",
+    "MagnetaStakingFactory": "0x3e931050389Daf7cBC408bF8099FcF6859c01f8E"
   }
 }
