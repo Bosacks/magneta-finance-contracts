@@ -1,0 +1,10 @@
+{
+  "network": "base",
+  "chainId": 8453,
+  "deployer": "0x620684F822da9adF36F41e3554791D889947e25E",
+  "weth9": "0xd418e7dee5De6B822c3Ef368BA1410988619C962",
+  "factory": "0xED990Cf16fC40981381FD4069551339B5Fdb4fDf",
+  "router": "0xc1a6e0Adc5070c78b4Da8A4Cd88B1F7eDEe3bccb",
+  "pairInitCodeHash": "0xf40783a955a9be9bf11de05e90244c2b6394edc5f348e5dcd168dba8661a95d2",
+  "deployedAt": "2026-05-07T12:58:43.382Z"
+}

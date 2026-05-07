@@ -22,6 +22,7 @@
     "MagnetaBundler": "0xBeb7bB26Efe2c9c8571c83590625d5249755ad27",
     "MagnetaGateway": "0x3f5BF77ba60949c4C5B9653159b0A050593B04a8",
     "MagnetaBridgeOApp": "0x3c21016E57e7A29333f38d200EC8945bfc6BA537",
-    "TokenOpsModule": "0xB4f06F01641eFFb376Cc5dcA90F81fed1C6FA76e"
+    "TokenOpsModule": "0xB4f06F01641eFFb376Cc5dcA90F81fed1C6FA76e",
+    "MagnetaStakingFactory": "0x714d0Ae0Ba1420D046CD2818697E41EF69448Ff0"
   }
 }

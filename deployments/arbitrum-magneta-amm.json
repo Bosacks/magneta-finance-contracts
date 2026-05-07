@@ -1,0 +1,10 @@
+{
+  "network": "arbitrum",
+  "chainId": 42161,
+  "deployer": "0x620684F822da9adF36F41e3554791D889947e25E",
+  "weth9": "0x5588Cd99E28518D13A316996dc0D4351afAe4D4a",
+  "factory": "0xB89181a73f3c1E92885D072Bb61eC7E7389D985f",
+  "router": "0xfC23272391baB3ACDB59177469901377F0963D8d",
+  "pairInitCodeHash": "0xf40783a955a9be9bf11de05e90244c2b6394edc5f348e5dcd168dba8661a95d2",
+  "deployedAt": "2026-05-07T12:58:49.213Z"
+}
