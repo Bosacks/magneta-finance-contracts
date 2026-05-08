@@ -1,0 +1,51 @@
+# Gitleaks config — extends the default rules and adds path allowlist
+# for known-noisy filesystem locations.
+#
+# This file is consumed by `gitleaks detect --config-path .gitleaks.toml`.
+# In Sentinelleai's `--no-git` mode (filesystem scan, not git history),
+# the allowlist below skips developer-local files.
+
+[extend]
+useDefault = true
+
+[[allowlist]]
+description = "Developer-local secrets (gitignored, never committed)"
+paths = [
+    '''^\.env(\..*)?$''',
+    '''.*/\.env(\..*)?$''',
+]
+
+[[allowlist]]
+description = "Server runtime logs (Next.js dev server output)"
+paths = [
+    '''.*\.log$''',
+]
+
+[[allowlist]]
+description = "Claude Code agent skills (not Magneta code)"
+paths = [
+    '''^\.agents/.*''',
+    '''^\.claude/.*''',
+    '''.*/\.agents/.*''',
+    '''.*/\.claude/.*''',
+]
+
+[[allowlist]]
+description = "Build artifacts and codegen output"
+paths = [
+    '''^\.next/.*''',
+    '''^node_modules/.*''',
+    '''^artifacts/.*''',
+    '''^typechain-types/.*''',
+    '''^generated/.*''',
+    '''^cache/.*''',
+    '''.*/node_modules/.*''',
+    '''.*/artifacts/.*''',
+    '''.*/typechain-types/.*''',
+]
+
+[[allowlist]]
+description = "Public EVM addresses are not secrets (40-char hex starting with 0x)"
+regexes = [
+    '''0x[0-9a-fA-F]{40}''',
+]

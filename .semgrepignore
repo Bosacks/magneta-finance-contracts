@@ -1,0 +1,19 @@
+# Sentinelleai / Semgrep — paths to skip during SAST scans.
+
+.env
+.env.*
+*.log
+.agents/
+.claude/
+.next/
+dist/
+build/
+out/
+generated/
+typechain-types/
+artifacts/
+cache/
+node_modules/
+coverage/
+test-results/
+broadcast/
