@@ -1,0 +1,160 @@
+{
+  "version": "1.0",
+  "chainId": "1329",
+  "createdAt": 1778343811026,
+  "meta": {
+    "name": "Magneta \u2014 Rotate PauseGuardian + Signer2 (sei)",
+    "description": "Replace compromised key 0x479ED522... with new 0x92F440Bc...",
+    "txBuilderVersion": "1.18.0",
+    "createdFromSafeAddress": "0x40ea2908Ea490d58E62D1Fd3364464D8A857b297",
+    "createdFromOwnerAddress": "",
+    "checksum": "0x0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "transactions": [
+    {
+      "to": "0x40ea2908Ea490d58E62D1Fd3364464D8A857b297",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [
+          {
+            "internalType": "address",
+            "name": "prevOwner",
+            "type": "address"
+          },
+          {
+            "internalType": "address",
+            "name": "oldOwner",
+            "type": "address"
+          },
+          {
+            "internalType": "address",
+            "name": "newOwner",
+            "type": "address"
+          }
+        ],
+        "name": "swapOwner",
+        "payable": false
+      },
+      "contractInputsValues": {
+        "prevOwner": "0x620684F822da9adF36F41e3554791D889947e25E",
+        "oldOwner": "0x479ED5228DCcef6CD05C98A5fe81aCF08F2f5998",
+        "newOwner": "0x92F440Bc1f1FaBD6D3e6256491631E07857F4260"
+      }
+    },
+    {
+      "to": "0xBeb7bB26Efe2c9c8571c83590625d5249755ad27",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [
+          {
+            "internalType": "address",
+            "name": "_newGuardian",
+            "type": "address"
+          }
+        ],
+        "name": "setPauseGuardian",
+        "payable": false
+      },
+      "contractInputsValues": {
+        "_newGuardian": "0x92F440Bc1f1FaBD6D3e6256491631E07857F4260"
+      }
+    },
+    {
+      "to": "0x3f5BF77ba60949c4C5B9653159b0A050593B04a8",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [
+          {
+            "internalType": "address",
+            "name": "_newGuardian",
+            "type": "address"
+          }
+        ],
+        "name": "setPauseGuardian",
+        "payable": false
+      },
+      "contractInputsValues": {
+        "_newGuardian": "0x92F440Bc1f1FaBD6D3e6256491631E07857F4260"
+      }
+    },
+    {
+      "to": "0xB4f06F01641eFFb376Cc5dcA90F81fed1C6FA76e",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [
+          {
+            "internalType": "address",
+            "name": "_newGuardian",
+            "type": "address"
+          }
+        ],
+        "name": "setPauseGuardian",
+        "payable": false
+      },
+      "contractInputsValues": {
+        "_newGuardian": "0x92F440Bc1f1FaBD6D3e6256491631E07857F4260"
+      }
+    },
+    {
+      "to": "0x9F9A3DC819e5229b63b504d7A0FDE93FA436919E",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [
+          {
+            "internalType": "address",
+            "name": "_newGuardian",
+            "type": "address"
+          }
+        ],
+        "name": "setPauseGuardian",
+        "payable": false
+      },
+      "contractInputsValues": {
+        "_newGuardian": "0x92F440Bc1f1FaBD6D3e6256491631E07857F4260"
+      }
+    },
+    {
+      "to": "0x3c21016E57e7A29333f38d200EC8945bfc6BA537",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [
+          {
+            "internalType": "address",
+            "name": "_newGuardian",
+            "type": "address"
+          }
+        ],
+        "name": "setPauseGuardian",
+        "payable": false
+      },
+      "contractInputsValues": {
+        "_newGuardian": "0x92F440Bc1f1FaBD6D3e6256491631E07857F4260"
+      }
+    },
+    {
+      "to": "0xDe1752E266C3978240014DFc616dd34EbF9cDF31",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [
+          {
+            "internalType": "address",
+            "name": "_newGuardian",
+            "type": "address"
+          }
+        ],
+        "name": "setPauseGuardian",
+        "payable": false
+      },
+      "contractInputsValues": {
+        "_newGuardian": "0x92F440Bc1f1FaBD6D3e6256491631E07857F4260"
+      }
+    }
+  ]
+}
