@@ -24,16 +24,34 @@ contract MagnetaBundler is ReentrancyGuard, Pausable, Ownable {
     using SafeERC20 for IERC20;
 
     address public router;
+    /// @notice Receives Magneta service fees forwarded on each bundleBuy /
+    ///         atomicVolumeBrush call. Set to address(0) to keep the legacy
+    ///         "fees stay in contract, owner rescues" behavior.
+    address public feeRecipient;
 
     event BundleBuy(address indexed sender, address token, uint256 totalEthAmount, uint256 successCount);
     event BundleSell(address indexed sender, address token, uint256 totalTokenAmount, uint256 successCount);
+    event FeeRecipientUpdated(address indexed oldRecipient, address indexed newRecipient);
+    event FeeForwarded(address indexed to, uint256 amount);
 
-    constructor(address _router) {
+    constructor(address _router, address _feeRecipient) {
         require(_router != address(0), "Invalid router");
         router = _router;
+        feeRecipient = _feeRecipient; // zero address allowed → keeps fees in-contract for legacy rescue
     }
 
     receive() external payable {}
+
+    /// @notice Forward an arbitrary native amount to `feeRecipient` if set.
+    ///         Called by mutating functions that accept `msg.value` excess
+    ///         (atomicVolumeBrush, bundleBuy) so fees route on-chain to the
+    ///         Magneta FeeVault without manual rescueETH.
+    function _forwardFee(uint256 amount) internal {
+        if (amount == 0 || feeRecipient == address(0)) return;
+        (bool ok, ) = payable(feeRecipient).call{value: amount}("");
+        require(ok, "fee forward failed");
+        emit FeeForwarded(feeRecipient, amount);
+    }
 
     // --- Core Bundling Logic ---
 
@@ -59,6 +77,11 @@ contract MagnetaBundler is ReentrancyGuard, Pausable, Ownable {
         }
         require(msg.value >= totalRequired, "Insufficient ETH sent");
 
+        // Forward Magneta service fee (msg.value excess over the swap totals)
+        // directly to the FeeVault — auto-collection, no manual rescue needed.
+        uint256 fee = msg.value - totalRequired;
+        _forwardFee(fee);
+
         address[] memory path = new address[](2);
         path[0] = IUniswapV2Router02(router).WETH();
         path[1] = token;
@@ -83,8 +106,16 @@ contract MagnetaBundler is ReentrancyGuard, Pausable, Ownable {
             }
         }
 
-        // Refund excess ETH if any (from failures or overpayment)
-        uint256 unspentEth = msg.value - ethSpent;
+        // Refund excess ETH if any (from failures or overpayment).
+        // CRITICAL: refund must NOT include `fee` — that's already been
+        // forwarded to feeRecipient earlier in the same tx via _forwardFee.
+        // Pre-patch the refund used `msg.value - ethSpent` which always tried
+        // to send back the fee on top of the unused buy budget, exceeding the
+        // contract's remaining balance and reverting the entire bundleBuy
+        // (require "ETH refund failed"). Post-patch we only refund the
+        // unused portion of the *buy budget* (`totalRequired - ethSpent`),
+        // which is what the contract actually still holds.
+        uint256 unspentEth = totalRequired - ethSpent;
         if (unspentEth > 0) {
             (bool success, ) = msg.sender.call{value: unspentEth}("");
             require(success, "ETH refund failed");
@@ -103,9 +134,13 @@ contract MagnetaBundler is ReentrancyGuard, Pausable, Ownable {
         address[] calldata tokens,
         uint256[] calldata amounts,
         uint256[] calldata amountsOutMin
-    ) external nonReentrant whenNotPaused {
+    ) external payable nonReentrant whenNotPaused {
         require(msg.sender != address(0), "Invalid sender");
         require(tokens.length == amounts.length && amounts.length == amountsOutMin.length, "Arrays length mismatch");
+
+        // Forward the service fee (any native sent with the call) to FeeVault.
+        // V1 had no fee on bundleSell — V2 unifies with bundleBuy/atomicVolumeBrush.
+        _forwardFee(msg.value);
 
         uint256 totalEthReceived = 0;
         uint256 successCount = 0;
@@ -156,6 +191,11 @@ contract MagnetaBundler is ReentrancyGuard, Pausable, Ownable {
     ) external payable nonReentrant whenNotPaused {
         require(msg.value >= ethAmount, "Insufficient ETH");
 
+        // Forward msg.value excess (the Magneta service fee) directly to the
+        // FeeVault instead of stockpiling in this contract.
+        uint256 fee = msg.value - ethAmount;
+        _forwardFee(fee);
+
         address[] memory buyPath = new address[](2);
         buyPath[0] = IUniswapV2Router02(router).WETH();
         buyPath[1] = token;
@@ -205,9 +245,14 @@ contract MagnetaBundler is ReentrancyGuard, Pausable, Ownable {
         uint256 minTokensPerBuy,
         address[] calldata recipients,
         uint256[] calldata buyAmounts
-    ) external nonReentrant whenNotPaused {
+    ) external payable nonReentrant whenNotPaused {
         require(msg.sender != address(0), "Invalid sender");
         require(recipients.length == buyAmounts.length, "Arrays length mismatch");
+
+        // Forward the service fee (any native sent with the call) to FeeVault.
+        // V1 had no fee on sellAndBundleBuy — V2 unifies with bundleBuy.
+        _forwardFee(msg.value);
+
         // 1. Transfer Sell Token
         IERC20(sellToken).safeTransferFrom(msg.sender, address(this), sellAmount);
         IERC20(sellToken).forceApprove(router, sellAmount);
@@ -295,6 +340,13 @@ contract MagnetaBundler is ReentrancyGuard, Pausable, Ownable {
     function setRouter(address _router) external onlyOwner {
         require(_router != address(0), "Invalid router");
         router = _router;
+    }
+
+    /// @notice Update the FeeVault address. Set to address(0) to fall back
+    ///         to the legacy "fees stay in contract" mode (then use rescueETH).
+    function setFeeRecipient(address _feeRecipient) external onlyOwner {
+        emit FeeRecipientUpdated(feeRecipient, _feeRecipient);
+        feeRecipient = _feeRecipient;
     }
 
     function rescueTokens(address token, uint256 amount) external onlyOwner {

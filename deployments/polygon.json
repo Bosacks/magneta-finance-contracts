@@ -12,14 +12,16 @@
     "cctpDomain": 7,
     "usdc": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
     "defaultRouter": "0xa5E0829CaCEd8fFDD4De3c43696c57F7D7A678ff",
-    "router": "uniV2"
+    "router": "uniV2",
+    "wnative": "0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270"
   },
   "contracts": {
+    "MagnetaProxy": "0x0e09fd3f18B66F2750A0Aa0B8bB6365fcE5f6B60",
     "MagnetaPool": "0xDc6BFf741D5a94c26002268b0228212C71F9C726",
     "MagnetaSwap": "0xDa43c95Fb2ccf6bDE904Ece558eDeA6B506641B9",
     "MagnetaLending": "0x2203FE0F92781d7ECdF626b6aD08A9D2e281EFD0",
     "MagnetaFactory": "0xBeb7bB26Efe2c9c8571c83590625d5249755ad27",
-    "MagnetaBundler": "0x3f5BF77ba60949c4C5B9653159b0A050593B04a8",
+    "MagnetaBundler": "0x916a9135c4eED07372D2F621C99FF3420cB3b4D3",
     "MagnetaGateway": "0x3c21016E57e7A29333f38d200EC8945bfc6BA537",
     "MagnetaBridgeOApp": "0xB4f06F01641eFFb376Cc5dcA90F81fed1C6FA76e",
     "LPModule": "0xe3162944b9D759c23B7D1d99A25075a4313db19c",
@@ -29,9 +31,16 @@
     "MagnetaOFTStandardFactory": "0x714d0Ae0Ba1420D046CD2818697E41EF69448Ff0",
     "MagnetaOFTAutoLiquidityFactory": "0x9FF21887b355d06fB0A426E34857567b9D8bbD2a",
     "TokenCreationModule": "0xae78a0d6d7E4536ADD1269f16E4fF28f7DB15Cd4",
-    "MagnetaCurveFactory": "0x3564406Da6475E02c359eD1d55f747299c477837",
+    "MagnetaCurveFactory": "0x9a225501d636580EEc17a33f7544AcdE703AB529",
     "MagnetaStakingFactory": "0xc0Bc9150D6d2f64d999072d4263ff87aF0357F4D",
-    "MAG": "0x07c926937b3dfde9a779ad066be1300ac41c6fef"
+    "MAG": "0x07c926937b3dfde9a779ad066be1300ac41c6fef",
+    "PromotionPayment": "0x2FaC13e2707475E6Ea034b92Ffc855333668c4Ea",
+    "MagnetaProxyV2": "0x0ff3D7a1ff7b4E53CA693D7A774E71f129520315",
+    "MagnetaBundlerV2": "0x916a9135c4eED07372D2F621C99FF3420cB3b4D3",
+    "MagnetaV2Factory": "0xdbEfA1fE8A0d3b25B7D3e15e01FD617AE77B4fc8",
+    "MagnetaV2Router02": "0x7402EbE42E374120991aBDaac27F2BC0EfEC4289",
+    "MagnetaCurveFactoryV1": "0x3564406Da6475E02c359eD1d55f747299c477837",
+    "MagnetaMasterChef": "0xB95032B64A6B8D2217DE2076351CbFA10F2B058E"
   },
   "tokenCreationDeployedAt": "2026-04-30T10:17:43.214Z"
 }
