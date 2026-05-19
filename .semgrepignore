@@ -17,3 +17,10 @@ node_modules/
 coverage/
 test-results/
 broadcast/
+
+# Safe multisig transaction batches — historical record of executed on-chain
+# operations (peer wiring, ownership transfers, etc.). The `value` and
+# `nonce` fields contain large integers that randomly match the Luhn
+# checksum used by Sentinelle's PII rule; they are wei amounts and chain
+# nonces, not credit cards. The whole `Fait/` directory is archive-only.
+scripts/safe/Fait/
