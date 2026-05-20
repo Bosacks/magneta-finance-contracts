@@ -161,11 +161,31 @@ probe_chain() {
         fi
 
         # 1. Bytecode exists
+        # Defensive double-check: some Alchemy multi-chain keys return `0x`
+        # for unsupported chains instead of an HTTP error, producing
+        # false-positive "no bytecode" findings. If the primary RPC says
+        # empty, retry with the public fallback and only fail if both
+        # agree the address has no code.
         local code
         code=$(cast code "$addr" --rpc-url "$rpc" 2>/dev/null || echo "0x")
         if [ "$code" = "0x" ] || [ -z "$code" ]; then
-            fail "$cname @ $addr — NO BYTECODE (address is empty / wrong)"
-            continue
+            local fallback_rpc="${CHAIN_PUBLIC_RPC[$chain]:-}"
+            if [ -n "$fallback_rpc" ] && [ "$fallback_rpc" != "$rpc" ]; then
+                local code2
+                code2=$(cast code "$addr" --rpc-url "$fallback_rpc" 2>/dev/null || echo "0x")
+                if [ "$code2" != "0x" ] && [ -n "$code2" ]; then
+                    # Primary RPC lied; the contract exists. Warn loudly so
+                    # the operator fixes the env-var RPC and continue with
+                    # the fallback for the rest of this contract's checks.
+                    warn "$cname — primary RPC returned 0x but public RPC sees bytecode (env var $env_var is misconfigured for this chain)"
+                    rpc="$fallback_rpc"
+                    code="$code2"
+                fi
+            fi
+            if [ "$code" = "0x" ] || [ -z "$code" ]; then
+                fail "$cname @ $addr — NO BYTECODE on both env and public RPC (address is empty / wrong)"
+                continue
+            fi
         fi
 
         # 2. owner()
