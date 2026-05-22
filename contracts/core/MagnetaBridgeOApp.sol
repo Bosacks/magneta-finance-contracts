@@ -390,9 +390,13 @@ contract MagnetaBridgeOApp is OApp, ReentrancyGuard {
     }
 
     /**
-     * @dev Set the pause guardian (zero address disables the role).
+     * @dev Set the pause guardian. To rotate to a different guardian, pass
+     *      the new address. To disable the secondary pause path entirely,
+     *      rotate to the owner Safe — using address(0) is rejected to
+     *      prevent accidental bricking of the emergency response flow.
      */
     function setPauseGuardian(address _guardian) external onlyOwner {
+        require(_guardian != address(0), "MagnetaBridgeOApp: zero guardian");
         address old = pauseGuardian;
         pauseGuardian = _guardian;
         emit PauseGuardianUpdated(old, _guardian);

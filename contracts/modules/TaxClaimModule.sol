@@ -121,6 +121,8 @@ contract TaxClaimModule is IModule, ReentrancyGuard, Ownable {
     }
 
     function setCctpRoute(address messenger, uint32 domain, bytes32 recipient) external onlyOwner {
+        require(messenger != address(0), "TaxClaim: zero messenger");
+        require(recipient != bytes32(0), "TaxClaim: zero recipient");
         cctpMessenger = messenger;
         treasuryDomain = domain;
         treasuryRecipient = recipient;

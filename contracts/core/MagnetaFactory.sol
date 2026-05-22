@@ -95,6 +95,7 @@ contract MagnetaFactory is Ownable2Step, Pausable {
     }
 
     function setPauseGuardian(address _guardian) external onlyOwner {
+        require(_guardian != address(0), "MagnetaFactory: zero guardian");
         address old = pauseGuardian;
         pauseGuardian = _guardian;
         emit PauseGuardianUpdated(old, _guardian);

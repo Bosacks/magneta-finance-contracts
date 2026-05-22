@@ -365,6 +365,7 @@ contract MagnetaDLMM is Ownable2Step, Pausable, ReentrancyGuard {
     }
 
     function setPauseGuardian(address _guardian) external onlyOwner {
+        require(_guardian != address(0), "MagnetaDLMM: zero guardian");
         address old = pauseGuardian;
         pauseGuardian = _guardian;
         emit PauseGuardianUpdated(old, _guardian);
