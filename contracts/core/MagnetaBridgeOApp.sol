@@ -49,8 +49,15 @@ contract MagnetaBridgeOApp is OApp, ReentrancyGuard {
     // Mapping: endpointId => token => bridgeable
     mapping(uint32 => mapping(address => bool)) public bridgeableTokens;
 
-    // Mapping: guid => bridge transaction info (for tracking)
+    // Mapping: guid => bridge transaction info (for tracking outgoing txs)
     mapping(bytes32 => BridgeTransaction) public bridgeTransactions;
+
+    // Mapping: guid => already-processed flag for INCOMING messages.
+    // bridgeTransactions[].completed only gets set for outgoing txs; for
+    // incoming messages we need a dedicated replay guard or every replayed
+    // _lzReceive would pass the completed==false check. Closes the CrossCurve
+    // 2026 ($3M) replay-semantic divergence attack class.
+    mapping(bytes32 => bool) public processedIncomingGuids;
 
     // Mapping: endpointId => token => available balance for bridging
     mapping(uint32 => mapping(address => uint256)) public bridgeLiquidity;
@@ -271,6 +278,27 @@ contract MagnetaBridgeOApp is OApp, ReentrancyGuard {
         address _executor,
         bytes calldata _extraData
     ) internal override {
+        // CRITICAL: validate the message comes from one of OUR remote bridge
+        // contracts. Without this, any contract on any source chain can call
+        // the LayerZero endpoint with a forged payload and drain our liquidity
+        // — exact Kelp DAO 2026-04-19 $292M attack pattern. _getPeerOrRevert
+        // reads peers[_origin.srcEid] (owner-managed via setPeer); if the
+        // source eid has no peer configured it reverts with NoPeer(_eid),
+        // which is also the correct behaviour (refuse messages from
+        // un-peered chains).
+        require(
+            _getPeerOrRevert(_origin.srcEid) == _origin.sender,
+            "MagnetaBridgeOApp: untrusted sender"
+        );
+
+        // Replay guard for INCOMING messages. The legacy
+        // bridgeTransactions[_guid].completed check below is preserved as a
+        // defence-in-depth signal (it would only ever be true for an outgoing
+        // guid that somehow round-tripped, an anomaly worth reverting on),
+        // but the authoritative replay protection is processedIncomingGuids.
+        require(!processedIncomingGuids[_guid], "MagnetaBridgeOApp: incoming guid replayed");
+        processedIncomingGuids[_guid] = true;
+
         (address token, address to, uint256 amount) = abi.decode(_payload, (address, address, uint256));
 
         require(!bridgeTransactions[_guid].completed, "MagnetaBridgeOApp: guid already processed");

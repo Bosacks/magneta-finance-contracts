@@ -412,6 +412,66 @@ describe("MagnetaBridgeOApp", function () {
                 )
             ).to.be.reverted;
         });
+
+        it("reverts when sender is not the configured peer (DVN spoof guard)", async function () {
+            // Forge a message claiming to come from a different (attacker-controlled)
+            // contract address on the source chain. The peer registered for EID_A
+            // is bridgeA — this attacker address is not.
+            const attackerOnChainA = ethers.zeroPadValue(
+                "0x000000000000000000000000DeadBeefBadCafe0001bAdC0DeBadc0DEbadc0de",
+                32
+            );
+            const amount = ethers.parseEther("10");
+            const guid = ethers.hexlify(ethers.randomBytes(32));
+            const payload = ethers.AbiCoder.defaultAbiCoder().encode(
+                ["address", "address", "uint256"],
+                [await token.getAddress(), bob.address, amount]
+            );
+
+            // The attack is blocked. Depending on the mock endpoint, the
+            // revert may come either from the endpoint's own peer check
+            // (allowInitializePath) or from our defence-in-depth check
+            // inside _lzReceive. Either way the forged message MUST NOT
+            // result in a successful token transfer.
+            await expect(
+                endpointB.deliverMessage(
+                    await bridgeB.getAddress(),
+                    { srcEid: EID_A, sender: attackerOnChainA, nonce: 1n },
+                    guid,
+                    payload
+                )
+            ).to.be.reverted;
+        });
+
+        it("reverts when an incoming guid is replayed", async function () {
+            const bridgeABytes32 = ethers.zeroPadValue(await bridgeA.getAddress(), 32);
+            const amount = ethers.parseEther("10");
+            const guid = ethers.hexlify(ethers.randomBytes(32));
+            const payload = ethers.AbiCoder.defaultAbiCoder().encode(
+                ["address", "address", "uint256"],
+                [await token.getAddress(), bob.address, amount]
+            );
+
+            // First delivery — should succeed and mark the guid as processed.
+            await endpointB.deliverMessage(
+                await bridgeB.getAddress(),
+                { srcEid: EID_A, sender: bridgeABytes32, nonce: 1n },
+                guid,
+                payload
+            );
+            expect(await bridgeB.processedIncomingGuids(guid)).to.equal(true);
+
+            // Same guid replayed — must revert. Closes the CrossCurve 2026 replay-
+            // semantic divergence class.
+            await expect(
+                endpointB.deliverMessage(
+                    await bridgeB.getAddress(),
+                    { srcEid: EID_A, sender: bridgeABytes32, nonce: 2n },
+                    guid,
+                    payload
+                )
+            ).to.be.revertedWith("MagnetaBridgeOApp: incoming guid replayed");
+        });
     });
 
     // ─── End-to-end flow ───────────────────────────────────────────────────────
@@ -513,14 +573,18 @@ describe("MagnetaBridgeOApp", function () {
     // ─── Pause guardian ────────────────────────────────────────────────────────
 
     describe("Pause guardian", function () {
-        it("owner can set and clear the guardian", async function () {
+        it("owner can rotate the guardian; clearing to zero-address is rejected", async function () {
             await expect(bridgeA.setPauseGuardian(bob.address))
                 .to.emit(bridgeA, "PauseGuardianUpdated")
                 .withArgs(ethers.ZeroAddress, bob.address);
             expect(await bridgeA.pauseGuardian()).to.equal(bob.address);
 
-            await bridgeA.setPauseGuardian(ethers.ZeroAddress);
-            expect(await bridgeA.pauseGuardian()).to.equal(ethers.ZeroAddress);
+            // Setting to address(0) is rejected to prevent accidental brick of
+            // the emergency response flow. To disable the guardian role,
+            // rotate it to the owner Safe instead (see contract comment).
+            await expect(bridgeA.setPauseGuardian(ethers.ZeroAddress))
+                .to.be.revertedWith("MagnetaBridgeOApp: zero guardian");
+            expect(await bridgeA.pauseGuardian()).to.equal(bob.address);
         });
 
         it("guardian can pause but not unpause", async function () {
