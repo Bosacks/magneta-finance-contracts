@@ -51,6 +51,13 @@ interface IUniswapV2Factory {
     function getPair(address tokenA, address tokenB) external view returns (address);
 }
 
+interface IUniswapV2Pair {
+    /// @notice Reserves of the pair at the latest sync. Used at graduation
+    ///         time to verify that no one front-ran our pool creation with a
+    ///         malicious ratio (Option 3 slippage protection).
+    function getReserves() external view returns (uint112 reserve0, uint112 reserve1, uint32 blockTimestampLast);
+}
+
 contract MagnetaCurvePool is ReentrancyGuard {
     using SafeERC20 for IERC20;
 
@@ -126,6 +133,11 @@ contract MagnetaCurvePool is ReentrancyGuard {
         uint256 tokensMigrated,
         uint256 lpBurned
     );
+
+    /// @notice Emitted when residual native (un-accounted donations + any
+    ///         router refund) is swept to the FeeVault after graduation.
+    ///         Zero amount = nothing to sweep, event not emitted.
+    event ResidualSwept(address indexed to, uint256 amount);
 
     // ─── Errors ──────────────────────────────────────────────────────────
 
@@ -288,8 +300,13 @@ contract MagnetaCurvePool is ReentrancyGuard {
     function _graduate() internal {
         graduated = true;
 
-        // Native to migrate = everything we hold (already net of fees)
-        uint256 nativeForLp = address(this).balance;
+        // Native to migrate = curve's own accounting. Reading
+        // address(this).balance here would let an attacker donate native
+        // (via plain transfer or selfdestruct) just before graduation to
+        // inflate the V2 LP's native side, distorting the post-graduation
+        // price. By committing to `nativeRaised`, donations are excluded
+        // from the LP and swept to the FeeVault at the end (see below).
+        uint256 nativeForLp = nativeRaised;
 
         // Token allocation reserved for graduation = total supply - curveAlloc
         uint256 tokenForLp = totalSupplyToken - curveAllocation;
@@ -300,15 +317,32 @@ contract MagnetaCurvePool is ReentrancyGuard {
             token.safeTransfer(DEAD, unsoldCurve);
         }
 
+        // ─── Slippage protection (Option 3 + Option 1) ─────────────────────
+        // Option 3: if a pair already exists for this token/wnative, refuse to
+        // graduate if it has non-zero reserves. Without this check, a frontrunner
+        // could pre-create the pair with an absurd ratio and force our deposit
+        // to mint very few LP tokens. Empty pair is harmless — we just use it.
+        address existingPair = IUniswapV2Factory(router.factory()).getPair(address(token), wnative);
+        if (existingPair != address(0)) {
+            (uint112 r0, uint112 r1, ) = IUniswapV2Pair(existingPair).getReserves();
+            require(r0 == 0 && r1 == 0, "graduation: pair has reserves (manipulated)");
+        }
+
         // Approve router to pull tokenForLp
         token.forceApprove(address(router), tokenForLp);
+
+        // Option 1: pass min amounts at 99% of intent. If reserves were
+        // somehow manipulated between our check and the addLiquidity call,
+        // the router would scale down our amounts → reverts on these mins.
+        uint256 amountTokenMin = (tokenForLp * 99) / 100;
+        uint256 amountETHMin   = (nativeForLp * 99) / 100;
 
         // Add liquidity ETH-style (wnative side paid from this contract's balance)
         (, , uint256 lp) = router.addLiquidityETH{value: nativeForLp}(
             address(token),
             tokenForLp,
-            0,
-            0,
+            amountTokenMin,
+            amountETHMin,
             address(this),
             block.timestamp
         );
@@ -318,6 +352,19 @@ contract MagnetaCurvePool is ReentrancyGuard {
         IERC20(pair).safeTransfer(DEAD, lp);
 
         emit Graduated(pair, nativeForLp, tokenForLp, lp);
+
+        // Sweep any residual native to the FeeVault. Sources:
+        //   - donations sent directly to this contract before graduation
+        //     (would otherwise be locked, since trading stops here)
+        //   - any unused native refunded by the router during addLiquidityETH
+        // Donations are thereby redirected to the protocol instead of
+        // distorting the V2 pair's initial price.
+        uint256 residual = address(this).balance;
+        if (residual > 0) {
+            (bool okSweep, ) = payable(feeVault).call{value: residual}("");
+            require(okSweep, "residual sweep failed");
+            emit ResidualSwept(feeVault, residual);
+        }
     }
 
     // ─── Receive — accept native top-ups (used by router callbacks etc.) ──
