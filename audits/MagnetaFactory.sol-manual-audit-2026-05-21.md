@@ -38,9 +38,9 @@ Aligned with Immunefi's standard. Reproduced from `SECURITY.md`:
 | # | ID | Severity | Title | Status |
 |---|----|----------|-------|--------|
 | 1 | MF-1 | LOW    | `setPauseGuardian` accepts zero address (was Sentinelle SC01) | ✅ Fixed 2026-05-21 |
-| 2 | MF-2 | MEDIUM | `createMultiPool` has no input validation (token / weight / fee) | 🟡 Open |
-| 3 | MF-3 | MEDIUM | `createDLMMPool` has no input validation (token identity / fee bounds) | 🟡 Open |
-| 4 | MF-4 | LOW    | `createStandardPool` passes through without local sanity checks | 🟡 Open |
+| 2 | MF-2 | MEDIUM | `createMultiPool` swapFee unbounded (token/weight invariants live in MagnetaMultiPool constructor) | ✅ Fixed 2026-05-22 (4ef3940) |
+| 3 | MF-3 | MEDIUM | `createDLMMPool` input validation | ✅ Already enforced at MagnetaDLMM constructor (DLMM:101-106) |
+| 4 | MF-4 | LOW    | `createStandardPool` zero-address token0/token1 | ✅ Fixed 2026-05-22 (4ef3940) |
 | 5 | MF-5 | LOW    | All `create*` functions are permissionless without rate limit or per-creator quota | 🟡 Open (design choice) |
 | 6 | MF-6 | LOW    | `pauseGuardian` not initialised in constructor | 🟡 Open |
 | 7 | MF-7 | INFO   | `multiPools` / `dlmmPools` arrays grow unbounded | 🟢 Acceptable |
