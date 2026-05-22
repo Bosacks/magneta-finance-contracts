@@ -153,7 +153,138 @@ describe("MagnetaPool", function () {
         magnetaPool
           .connect(owner)
           .removeLiquidity(tokenId, liquidityToRemove, 0, 0, owner.address)
-      ).to.be.revertedWith("MagnetaPool: not position owner");
+      ).to.be.revertedWith("MagnetaPool: not position owner or approved");
+    });
+  });
+
+  describe("Hardening: MP-1 / MP-2 / MP-4", function () {
+    const token0Amt = () => ethers.parseEther("100");
+    const token1Amt = () => ethers.parseEther("200");
+
+    async function bootPool() {
+      await magnetaPool.createPool(await token0.getAddress(), await token1.getAddress(), 30);
+      await token0.connect(user).approve(await magnetaPool.getAddress(), ethers.parseEther("10000"));
+      await token1.connect(user).approve(await magnetaPool.getAddress(), ethers.parseEther("10000"));
+    }
+
+    describe("MP-1: MINIMUM_LIQUIDITY phantom share locks pool from re-init", function () {
+      it("exposes MINIMUM_LIQUIDITY = 1000", async function () {
+        expect(await magnetaPool.MINIMUM_LIQUIDITY()).to.equal(1000n);
+      });
+
+      it("rejects initial deposits whose sqrt(amt0*amt1) <= MINIMUM_LIQUIDITY", async function () {
+        await bootPool();
+        // sqrt(10 * 10) = 10, less than 1000.
+        await expect(
+          magnetaPool.connect(user).addLiquidity(1, 10n, 10n, 0, 0, user.address)
+        ).to.be.revertedWith("MagnetaPool: insufficient initial liquidity");
+      });
+
+      it("first LP receives totalLiquidity - MINIMUM_LIQUIDITY; pool stays > 0 after full withdraw", async function () {
+        await bootPool();
+        await magnetaPool.connect(user).addLiquidity(1, token0Amt(), token1Amt(), 0, 0, user.address);
+
+        const position = await magnetaPool.positions(1);
+        const pool = await magnetaPool.pools(1);
+
+        // pool.liquidity = position.liquidity + MINIMUM_LIQUIDITY
+        expect(pool.liquidity).to.equal(position.liquidity + 1000n);
+
+        // Full withdraw of caller's share leaves the phantom 1000 behind.
+        await magnetaPool.connect(user).removeLiquidity(1, position.liquidity, 0, 0, user.address);
+        const poolAfter = await magnetaPool.pools(1);
+        expect(poolAfter.liquidity).to.equal(1000n);
+      });
+
+      it("post-drain re-deposit hits the existing-pool branch (cannot re-init at arbitrary ratio)", async function () {
+        await bootPool();
+        await magnetaPool.connect(user).addLiquidity(1, token0Amt(), token1Amt(), 0, 0, user.address);
+
+        const position = await magnetaPool.positions(1);
+        await magnetaPool.connect(user).removeLiquidity(1, position.liquidity, 0, 0, user.address);
+
+        // pool.reserve0 and reserve1 retain a tiny dust amount; pool.liquidity = 1000.
+        const poolAfterDrain = await magnetaPool.pools(1);
+        expect(poolAfterDrain.liquidity).to.equal(1000n);
+
+        // Attacker tries to deposit (1, 1) wei (would re-init at extreme ratio
+        // if first-deposit branch were taken). Should hit the existing-pool
+        // branch and revert because reserves are too dust-small to compute
+        // a non-zero LP share for such a small deposit.
+        await expect(
+          magnetaPool.connect(user).addLiquidity(1, 1n, 1n, 0, 0, user.address)
+        ).to.be.revertedWith("MagnetaPool: insufficient liquidity");
+      });
+    });
+
+    describe("MP-2: swap rejects zero recipient", function () {
+      it("reverts when to == address(0)", async function () {
+        await bootPool();
+        await magnetaPool.connect(user).addLiquidity(1, token0Amt(), token1Amt(), 0, 0, user.address);
+
+        // Use block.timestamp + 1h, not wall clock (hardhat advances block time independently)
+        const latest = await ethers.provider.getBlock("latest");
+        const deadline = latest!.timestamp + 3600;
+        await expect(
+          magnetaPool.connect(user).swap(
+            1,
+            await token0.getAddress(),
+            ethers.parseEther("1"),
+            0,
+            ethers.ZeroAddress,
+            deadline
+          )
+        ).to.be.revertedWith("MagnetaPool: invalid recipient");
+      });
+    });
+
+    describe("MP-4: removeLiquidity / collectFees honor ERC721 approval", function () {
+      it("an approved operator can call removeLiquidity without holding the NFT", async function () {
+        await bootPool();
+        await magnetaPool.connect(user).addLiquidity(1, token0Amt(), token1Amt(), 0, 0, user.address);
+
+        // user approves owner for tokenId 1
+        await magnetaPool.connect(user).approve(owner.address, 1);
+
+        const position = await magnetaPool.positions(1);
+        const half = position.liquidity / 2n;
+
+        await expect(
+          magnetaPool.connect(owner).removeLiquidity(1, half, 0, 0, owner.address)
+        ).to.emit(magnetaPool, "LiquidityRemoved");
+      });
+
+      it("a setApprovalForAll operator can also call removeLiquidity", async function () {
+        await bootPool();
+        await magnetaPool.connect(user).addLiquidity(1, token0Amt(), token1Amt(), 0, 0, user.address);
+
+        await magnetaPool.connect(user).setApprovalForAll(owner.address, true);
+
+        const position = await magnetaPool.positions(1);
+        await expect(
+          magnetaPool.connect(owner).removeLiquidity(1, position.liquidity, 0, 0, owner.address)
+        ).to.emit(magnetaPool, "LiquidityRemoved");
+      });
+
+      it("collectFees follows the same approval rule", async function () {
+        await bootPool();
+        await magnetaPool.connect(user).addLiquidity(1, token0Amt(), token1Amt(), 0, 0, user.address);
+
+        // Approved operator can call collectFees (returns zeros since no fees accrue, but doesn't revert)
+        await magnetaPool.connect(user).approve(owner.address, 1);
+        await expect(
+          magnetaPool.connect(owner).collectFees(1, owner.address)
+        ).to.not.be.reverted;
+      });
+
+      it("unrelated user is still rejected", async function () {
+        await bootPool();
+        await magnetaPool.connect(user).addLiquidity(1, token0Amt(), token1Amt(), 0, 0, user.address);
+
+        await expect(
+          magnetaPool.connect(owner).removeLiquidity(1, 1n, 0, 0, owner.address)
+        ).to.be.revertedWith("MagnetaPool: not position owner or approved");
+      });
     });
   });
 });

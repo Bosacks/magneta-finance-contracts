@@ -27,6 +27,15 @@ contract MagnetaPool is ERC721, ERC721Enumerable, Ownable2Step, Pausable, Reentr
     uint24 public constant FEE_TIER_MEDIUM = 30; // 0.3%
     uint24 public constant FEE_TIER_HIGH = 100; // 1%
 
+    /// @notice Phantom liquidity permanently locked into every pool on the
+    ///         first deposit (Uniswap V2 pattern). Prevents post-drain pool
+    ///         re-initialisation at a fresh price ratio — once a pool has
+    ///         seen its first LP, `pool.liquidity` stays >= MINIMUM_LIQUIDITY
+    ///         forever, so all subsequent deposits go through the
+    ///         existing-pool branch (ratio-bound) instead of the
+    ///         first-liquidity branch (caller-chosen ratio).
+    uint256 public constant MINIMUM_LIQUIDITY = 1000;
+
     /**
      * @dev Pool structure
      * @notice Simplified invariant: When liquidity > 0, the ratio reserve0/reserve1 must be 
@@ -66,8 +75,10 @@ contract MagnetaPool is ERC721, ERC721Enumerable, Ownable2Step, Pausable, Reentr
     uint256 public poolCount;
     uint256 private _tokenIdCounter;
 
-    // Feature flag: Controls access to createPool and addLiquidity
-    // Set to false by default to prevent public use until full AMM implementation is ready
+    // Feature flag: Controls public access to createPool and addLiquidity.
+    // Defaults to TRUE in the constructor (production behaviour). Owner can
+    // toggle either flag off via setPoolCreationEnabled / setLiquidityAdditionEnabled
+    // to lock down the contract during an incident or migration.
     bool public poolCreationEnabled;
     bool public liquidityAdditionEnabled;
 
@@ -272,9 +283,15 @@ contract MagnetaPool is ERC721, ERC721Enumerable, Ownable2Step, Pausable, Reentr
         require(amount1 >= amount1Min, "MagnetaPool: amount1 slippage tolerance exceeded");
 
         // Calculate liquidity (simplified formula)
-        if (pool.liquidity == 0) {
-            // Initial liquidity: geometric mean
-            liquidity = sqrt(amount0 * amount1);
+        bool isInitialDeposit = pool.liquidity == 0;
+        if (isInitialDeposit) {
+            // Initial liquidity: geometric mean. Subtract MINIMUM_LIQUIDITY
+            // from the caller's share and add it to pool.liquidity as a
+            // permanent phantom share, preventing post-drain re-init at a
+            // fresh ratio. Caller's share must still be strictly positive.
+            uint256 totalLiquidity = sqrt(amount0 * amount1);
+            require(totalLiquidity > MINIMUM_LIQUIDITY, "MagnetaPool: insufficient initial liquidity");
+            liquidity = totalLiquidity - MINIMUM_LIQUIDITY;
         } else {
             // Additional liquidity: proportional to existing reserves
             // Uses minimum to ensure ratio is maintained
@@ -286,10 +303,11 @@ contract MagnetaPool is ERC721, ERC721Enumerable, Ownable2Step, Pausable, Reentr
 
         require(liquidity > 0, "MagnetaPool: insufficient liquidity");
 
-        // Update pool reserves
+        // Update pool reserves; on the first deposit also bank the phantom
+        // MINIMUM_LIQUIDITY share so pool.liquidity is locked above 0 forever.
         pool.reserve0 += amount0;
         pool.reserve1 += amount1;
-        pool.liquidity += liquidity;
+        pool.liquidity += liquidity + (isInitialDeposit ? MINIMUM_LIQUIDITY : 0);
 
         // Mint position NFT
         tokenId = ++_tokenIdCounter;
@@ -338,7 +356,7 @@ contract MagnetaPool is ERC721, ERC721Enumerable, Ownable2Step, Pausable, Reentr
         uint256 amount1Min,
         address to
     ) external nonReentrant whenNotPaused returns (uint256 amount0, uint256 amount1) {
-        require(ownerOf(tokenId) == msg.sender, "MagnetaPool: not position owner");
+        require(_isApprovedOrOwner(msg.sender, tokenId), "MagnetaPool: not position owner or approved");
         require(to != address(0), "MagnetaPool: invalid recipient");
 
         Position storage position = positions[tokenId];
@@ -390,7 +408,7 @@ contract MagnetaPool is ERC721, ERC721Enumerable, Ownable2Step, Pausable, Reentr
      * @return amount1 Amount of token1 fees collected
      */
     function collectFees(uint256 tokenId, address to) external nonReentrant returns (uint256 amount0, uint256 amount1) {
-        require(ownerOf(tokenId) == msg.sender, "MagnetaPool: not position owner");
+        require(_isApprovedOrOwner(msg.sender, tokenId), "MagnetaPool: not position owner or approved");
         require(to != address(0), "MagnetaPool: invalid recipient");
 
         Position storage position = positions[tokenId];
@@ -499,13 +517,14 @@ contract MagnetaPool is ERC721, ERC721Enumerable, Ownable2Step, Pausable, Reentr
         uint256 deadline
     ) external nonReentrant whenNotPaused returns (uint256 amountOut) {
         require(block.timestamp <= deadline, "MagnetaPool: deadline exceeded");
-        
+        require(to != address(0), "MagnetaPool: invalid recipient");
+
         Pool storage pool = pools[poolId];
         require(pool.exists, "MagnetaPool: pool does not exist");
-        
+
         bool isToken0 = tokenIn == pool.token0;
         require(isToken0 || tokenIn == pool.token1, "MagnetaPool: invalid token");
-        
+
         // Transfer input
         IERC20(tokenIn).safeTransferFrom(msg.sender, address(this), amountIn);
         
