@@ -20,9 +20,27 @@ contract MagnetaProxy is Ownable2Step, ReentrancyGuard {
     // Fee recipient
     address public feeRecipient;
 
+    // Owner-managed whitelist of swapTarget addresses that callers may route
+    // through. Closes the unrestricted-external-call class (Sentinelle audit
+    // 2026-05-22, CVSS 7.8 SC06) and the donation/approval-drain attack
+    // surface (CVSS 7.5 SC02) by ensuring only known-good routers can be
+    // invoked. Each EVM chain's V2 router (PancakeSwap, QuickSwap, Sushi,
+    // etc.) must be whitelisted post-deploy by the owner Safe before the
+    // proxy can be used on that chain.
+    mapping(address => bool) public allowedSwapTargets;
+
+    // Owner-managed whitelist of spender addresses the proxy may approve
+    // tokens to. In practice this is the same set as allowedSwapTargets
+    // (routers approve themselves), but kept separate so e.g. PermitV2 can
+    // be added later without touching the swap-target list.
+    mapping(address => bool) public allowedSpenders;
+
     // Events
     event FeeRecipientUpdated(address indexed oldRecipient, address indexed newRecipient);
     event FeeBpsUpdated(uint256 oldFeeBps, uint256 newFeeBps);
+    event SwapTargetAllowed(address indexed target, bool allowed);
+    event SpenderAllowed(address indexed spender, bool allowed);
+    event Rescued(address indexed token, address indexed to, uint256 amount); // token == address(0) for ETH
     event Swapped(
         address indexed user,
         address indexed tokenIn,
@@ -57,8 +75,8 @@ contract MagnetaProxy is Ownable2Step, ReentrancyGuard {
         bytes calldata swapCallData
     ) external payable nonReentrant {
         require(amountIn > 0, "Invalid amount");
-        require(spender != address(0), "Invalid spender");
-        require(swapTarget != address(0), "Invalid target");
+        require(allowedSpenders[spender], "MagnetaProxy: spender not allowed");
+        require(allowedSwapTargets[swapTarget], "MagnetaProxy: target not allowed");
         require(tokenIn != tokenOut, "Same token");
 
         uint256 fee = 0;
@@ -108,7 +126,9 @@ contract MagnetaProxy is Ownable2Step, ReentrancyGuard {
     ) external payable nonReentrant {
         require(msg.sender != address(0), "Invalid sender");
         require(msg.value > 0, "Invalid ETH amount");
-        
+        require(allowedSpenders[spender], "MagnetaProxy: spender not allowed");
+        require(allowedSwapTargets[swapTarget], "MagnetaProxy: target not allowed");
+
         uint256 amountIn = msg.value;
         uint256 fee = 0;
         uint256 amountToSwap = amountIn;
@@ -141,6 +161,63 @@ contract MagnetaProxy is Ownable2Step, ReentrancyGuard {
     }
 
     /**
+     * @dev Execute a swap with ERC20 input and native (ETH/POL/etc.) output.
+     *      Symmetric to executeSwapETH (which is native input, ERC20 output).
+     *      Required for any swap where the router returns native to the proxy
+     *      (e.g. V2's swapExactTokensForETH). Without this path, the existing
+     *      executeSwap reverts on IERC20(0).balanceOf when tokenOut is native.
+     *
+     * @param tokenIn       ERC20 input token (USDC, WETH-wrapped, etc.)
+     * @param amountIn      Amount of tokenIn to pull from msg.sender
+     * @param minAmountOut  Minimum native received after the swap
+     * @param spender       Address approved to pull tokenIn (router)
+     * @param swapTarget    Address called with swapCallData (router)
+     * @param swapCallData  Encoded call that routes tokenIn -> native and
+     *                      sends the native to this proxy (recipient = self)
+     */
+    function executeSwapToETH(
+        address tokenIn,
+        uint256 amountIn,
+        uint256 minAmountOut,
+        address spender,
+        address swapTarget,
+        bytes calldata swapCallData
+    ) external nonReentrant {
+        require(amountIn > 0, "Invalid amount");
+        require(allowedSpenders[spender], "MagnetaProxy: spender not allowed");
+        require(allowedSwapTargets[swapTarget], "MagnetaProxy: target not allowed");
+
+        // 1. Pull input tokens from user
+        IERC20(tokenIn).safeTransferFrom(msg.sender, address(this), amountIn);
+
+        // 2. Deduct fee in the input token
+        uint256 fee = 0;
+        uint256 amountToSwap = amountIn;
+        if (feeBps > 0) {
+            fee = (amountIn * feeBps) / 10000;
+            amountToSwap = amountIn - fee;
+            IERC20(tokenIn).safeTransfer(feeRecipient, fee);
+        }
+
+        // 3. Approve router and record native balance before
+        IERC20(tokenIn).forceApprove(spender, amountToSwap);
+        uint256 initialNativeBalance = address(this).balance;
+
+        // 4. Execute swap — router must send native back to this contract
+        (bool success, ) = swapTarget.call(swapCallData);
+        require(success, "Swap failed");
+
+        // 5. Verify native received and forward to user
+        uint256 amountReceived = address(this).balance - initialNativeBalance;
+        require(amountReceived >= minAmountOut, "Insufficient output amount");
+
+        (bool sent, ) = payable(msg.sender).call{value: amountReceived}("");
+        require(sent, "Native transfer failed");
+
+        emit Swapped(msg.sender, tokenIn, address(0), amountIn, amountReceived, fee);
+    }
+
+    /**
      * @dev Admin functions
      */
     function setFeeRecipient(address _feeRecipient) external onlyOwner {
@@ -153,6 +230,76 @@ contract MagnetaProxy is Ownable2Step, ReentrancyGuard {
         require(_feeBps <= MAX_FEE_BPS, "Fee too high");
         emit FeeBpsUpdated(feeBps, _feeBps);
         feeBps = _feeBps;
+    }
+
+    /**
+     * @dev Whitelist (or de-whitelist) a swapTarget address. Routers must be
+     *      enabled here before users can route swaps through them. Owner-only.
+     *      Setting `allowed=false` disables an existing entry (e.g. on
+     *      vulnerable-router incident).
+     */
+    function setAllowedSwapTarget(address target, bool allowed) external onlyOwner {
+        require(target != address(0), "MagnetaProxy: zero target");
+        allowedSwapTargets[target] = allowed;
+        emit SwapTargetAllowed(target, allowed);
+    }
+
+    /**
+     * @dev Whitelist (or de-whitelist) a spender address. Typically the same
+     *      address as the swapTarget (the router approves itself), but kept
+     *      separate so Permit2 / aggregator helpers can be added without
+     *      relisting routers.
+     */
+    function setAllowedSpender(address spender, bool allowed) external onlyOwner {
+        require(spender != address(0), "MagnetaProxy: zero spender");
+        allowedSpenders[spender] = allowed;
+        emit SpenderAllowed(spender, allowed);
+    }
+
+    /**
+     * @dev Convenience: whitelist many targets/spenders in one transaction.
+     *      Used by the post-deploy configuration script to populate the
+     *      per-chain router set in a single Safe batch.
+     */
+    function setAllowedSwapTargets(address[] calldata targets, bool allowed) external onlyOwner {
+        for (uint256 i = 0; i < targets.length; ++i) {
+            require(targets[i] != address(0), "MagnetaProxy: zero target");
+            allowedSwapTargets[targets[i]] = allowed;
+            emit SwapTargetAllowed(targets[i], allowed);
+        }
+    }
+
+    function setAllowedSpenders(address[] calldata spenders, bool allowed) external onlyOwner {
+        for (uint256 i = 0; i < spenders.length; ++i) {
+            require(spenders[i] != address(0), "MagnetaProxy: zero spender");
+            allowedSpenders[spenders[i]] = allowed;
+            emit SpenderAllowed(spenders[i], allowed);
+        }
+    }
+
+    /**
+     * @dev Rescue ERC20 tokens accidentally sent to the contract or stuck
+     *      after a failed swap. Owner-only. Limited to amounts ≤ the
+     *      contract's idle balance so rescue can't be used to drain an
+     *      in-flight swap (functions hold tokens transiently inside
+     *      nonReentrant which would block this).
+     */
+    function rescueERC20(address token, address to, uint256 amount) external onlyOwner {
+        require(token != address(0), "MagnetaProxy: zero token");
+        require(to != address(0), "MagnetaProxy: zero recipient");
+        IERC20(token).safeTransfer(to, amount);
+        emit Rescued(token, to, amount);
+    }
+
+    /**
+     * @dev Rescue native ETH (e.g. WETH unwrapping refunds, donation grief).
+     *      Owner-only. nonReentrant for defence in depth.
+     */
+    function rescueETH(address payable to, uint256 amount) external onlyOwner nonReentrant {
+        require(to != address(0), "MagnetaProxy: zero recipient");
+        (bool sent, ) = to.call{value: amount}("");
+        require(sent, "MagnetaProxy: ETH rescue failed");
+        emit Rescued(address(0), to, amount);
     }
 
     // Allow receiving ETH (required for unwrapping WETH or refunds)
