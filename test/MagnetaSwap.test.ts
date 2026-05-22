@@ -130,6 +130,26 @@ describe("MagnetaSwap", function () {
     });
   });
 
+  describe("Hardening: MS-3 swap to != 0", function () {
+    it("Reverts when recipient is the zero address", async function () {
+      await token0.connect(user).approve(await magnetaSwap.getAddress(), ethers.parseEther("100"));
+      const deadline = (await ethers.provider.getBlock("latest"))!.timestamp + 3600;
+
+      await expect(
+        magnetaSwap
+          .connect(user)
+          .swap(
+            await token0.getAddress(),
+            await token1.getAddress(),
+            ethers.parseEther("10"),
+            0,
+            ethers.ZeroAddress,
+            deadline
+          )
+      ).to.be.revertedWith("MagnetaSwap: invalid recipient");
+    });
+  });
+
   describe("Pause/Unpause", function () {
     it("Should allow owner to pause", async function () {
       await magnetaSwap.pause();

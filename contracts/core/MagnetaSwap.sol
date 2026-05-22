@@ -24,9 +24,8 @@ contract MagnetaSwap is IMagnetaSwap, Ownable2Step, ReentrancyGuard {
 
     IMagnetaPoolSwap public immutable poolContract;
 
-    // Fee in basis points (100 = 1%)
+    // Fee in basis points (100 = 1%). FEE_BPS is the immutable router fee.
     uint256 public constant FEE_BPS = 30; // 0.3%
-    uint256 public constant MAX_FEE_BPS = 1000; // 10%
 
     // Fee recipient
     address public feeRecipient;
@@ -82,6 +81,7 @@ contract MagnetaSwap is IMagnetaSwap, Ownable2Step, ReentrancyGuard {
         require(block.timestamp <= deadline, "MagnetaSwap: deadline exceeded");
         require(tokenIn != tokenOut, "MagnetaSwap: identical tokens");
         require(amountIn > 0, "MagnetaSwap: invalid amount");
+        require(to != address(0), "MagnetaSwap: invalid recipient");
         require(whitelistedTokens[tokenIn] && whitelistedTokens[tokenOut], "MagnetaSwap: token not whitelisted");
 
         // Transfer tokens from user
@@ -125,9 +125,11 @@ contract MagnetaSwap is IMagnetaSwap, Ownable2Step, ReentrancyGuard {
     ) public view override returns (uint256 amountOut) {
         if (amountIn == 0) return 0;
         if (!whitelistedTokens[tokenIn] || !whitelistedTokens[tokenOut]) return 0;
-        
-        // Take contract-level fee
-        uint256 fee = (amountIn * FEE_BPS) / 10000;
+
+        // Match swap()'s fee handling: exempt addresses (LPModule etc.) get
+        // a quote computed on the full amountIn — otherwise their on-chain
+        // slippage checks would be biased low (we under-quoted them).
+        uint256 fee = feeExempt[msg.sender] ? 0 : (amountIn * FEE_BPS) / 10000;
         uint256 amountToSwap = amountIn - fee;
 
         uint256 poolId = poolContract.getPool(tokenIn, tokenOut, 30);
