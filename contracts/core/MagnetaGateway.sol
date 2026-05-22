@@ -47,6 +47,14 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
     /// @notice Basis-point fee for value-carrying cross-chain ops. Default: 15 (0.15%).
     uint16 public crossChainValueFeeBps = 15;
 
+    /// @notice Upper bound on `crossChainCommandFee` (100 USDC). Above this,
+    ///         operators could brick all cross-chain ops by overcharging.
+    uint256 public constant MAX_CROSSCHAIN_COMMAND_FEE = 100_000_000; // $100
+
+    /// @notice Upper bound on `crossChainValueFeeBps` (10%). Above this, the
+    ///         protocol could skim arbitrary amounts of bridged value.
+    uint16 public constant MAX_CROSSCHAIN_VALUE_FEE_BPS = 1000;
+
     /// @notice Circle CCTP TokenMessenger for burning/minting USDC cross-chain.
     ITokenMessenger public cctpMessenger;
 
@@ -88,6 +96,9 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
     event ValueOpPending(bytes32 indexed guid, OpType indexed op, address indexed caller, address token, uint256 amount);
     event ValueOpFulfilled(bytes32 indexed guid, OpType indexed op, address indexed caller);
     event CctpConfigUpdated(address messenger, uint32 localDomain);
+    event UsdcSet(address indexed usdc);
+    event EidCctpDomainSet(uint32 indexed eid, uint32 indexed cctpDomain);
+    event Rescued(address indexed token, address indexed to, uint256 amount);
 
     modifier onlyOwnerOrGuardian() {
         require(
@@ -150,7 +161,7 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
         bytes calldata moduleParams,
         bytes calldata lzOptions
     ) external payable override nonReentrant whenNotPaused returns (bytes32 guid) {
-        _collectCrossChainFee(0);
+        _collectCrossChainFee(0, 1);
 
         bytes memory payload = abi.encode(uint8(0), op, msg.sender, moduleParams);
         MessagingFee memory fee = _quote(dstEid, payload, lzOptions, false);
@@ -184,7 +195,7 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
         if (address(usdc) == address(0)) revert CctpNotConfigured();
 
         // Collect Magneta value-based fee (0.15% of USDC amount)
-        _collectCrossChainFee(usdcAmount);
+        _collectCrossChainFee(usdcAmount, 1);
 
         // Pull USDC from caller and burn via CCTP
         usdc.safeTransferFrom(msg.sender, address(this), usdcAmount);
@@ -250,7 +261,11 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
     }
 
     /// @notice Fan-out: broadcast the same op type to multiple chains in one tx.
-    ///         Fee is charged once per destination chain.
+    ///         The Magneta command fee is charged once per destination
+    ///         chain (e.g. fan-out to 5 chains = 5 × `crossChainCommandFee`).
+    ///         LayerZero native fees are charged per destination by the LZ
+    ///         endpoint itself; any excess `msg.value` is refunded to the
+    ///         caller at the end.
     /// @param dstEids              Target chain LZ endpoint IDs
     /// @param op                   Operation type for all destinations
     /// @param moduleParamsPerChain Per-chain module params (length must match dstEids)
@@ -266,7 +281,8 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
         if (n == 0) revert FanOutEmpty();
         if (moduleParamsPerChain.length != n) revert ArrayLengthMismatch();
 
-        _collectCrossChainFee(0);
+        // MG-3: charge the command fee once × n destinations (was once total).
+        _collectCrossChainFee(0, n);
 
         guids = new bytes32[](n);
         uint256 totalSpent;
@@ -313,7 +329,9 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
         uint256 totalUsdc;
         for (uint256 i; i < n; ++i) totalUsdc += usdcAmountsPerChain[i];
 
-        _collectCrossChainFee(totalUsdc);
+        // Value fee is proportional to total bridged USDC; nDestinations=1
+        // because we want one BPS application to the aggregate, not n.
+        _collectCrossChainFee(totalUsdc, 1);
 
         usdc.safeTransferFrom(msg.sender, address(this), totalUsdc);
         usdc.forceApprove(address(cctpMessenger), totalUsdc);
@@ -478,10 +496,13 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
     function setUsdc(address _usdc) external onlyOwner {
         require(_usdc != address(0), "MagnetaGateway: zero usdc");
         usdc = IERC20(_usdc);
+        emit UsdcSet(_usdc);
     }
 
     /// @notice Set cross-chain fees: flat command fee (USDC 6d) and value fee (BPS).
     function setCrossChainFees(uint256 commandFee, uint16 valueFeeBps) external onlyOwner {
+        require(commandFee <= MAX_CROSSCHAIN_COMMAND_FEE, "MagnetaGateway: commandFee too high");
+        require(valueFeeBps <= MAX_CROSSCHAIN_VALUE_FEE_BPS, "MagnetaGateway: valueFeeBps too high");
         crossChainCommandFee = commandFee;
         crossChainValueFeeBps = valueFeeBps;
         emit CrossChainFeesUpdated(commandFee, valueFeeBps);
@@ -500,6 +521,7 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
     /// @notice Map a destination LZ EID to its CCTP domain.
     function setEidCctpDomain(uint32 eid, uint32 cctpDomain) external onlyOwner {
         eidToCctpDomain[eid] = cctpDomain;
+        emit EidCctpDomainSet(eid, cctpDomain);
     }
 
     /// @notice Batch-set EID → CCTP domain mappings.
@@ -510,7 +532,37 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
         if (eids.length != domains.length) revert ArrayLengthMismatch();
         for (uint256 i; i < eids.length; ++i) {
             eidToCctpDomain[eids[i]] = domains[i];
+            emit EidCctpDomainSet(eids[i], domains[i]);
         }
+    }
+
+    // ─────────────────────────── rescue (MG-1) ───────────────────────────
+
+    /// @notice Owner-only rescue of arbitrary ERC20 stuck in the gateway.
+    ///         For the USDC bridged token, the rescue is bounded by
+    ///         `totalEarmarked` so it cannot dip into funds reserved for
+    ///         pending cross-chain value ops. Other tokens (donations or
+    ///         accidental sends) are rescuable in full.
+    function rescueERC20(address tokenAddr, address to, uint256 amount) external onlyOwner {
+        require(to != address(0), "MagnetaGateway: zero to");
+        require(amount > 0, "MagnetaGateway: zero amount");
+        if (tokenAddr == address(usdc)) {
+            uint256 balance = IERC20(tokenAddr).balanceOf(address(this));
+            require(balance >= totalEarmarked + amount, "MagnetaGateway: would dip into earmark");
+        }
+        IERC20(tokenAddr).safeTransfer(to, amount);
+        emit Rescued(tokenAddr, to, amount);
+    }
+
+    /// @notice Owner-only rescue of native (donated/refunded ETH) — the
+    ///         gateway never reads `address(this).balance` for accounting,
+    ///         so all native here is rescuable.
+    function rescueETH(address to, uint256 amount) external onlyOwner nonReentrant {
+        require(to != address(0), "MagnetaGateway: zero to");
+        require(amount > 0, "MagnetaGateway: zero amount");
+        (bool ok, ) = payable(to).call{value: amount}("");
+        require(ok, "MagnetaGateway: rescue failed");
+        emit Rescued(address(0), to, amount);
     }
 
     /// @notice Map a LayerZero endpoint ID to an EVM chain ID (bidirectional).
@@ -563,15 +615,19 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
     }
 
     /// @dev Collect Magneta fee in USDC on the source chain for cross-chain ops.
-    ///      valueUsdc6d = 0 for command ops (flat fee); >0 for value ops (BPS).
-    function _collectCrossChainFee(uint256 valueUsdc6d) internal {
-        if (address(usdc) == address(0)) return;
+    ///      valueUsdc6d = 0 for command ops (flat fee × nDestinations); >0 for
+    ///      value ops (BPS on aggregate value). Reverts if USDC not configured
+    ///      — silent-skip would let an unsetUsdc deployment process all
+    ///      cross-chain ops for free (MG-2).
+    function _collectCrossChainFee(uint256 valueUsdc6d, uint256 nDestinations) internal {
+        require(address(usdc) != address(0), "MagnetaGateway: usdc not set");
 
         uint256 fee;
         if (valueUsdc6d > 0 && crossChainValueFeeBps > 0) {
             fee = (valueUsdc6d * crossChainValueFeeBps) / 10_000;
         } else if (crossChainCommandFee > 0) {
-            fee = crossChainCommandFee;
+            // MG-3: command fee is per destination, not flat per call.
+            fee = crossChainCommandFee * nDestinations;
         }
 
         if (fee > 0) {
