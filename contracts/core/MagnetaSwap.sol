@@ -22,7 +22,7 @@ interface IMagnetaPoolSwap {
 contract MagnetaSwap is IMagnetaSwap, Ownable2Step, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
-    IMagnetaPoolSwap public poolContract;
+    IMagnetaPoolSwap public immutable poolContract;
 
     // Fee in basis points (100 = 1%)
     uint256 public constant FEE_BPS = 30; // 0.3%
@@ -34,8 +34,8 @@ contract MagnetaSwap is IMagnetaSwap, Ownable2Step, ReentrancyGuard {
     // Mapping to track if a token is whitelisted
     mapping(address => bool) public whitelistedTokens;
 
-    // Mapping to track token reserves (balance accounting)
-    mapping(address => uint256) public tokenReserves;
+    // Addresses exempt from swap fee (e.g. LPModule for cross-chain conversions)
+    mapping(address => bool) public feeExempt;
 
     // Paused state
     bool public paused;
@@ -43,12 +43,11 @@ contract MagnetaSwap is IMagnetaSwap, Ownable2Step, ReentrancyGuard {
     address public pauseGuardian;
 
     event TokenWhitelisted(address indexed token, bool whitelisted);
+    event FeeExemptUpdated(address indexed addr, bool exempt);
     event FeeRecipientUpdated(address indexed oldRecipient, address indexed newRecipient);
-    event Paused(address account);
-    event Unpaused(address account);
+    event Paused(address indexed account);
+    event Unpaused(address indexed account);
     event PauseGuardianUpdated(address indexed oldGuardian, address indexed newGuardian);
-    event LiquidityDeposited(address indexed token, uint256 amount, address indexed depositor);
-    event LiquidityWithdrawn(address indexed token, uint256 amount, address indexed recipient);
     event EmergencyWithdraw(address indexed token, uint256 amount, address indexed caller);
 
     modifier whenNotPaused() {
@@ -69,19 +68,8 @@ contract MagnetaSwap is IMagnetaSwap, Ownable2Step, ReentrancyGuard {
     }
 
     /**
-     * @dev Execute a token swap
-     * 
-     * @notice WARNING: This function is NOT production-ready. It requires proper AMM or pool 
-     * integration before use with real funds. The current implementation uses simplified pricing 
-     * and requires explicit liquidity deposits via `depositLiquidity`.
-     * 
-     * @param tokenIn Address of the input token
-     * @param tokenOut Address of the output token
-     * @param amountIn Amount of input tokens
-     * @param amountOutMin Minimum amount of output tokens (slippage protection)
-     * @param to Address to receive output tokens
-     * @param deadline Transaction deadline
-     * @return amountOut Amount of output tokens received
+     * @dev Execute a token swap via MagnetaPool (CPMM). Protocol fee (0.3%) is taken
+     *      before routing to the pool. Fee-exempt addresses (e.g. LPModule) skip the fee.
      */
     function swap(
         address tokenIn,
@@ -99,8 +87,8 @@ contract MagnetaSwap is IMagnetaSwap, Ownable2Step, ReentrancyGuard {
         // Transfer tokens from user
         IERC20(tokenIn).safeTransferFrom(msg.sender, address(this), amountIn);
 
-        // Take contract-level fee
-        uint256 fee = (amountIn * FEE_BPS) / 10000;
+        // Take contract-level fee (skip for exempt addresses like LPModule)
+        uint256 fee = feeExempt[msg.sender] ? 0 : (amountIn * FEE_BPS) / 10000;
         if (fee > 0) {
             IERC20(tokenIn).safeTransfer(feeRecipient, fee);
         }
@@ -159,6 +147,20 @@ contract MagnetaSwap is IMagnetaSwap, Ownable2Step, ReentrancyGuard {
         emit TokenWhitelisted(token, whitelisted);
     }
 
+    function whitelistTokenBatch(address[] calldata tokens, bool whitelisted) external onlyOwner {
+        for (uint256 i = 0; i < tokens.length; i++) {
+            require(tokens[i] != address(0), "MagnetaSwap: invalid token");
+            whitelistedTokens[tokens[i]] = whitelisted;
+            emit TokenWhitelisted(tokens[i], whitelisted);
+        }
+    }
+
+    function setFeeExempt(address addr, bool exempt) external onlyOwner {
+        require(addr != address(0), "MagnetaSwap: invalid address");
+        feeExempt[addr] = exempt;
+        emit FeeExemptUpdated(addr, exempt);
+    }
+
     /**
      * @dev Update fee recipient
      * @param _feeRecipient New fee recipient address
@@ -189,97 +191,23 @@ contract MagnetaSwap is IMagnetaSwap, Ownable2Step, ReentrancyGuard {
     }
 
     function setPauseGuardian(address _guardian) external onlyOwner {
+        require(_guardian != address(0), "MagnetaSwap: zero guardian");
         address old = pauseGuardian;
         pauseGuardian = _guardian;
         emit PauseGuardianUpdated(old, _guardian);
     }
 
     /**
-     * @dev Deposit liquidity for a token (only owner or authorized pool contract)
-     * @notice This function allows the owner to seed the contract with tokens for swaps.
-     * Tokens must be approved for transfer to this contract before calling.
-     * @param token Address of the token to deposit
-     * @param amount Amount of tokens to deposit
-     */
-    function depositLiquidity(address token, uint256 amount) external nonReentrant onlyOwner {
-        require(token != address(0), "MagnetaSwap: invalid token");
-        require(amount > 0, "MagnetaSwap: invalid amount");
-        require(whitelistedTokens[token], "MagnetaSwap: token not whitelisted");
-        
-        // Transfer tokens from caller
-        IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
-        
-        // Update reserves
-        tokenReserves[token] += amount;
-        
-        emit LiquidityDeposited(token, amount, msg.sender);
-    }
-
-    /**
-     * @dev Withdraw liquidity for a token (only owner)
-     * @notice This function allows the owner to withdraw excess tokens from the contract.
-     * @param token Address of the token to withdraw
-     * @param amount Amount of tokens to withdraw
-     */
-    function withdrawLiquidity(address token, uint256 amount) external nonReentrant onlyOwner {
-        require(token != address(0), "MagnetaSwap: invalid token");
-        require(amount > 0, "MagnetaSwap: invalid amount");
-        
-        // Check contract balance
-        uint256 contractBalance = IERC20(token).balanceOf(address(this));
-        require(contractBalance >= amount, "MagnetaSwap: insufficient balance");
-        
-        // Check reserves
-        require(tokenReserves[token] >= amount, "MagnetaSwap: insufficient reserves");
-        
-        // Update reserves
-        tokenReserves[token] -= amount;
-        
-        // Transfer tokens to owner
-        IERC20(token).safeTransfer(owner(), amount);
-        
-        emit LiquidityWithdrawn(token, amount, owner());
-    }
-
-    /**
-     * @dev Emergency withdraw tokens (only owner, only when paused)
-     * 
-     * @notice EMERGENCY FUNCTION - This function can only be called when the contract is paused.
-     * This is a critical security measure to prevent abuse and misconfiguration.
-     * 
-     * @notice Expected Emergency Process:
-     * 1. Owner detects a critical issue or vulnerability
-     * 2. Owner calls `pause()` to halt all swap operations
-     * 3. Owner calls `emergencyWithdraw()` to recover funds if necessary
-     * 4. After investigation and fixes, owner calls `unpause()` to resume operations
-     * 
-     * @notice This function does NOT update token reserves, making it suitable only for 
-     * emergency recovery scenarios. For normal operations, use `withdrawLiquidity()` instead.
-     * 
-     * @notice Security Considerations:
-     * - Uses `Ownable2Step` for two-step ownership transfer, reducing risk of compromised deployer key
-     * - Requires contract to be paused, preventing use during normal operations
-     * - Emits `EmergencyWithdraw` event for off-chain monitoring and traceability
-     * - Only owner can call this function
-     * 
-     * @param token Address of the token to withdraw
-     * @param amount Amount to withdraw
+     * @dev Emergency: recover tokens stuck in the router (only when paused).
+     *      MagnetaSwap should never hold tokens — all swaps route through MagnetaPool.
+     *      This covers edge cases like failed transfers or accidental sends.
      */
     function emergencyWithdraw(address token, uint256 amount) external nonReentrant onlyOwner whenPaused {
-        require(token != address(0), "MagnetaSwap: invalid token");
-        require(amount > 0, "MagnetaSwap: invalid amount");
-        
-        // Check contract balance
-        uint256 contractBalance = IERC20(token).balanceOf(address(this));
-        require(contractBalance >= amount, "MagnetaSwap: insufficient balance");
-        
-        // Transfer tokens to owner
+        require(token != address(0) && amount > 0, "MagnetaSwap: invalid");
+        uint256 bal = IERC20(token).balanceOf(address(this));
+        require(bal >= amount, "MagnetaSwap: insufficient balance");
         IERC20(token).safeTransfer(owner(), amount);
-        
-        // Emit event for off-chain traceability
         emit EmergencyWithdraw(token, amount, msg.sender);
-        
-        // Note: This does not update reserves - use only in emergencies
     }
 }
 

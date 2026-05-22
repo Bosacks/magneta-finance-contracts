@@ -12,6 +12,7 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 import "../interfaces/IMagnetaGateway.sol";
 import "../interfaces/IModule.sol";
+import "../interfaces/ICCTP.sol";
 
 /// @title MagnetaGateway
 /// @notice Per-chain facade for the chain-service SDK. Dispatches local calls
@@ -46,11 +47,37 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
     /// @notice Basis-point fee for value-carrying cross-chain ops. Default: 15 (0.15%).
     uint16 public crossChainValueFeeBps = 15;
 
+    /// @notice Circle CCTP TokenMessenger for burning/minting USDC cross-chain.
+    ITokenMessenger public cctpMessenger;
+
+    /// @notice CCTP domain of this chain (0=Eth, 1=Avax, 2=Op, 3=Arb, 6=Base, 7=Pol).
+    uint32 public localCctpDomain;
+
+    /// @notice Destination LZ EID → CCTP domain mapping.
+    mapping(uint32 => uint32) public eidToCctpDomain;
+
+    /// @notice Pending cross-chain value ops waiting for CCTP token arrival.
+    struct PendingValueOp {
+        OpType op;
+        address caller;
+        bytes params;
+        address bridgedToken;
+        uint256 bridgedAmount;
+        uint256 createdAt;
+    }
+    mapping(bytes32 => PendingValueOp) public pendingValueOps;
+
+    /// @notice Total USDC earmarked for pending value ops (prevents double-spend).
+    uint256 public totalEarmarked;
+
     error ModuleNotSet(OpType op);
     error ZeroAddress();
     error ArrayLengthMismatch();
     error InsufficientLzFee();
     error FanOutEmpty();
+    error NoPendingOp();
+    error TokensNotArrived();
+    error CctpNotConfigured();
 
     address public pauseGuardian;
     event PauseGuardianUpdated(address indexed oldGuardian, address indexed newGuardian);
@@ -58,6 +85,9 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
     event CrossChainFanOut(OpType indexed op, address indexed caller, uint256 chainCount);
     event EidMappingSet(uint32 eid, uint256 chainId);
     event CrossChainFeesUpdated(uint256 commandFee, uint16 valueFeeBps);
+    event ValueOpPending(bytes32 indexed guid, OpType indexed op, address indexed caller, address token, uint256 amount);
+    event ValueOpFulfilled(bytes32 indexed guid, OpType indexed op, address indexed caller);
+    event CctpConfigUpdated(address messenger, uint32 localDomain);
 
     modifier onlyOwnerOrGuardian() {
         require(
@@ -95,7 +125,8 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
         IModule.Context memory ctx = IModule.Context({
             caller: msg.sender,
             originChainId: block.chainid,
-            feeVault: _feeVault
+            feeVault: _feeVault,
+            tokenSource: address(0)
         });
 
         result = IModule(module).execute{value: msg.value}(ctx, params);
@@ -121,7 +152,7 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
     ) external payable override nonReentrant whenNotPaused returns (bytes32 guid) {
         _collectCrossChainFee(0);
 
-        bytes memory payload = abi.encode(op, msg.sender, moduleParams);
+        bytes memory payload = abi.encode(uint8(0), op, msg.sender, moduleParams);
         MessagingFee memory fee = _quote(dstEid, payload, lzOptions, false);
         if (msg.value < fee.nativeFee) revert InsufficientLzFee();
 
@@ -131,6 +162,91 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
         guid = receipt.guid;
 
         emit CrossChainOpSent(dstEid, op, msg.sender, guid);
+    }
+
+    // ───────────────────── cross-chain value ops ─────────────────────
+
+    /// @notice Send a cross-chain VALUE operation: bridge USDC via CCTP, then
+    ///         dispatch the op on the destination chain once tokens arrive.
+    /// @param dstEid         Target chain LZ endpoint ID
+    /// @param op             Operation to execute on destination
+    /// @param moduleParams   ABI-encoded params for the target module
+    /// @param usdcAmount     Amount of USDC to bridge (6 decimals)
+    /// @param lzOptions      LayerZero executor options
+    function sendCrossChainValueOp(
+        uint32 dstEid,
+        OpType op,
+        bytes calldata moduleParams,
+        uint256 usdcAmount,
+        bytes calldata lzOptions
+    ) external payable override nonReentrant whenNotPaused returns (bytes32 guid) {
+        if (address(cctpMessenger) == address(0)) revert CctpNotConfigured();
+        if (address(usdc) == address(0)) revert CctpNotConfigured();
+
+        // Collect Magneta value-based fee (0.15% of USDC amount)
+        _collectCrossChainFee(usdcAmount);
+
+        // Pull USDC from caller and burn via CCTP
+        usdc.safeTransferFrom(msg.sender, address(this), usdcAmount);
+
+        // CCTP mint recipient = the sibling gateway on destination chain
+        bytes32 peer = peers[dstEid];
+        require(peer != bytes32(0), "MagnetaGateway: no peer for dstEid");
+        bytes32 mintRecipient = peer; // peer is already bytes32-padded address
+
+        usdc.forceApprove(address(cctpMessenger), usdcAmount);
+        cctpMessenger.depositForBurn(
+            usdcAmount,
+            eidToCctpDomain[dstEid],
+            mintRecipient,
+            address(usdc)
+        );
+
+        // Send LZ command (version 1 = value op)
+        bytes memory payload = abi.encode(
+            uint8(1), op, msg.sender, moduleParams, address(usdc), usdcAmount
+        );
+        MessagingFee memory fee = _quote(dstEid, payload, lzOptions, false);
+        if (msg.value < fee.nativeFee) revert InsufficientLzFee();
+
+        MessagingReceipt memory receipt = _lzSend(
+            dstEid, payload, lzOptions, fee, payable(msg.sender)
+        );
+        guid = receipt.guid;
+
+        emit CrossChainOpSent(dstEid, op, msg.sender, guid);
+    }
+
+    /// @notice Fulfill a pending cross-chain value op after CCTP tokens have
+    ///         been minted to this gateway. Callable by anyone (permissionless
+    ///         — the op was already authorized by LZ message verification).
+    function fulfillValueOp(bytes32 _guid) external override nonReentrant whenNotPaused {
+        PendingValueOp memory p = pendingValueOps[_guid];
+        require(p.bridgedAmount > 0, "MagnetaGateway: no pending op");
+
+        uint256 available = IERC20(p.bridgedToken).balanceOf(address(this));
+        require(available >= totalEarmarked, "MagnetaGateway: tokens not arrived");
+
+        address module = _modules[p.op];
+        if (module == address(0)) revert ModuleNotSet(p.op);
+
+        totalEarmarked -= p.bridgedAmount;
+        delete pendingValueOps[_guid];
+
+        // Approve module to pull bridged tokens from this gateway
+        IERC20(p.bridgedToken).forceApprove(module, p.bridgedAmount);
+
+        IModule.Context memory ctx = IModule.Context({
+            caller: p.caller,
+            originChainId: 0, // cross-chain marker
+            feeVault: _feeVault,
+            tokenSource: address(this)
+        });
+
+        bytes memory result = IModule(module).execute(ctx, p.params);
+
+        emit ValueOpFulfilled(_guid, p.op, p.caller);
+        emit OperationExecuted(p.op, module, p.caller, 0, keccak256(result));
     }
 
     /// @notice Fan-out: broadcast the same op type to multiple chains in one tx.
@@ -156,7 +272,7 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
         uint256 totalSpent;
 
         for (uint256 i; i < n; ++i) {
-            bytes memory payload = abi.encode(op, msg.sender, moduleParamsPerChain[i]);
+            bytes memory payload = abi.encode(uint8(0), op, msg.sender, moduleParamsPerChain[i]);
             MessagingFee memory fee = _quote(dstEids[i], payload, lzOptions, false);
             MessagingReceipt memory receipt = _lzSend(
                 dstEids[i], payload, lzOptions, fee, payable(msg.sender)
@@ -179,6 +295,67 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
         emit CrossChainFanOut(op, msg.sender, n);
     }
 
+    /// @notice Fan-out VALUE op: bridge USDC via CCTP + send LZ messages to N chains.
+    ///         Each destination gets its own CCTP burn + version-1 LZ message.
+    ///         Fee is charged once on the total USDC amount.
+    function sendFanOutValueOp(
+        uint32[] calldata dstEids,
+        OpType op,
+        bytes[] calldata moduleParamsPerChain,
+        uint256[] calldata usdcAmountsPerChain,
+        bytes calldata lzOptions
+    ) external payable override nonReentrant whenNotPaused returns (bytes32[] memory guids) {
+        if (address(cctpMessenger) == address(0)) revert CctpNotConfigured();
+        uint256 n = dstEids.length;
+        if (n == 0) revert FanOutEmpty();
+        if (moduleParamsPerChain.length != n || usdcAmountsPerChain.length != n) revert ArrayLengthMismatch();
+
+        uint256 totalUsdc;
+        for (uint256 i; i < n; ++i) totalUsdc += usdcAmountsPerChain[i];
+
+        _collectCrossChainFee(totalUsdc);
+
+        usdc.safeTransferFrom(msg.sender, address(this), totalUsdc);
+        usdc.forceApprove(address(cctpMessenger), totalUsdc);
+
+        guids = new bytes32[](n);
+        uint256 totalLzSpent;
+
+        for (uint256 i; i < n; ++i) {
+            bytes32 peer = peers[dstEids[i]];
+            require(peer != bytes32(0), "MagnetaGateway: no peer for dstEid");
+
+            cctpMessenger.depositForBurn(
+                usdcAmountsPerChain[i],
+                eidToCctpDomain[dstEids[i]],
+                peer,
+                address(usdc)
+            );
+
+            bytes memory payload = abi.encode(
+                uint8(1), op, msg.sender, moduleParamsPerChain[i], address(usdc), usdcAmountsPerChain[i]
+            );
+            MessagingFee memory fee = _quote(dstEids[i], payload, lzOptions, false);
+            MessagingReceipt memory receipt = _lzSend(
+                dstEids[i], payload, lzOptions, fee, payable(msg.sender)
+            );
+            guids[i] = receipt.guid;
+            totalLzSpent += fee.nativeFee;
+
+            emit CrossChainOpSent(dstEids[i], op, msg.sender, receipt.guid);
+        }
+
+        if (msg.value < totalLzSpent) revert InsufficientLzFee();
+
+        uint256 excess = msg.value - totalLzSpent;
+        if (excess > 0) {
+            (bool ok,) = payable(msg.sender).call{value: excess}("");
+            require(ok, "MagnetaGateway: refund failed");
+        }
+
+        emit CrossChainFanOut(op, msg.sender, n);
+    }
+
     /// @notice Estimate LZ fee for a single cross-chain op.
     function quoteCrossChainFee(
         uint32 dstEid,
@@ -187,7 +364,7 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
         bytes calldata lzOptions,
         bool payInLzToken
     ) external view override returns (uint256 nativeFee, uint256 lzTokenFee) {
-        bytes memory payload = abi.encode(op, msg.sender, moduleParams);
+        bytes memory payload = abi.encode(uint8(0), op, msg.sender, moduleParams);
         MessagingFee memory fee = _quote(dstEid, payload, lzOptions, payInLzToken);
         nativeFee = fee.nativeFee;
         lzTokenFee = fee.lzTokenFee;
@@ -202,7 +379,7 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
         bool payInLzToken
     ) external view override returns (uint256 totalNativeFee, uint256 totalLzTokenFee) {
         for (uint256 i; i < dstEids.length; ++i) {
-            bytes memory payload = abi.encode(op, msg.sender, moduleParamsPerChain[i]);
+            bytes memory payload = abi.encode(uint8(0), op, msg.sender, moduleParamsPerChain[i]);
             MessagingFee memory fee = _quote(dstEids[i], payload, lzOptions, payInLzToken);
             totalNativeFee += fee.nativeFee;
             totalLzTokenFee += fee.lzTokenFee;
@@ -226,21 +403,44 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
         require(!processedGuid[_guid], "MagnetaGateway: guid already processed");
         processedGuid[_guid] = true;
 
-        (OpType op, address caller, bytes memory params) =
-            abi.decode(_payload, (OpType, address, bytes));
+        uint8 version = abi.decode(_payload[:32], (uint8));
 
-        address module = _modules[op];
-        if (module == address(0)) revert ModuleNotSet(op);
+        if (version == 0) {
+            // Command op — execute immediately
+            (, OpType op, address caller, bytes memory params) =
+                abi.decode(_payload, (uint8, OpType, address, bytes));
 
-        IModule.Context memory ctx = IModule.Context({
-            caller: caller,
-            originChainId: _srcEidToChainId(_origin.srcEid),
-            feeVault: _feeVault
-        });
+            address module = _modules[op];
+            if (module == address(0)) revert ModuleNotSet(op);
 
-        bytes memory result = IModule(module).execute(ctx, params);
+            IModule.Context memory ctx = IModule.Context({
+                caller: caller,
+                originChainId: _srcEidToChainId(_origin.srcEid),
+                feeVault: _feeVault,
+                tokenSource: address(0)
+            });
 
-        emit OperationExecuted(op, module, caller, ctx.originChainId, keccak256(result));
+            bytes memory result = IModule(module).execute(ctx, params);
+            emit OperationExecuted(op, module, caller, ctx.originChainId, keccak256(result));
+
+        } else if (version == 1) {
+            // Value op — store as pending, wait for CCTP tokens
+            (, OpType op, address caller, bytes memory params,
+             address bridgedToken, uint256 bridgedAmount) =
+                abi.decode(_payload, (uint8, OpType, address, bytes, address, uint256));
+
+            pendingValueOps[_guid] = PendingValueOp({
+                op: op,
+                caller: caller,
+                params: params,
+                bridgedToken: bridgedToken,
+                bridgedAmount: bridgedAmount,
+                createdAt: block.timestamp
+            });
+            totalEarmarked += bridgedAmount;
+
+            emit ValueOpPending(_guid, op, caller, bridgedToken, bridgedAmount);
+        }
     }
 
     // ───────────────────────────── admin ─────────────────────────────
@@ -268,6 +468,7 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
     }
 
     function setPauseGuardian(address _guardian) external onlyOwner {
+        require(_guardian != address(0), "MagnetaGateway: zero guardian");
         address old = pauseGuardian;
         pauseGuardian = _guardian;
         emit PauseGuardianUpdated(old, _guardian);
@@ -275,6 +476,7 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
 
     /// @notice Set the USDC token used for cross-chain fee collection.
     function setUsdc(address _usdc) external onlyOwner {
+        require(_usdc != address(0), "MagnetaGateway: zero usdc");
         usdc = IERC20(_usdc);
     }
 
@@ -283,6 +485,32 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
         crossChainCommandFee = commandFee;
         crossChainValueFeeBps = valueFeeBps;
         emit CrossChainFeesUpdated(commandFee, valueFeeBps);
+    }
+
+    /// @notice Configure Circle CCTP for cross-chain USDC bridging.
+    /// @dev Note: localDomain may be 0 (Ethereum mainnet is Circle CCTP domain 0).
+    ///      Only the messenger address is required to be non-zero.
+    function setCctp(address messenger, uint32 _localDomain) external onlyOwner {
+        require(messenger != address(0), "MagnetaGateway: zero messenger");
+        cctpMessenger = ITokenMessenger(messenger);
+        localCctpDomain = _localDomain;
+        emit CctpConfigUpdated(messenger, _localDomain);
+    }
+
+    /// @notice Map a destination LZ EID to its CCTP domain.
+    function setEidCctpDomain(uint32 eid, uint32 cctpDomain) external onlyOwner {
+        eidToCctpDomain[eid] = cctpDomain;
+    }
+
+    /// @notice Batch-set EID → CCTP domain mappings.
+    function setEidCctpDomainBatch(
+        uint32[] calldata eids,
+        uint32[] calldata domains
+    ) external onlyOwner {
+        if (eids.length != domains.length) revert ArrayLengthMismatch();
+        for (uint256 i; i < eids.length; ++i) {
+            eidToCctpDomain[eids[i]] = domains[i];
+        }
     }
 
     /// @notice Map a LayerZero endpoint ID to an EVM chain ID (bidirectional).

@@ -86,6 +86,7 @@ contract SwapModule is IModule, ReentrancyGuard, Ownable {
     }
 
     function setCctpMessenger(address messenger) external onlyOwner {
+        require(messenger != address(0), "SwapModule: zero messenger");
         emit CctpMessengerSet(cctpMessenger, messenger);
         cctpMessenger = messenger;
     }
@@ -129,6 +130,21 @@ contract SwapModule is IModule, ReentrancyGuard, Ownable {
         bool inNative  = (p.tokenIn  == address(0));
         bool outNative = (p.tokenOut == address(0));
 
+        // SSP_127138_377 — Path/tokenOut consistency check.
+        // Without this, a caller could request a swap WETH→DAI (path=[WETH,DAI])
+        // while declaring tokenOut=USDC. The router would output DAI to the
+        // module, but `_sendOut(p.tokenOut, ...)` would transfer USDC the
+        // module happens to hold from previous operations. Bug: arbitrary
+        // ERC20 drain. Fix: enforce that the last token in `path` matches the
+        // declared output token (or its WETH wrapping for native outputs).
+        require(p.path.length >= 2, "path too short");
+        address pathEnd = p.path[p.path.length - 1];
+        if (outNative) {
+            require(pathEnd == IV2RouterSwap(router).WETH(), "path end != WETH");
+        } else {
+            require(pathEnd == p.tokenOut, "path end != tokenOut");
+        }
+
         uint256 amountOut;
         if (inNative) {
             if (msg.value != p.amountIn) revert EthMismatch();
@@ -137,7 +153,7 @@ contract SwapModule is IModule, ReentrancyGuard, Ownable {
             );
             amountOut = amts[amts.length - 1];
         } else {
-            IERC20(p.tokenIn).safeTransferFrom(ctx.caller, address(this), p.amountIn);
+            _pullToken(ctx, p.tokenIn, p.amountIn);
             IERC20(p.tokenIn).forceApprove(router, p.amountIn);
 
             if (outNative) {
@@ -189,7 +205,7 @@ contract SwapModule is IModule, ReentrancyGuard, Ownable {
                 p.amountOutMin, p.path, address(this), p.deadline
             );
         } else {
-            IERC20(p.tokenIn).safeTransferFrom(ctx.caller, address(this), p.amountIn);
+            _pullToken(ctx, p.tokenIn, p.amountIn);
             IERC20(p.tokenIn).forceApprove(router, p.amountIn);
             IV2RouterSwap(router).swapExactTokensForTokens(
                 p.amountIn, p.amountOutMin, p.path, address(this), p.deadline
@@ -210,6 +226,11 @@ contract SwapModule is IModule, ReentrancyGuard, Ownable {
     }
 
     // ───────────────────── internals ─────────────────────
+
+    function _pullToken(Context calldata ctx, address token, uint256 amount) internal {
+        address src = ctx.tokenSource != address(0) ? ctx.tokenSource : ctx.caller;
+        IERC20(token).safeTransferFrom(src, address(this), amount);
+    }
 
     function _sendOut(address token, address to, uint256 amount) internal {
         if (amount == 0) return;
