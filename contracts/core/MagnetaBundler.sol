@@ -3,7 +3,7 @@ pragma solidity 0.8.20;
 
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/security/Pausable.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/access/Ownable2Step.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
@@ -20,7 +20,7 @@ interface IUniswapV2Router02 {
     function WETH() external pure returns (address);
 }
 
-contract MagnetaBundler is ReentrancyGuard, Pausable, Ownable {
+contract MagnetaBundler is ReentrancyGuard, Pausable, Ownable2Step {
     using SafeERC20 for IERC20;
 
     address public router;
@@ -29,10 +29,33 @@ contract MagnetaBundler is ReentrancyGuard, Pausable, Ownable {
     ///         "fees stay in contract, owner rescues" behavior.
     address public feeRecipient;
 
+    /// @notice Hard cap on the native amount forwarded as fee in a single
+    ///         transaction. Defends against a buggy frontend sending an
+    ///         excessive msg.value (which `_forwardFee` would otherwise
+    ///         route in full to feeRecipient). Default = 1 native unit;
+    ///         owner can adjust per-chain since 1 unit denominates
+    ///         differently across deployments.
+    uint256 public maxFeePerTx = 1 ether;
+
+    /// @notice Optional fast-pause role. When set, can pause the contract
+    ///         without going through the owner Safe (consistent with the
+    ///         pause-guardian pattern elsewhere in Magneta).
+    address public pauseGuardian;
+
     event BundleBuy(address indexed sender, address token, uint256 totalEthAmount, uint256 successCount);
     event BundleSell(address indexed sender, address token, uint256 totalTokenAmount, uint256 successCount);
     event FeeRecipientUpdated(address indexed oldRecipient, address indexed newRecipient);
     event FeeForwarded(address indexed to, uint256 amount);
+    event MaxFeePerTxUpdated(uint256 oldCap, uint256 newCap);
+    event PauseGuardianUpdated(address indexed oldGuardian, address indexed newGuardian);
+
+    modifier onlyOwnerOrGuardian() {
+        require(
+            msg.sender == owner() || msg.sender == pauseGuardian,
+            "MagnetaBundler: not owner or guardian"
+        );
+        _;
+    }
 
     constructor(address _router, address _feeRecipient) {
         require(_router != address(0), "Invalid router");
@@ -48,6 +71,10 @@ contract MagnetaBundler is ReentrancyGuard, Pausable, Ownable {
     ///         Magneta FeeVault without manual rescueETH.
     function _forwardFee(uint256 amount) internal {
         if (amount == 0 || feeRecipient == address(0)) return;
+        // Hard cap to neutralise a buggy/malicious frontend that sends
+        // far more native than intended as fee. Owner can update the cap
+        // via setMaxFeePerTx for chains where 1 native unit is too low.
+        require(amount <= maxFeePerTx, "MagnetaBundler: fee exceeds cap");
         (bool ok, ) = payable(feeRecipient).call{value: amount}("");
         require(ok, "fee forward failed");
         emit FeeForwarded(feeRecipient, amount);
@@ -350,6 +377,8 @@ contract MagnetaBundler is ReentrancyGuard, Pausable, Ownable {
     }
 
     function rescueTokens(address token, uint256 amount) external onlyOwner {
+        require(token != address(0), "MagnetaBundler: zero token");
+        require(amount > 0, "MagnetaBundler: zero amount");
         IERC20(token).safeTransfer(msg.sender, amount);
     }
 
@@ -358,7 +387,22 @@ contract MagnetaBundler is ReentrancyGuard, Pausable, Ownable {
         require(success, "Transfer failed");
     }
 
-    function pause() external onlyOwner {
+    /// @notice Update the per-tx fee cap. Owner-only. Useful on chains
+    ///         where 1 native unit denominates an unusual value
+    ///         (e.g. cheap-native L2s where legitimate fees exceed 1 unit).
+    function setMaxFeePerTx(uint256 newCap) external onlyOwner {
+        require(newCap > 0, "MagnetaBundler: zero cap");
+        emit MaxFeePerTxUpdated(maxFeePerTx, newCap);
+        maxFeePerTx = newCap;
+    }
+
+    /// @notice Set the fast-pause guardian. Set to address(0) to disable.
+    function setPauseGuardian(address _guardian) external onlyOwner {
+        emit PauseGuardianUpdated(pauseGuardian, _guardian);
+        pauseGuardian = _guardian;
+    }
+
+    function pause() external onlyOwnerOrGuardian {
         _pause();
     }
 
