@@ -94,4 +94,39 @@ describe("MagnetaFactory", function () {
         const poolId = await standardPool.getPool(await token0.getAddress(), await token1.getAddress(), 30);
         expect(poolId).to.equal(1);
     });
+
+    describe("Input validation (MF-2 / MF-4 hardening)", function () {
+        it("createMultiPool reverts when swapFee exceeds MAX_SWAP_FEE_WAD (10%)", async function () {
+            const tokens = [await token0.getAddress(), await token1.getAddress()];
+            const weights = [ethers.parseEther("0.5"), ethers.parseEther("0.5")];
+
+            // MAX_SWAP_FEE_WAD = 1e17 (10%). 1.5e17 should revert.
+            const tooHighFee = ethers.parseEther("0.15");
+            await expect(
+                factory.createMultiPool("Bad Pool", "BAD", tokens, weights, tooHighFee)
+            ).to.be.revertedWith("MagnetaFactory: swapFee too high");
+
+            // Exactly at the cap is allowed.
+            const atCap = ethers.parseEther("0.1");
+            await expect(
+                factory.createMultiPool("Capped", "CAP", tokens, weights, atCap)
+            ).to.not.be.reverted;
+        });
+
+        it("createStandardPool reverts on zero-address token0 or token1", async function () {
+            await standardPool.setPoolCreationEnabled(true);
+
+            await expect(
+                factory.createStandardPool(ethers.ZeroAddress, await token1.getAddress(), 30)
+            ).to.be.revertedWith("MagnetaFactory: zero token");
+
+            await expect(
+                factory.createStandardPool(await token0.getAddress(), ethers.ZeroAddress, 30)
+            ).to.be.revertedWith("MagnetaFactory: zero token");
+        });
+
+        it("MAX_SWAP_FEE_WAD constant is exposed and equals 1e17", async function () {
+            expect(await factory.MAX_SWAP_FEE_WAD()).to.equal(ethers.parseEther("0.1"));
+        });
+    });
 });
