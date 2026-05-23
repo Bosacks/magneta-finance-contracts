@@ -4,10 +4,16 @@ pragma solidity 0.8.20;
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/access/Ownable2Step.sol";
 
 import "../interfaces/IModule.sol";
 import "../interfaces/IMagnetaGateway.sol";
+import "../interfaces/IMagnetaSwap.sol";
+
+interface IWETH {
+    function deposit() external payable;
+    function withdraw(uint256 amount) external;
+}
 
 interface IUniswapV2Router02 {
     function factory() external pure returns (address);
@@ -49,6 +55,7 @@ interface IUniswapV2Router02 {
         address to,
         uint deadline
     ) external payable returns (uint[] memory amounts);
+
 }
 
 interface IUniswapV2Factory {
@@ -63,7 +70,7 @@ interface IUniswapV2Factory {
 /// @dev    Called exclusively by MagnetaGateway. Pulls user tokens/native via
 ///         the gateway context caller. Magneta markup (0.15% of value) is
 ///         taken in USDC and sent to the gateway feeVault.
-contract LPModule is IModule, ReentrancyGuard, Ownable {
+contract LPModule is IModule, ReentrancyGuard, Ownable2Step {
     using SafeERC20 for IERC20;
 
     uint16 public constant FEE_BPS = 15;                   // 0.15%
@@ -73,6 +80,7 @@ contract LPModule is IModule, ReentrancyGuard, Ownable {
     address public immutable gateway;
     address public immutable router;
     address public immutable usdc;
+    address public immutable magnetaSwap;
 
     event LPCreated(address indexed caller, address indexed token, uint256 amountToken, uint256 amountETH, uint256 liquidity);
     event LPRemoved(address indexed caller, address indexed token, uint256 liquidity, uint256 amountToken, uint256 amountETH);
@@ -82,17 +90,20 @@ contract LPModule is IModule, ReentrancyGuard, Ownable {
     error InvalidParams();
     error UnsupportedOp();
 
-    constructor(address _gateway, address _router, address _usdc) {
-        require(_gateway != address(0) && _router != address(0) && _usdc != address(0), "zero address");
+    constructor(address _gateway, address _router, address _usdc, address _magnetaSwap) {
+        require(_gateway != address(0) && _router != address(0) && _usdc != address(0) && _magnetaSwap != address(0), "zero address");
         gateway = _gateway;
         router = _router;
         usdc = _usdc;
+        magnetaSwap = _magnetaSwap;
     }
 
     modifier onlyGateway() {
         if (msg.sender != gateway) revert OnlyGateway();
         _;
     }
+
+    receive() external payable {}
 
     /// @inheritdoc IModule
     /// @dev Dispatches by the first byte of `params`: it carries the OpType so
@@ -109,6 +120,9 @@ contract LPModule is IModule, ReentrancyGuard, Ownable {
         bytes calldata inner = params[1:];
 
         if (op == IMagnetaGateway.OpType.CREATE_LP) {
+            if (ctx.tokenSource != address(0)) {
+                return _createLPFromBridgedUsdc(ctx, inner);
+            }
             return _createLP(ctx, inner);
         } else if (op == IMagnetaGateway.OpType.REMOVE_LP) {
             return _removeLP(ctx, inner);
@@ -138,7 +152,7 @@ contract LPModule is IModule, ReentrancyGuard, Ownable {
 
         _collectFee(ctx, p.usdcFee);
 
-        IERC20(p.token).safeTransferFrom(ctx.caller, address(this), p.tokenAmount);
+        _pullToken(ctx, p.token, p.tokenAmount);
         IERC20(p.token).forceApprove(router, p.tokenAmount);
 
         (uint256 amountToken, uint256 amountETH, uint256 liquidity) = IUniswapV2Router02(router).addLiquidityETH{value: p.ethAmount}(
@@ -171,7 +185,7 @@ contract LPModule is IModule, ReentrancyGuard, Ownable {
         address pair = IUniswapV2Factory(IUniswapV2Router02(router).factory()).getPair(p.token, weth);
         require(pair != address(0), "no pair");
 
-        IERC20(pair).safeTransferFrom(ctx.caller, address(this), p.liquidity);
+        _pullToken(ctx, pair, p.liquidity);
         IERC20(pair).forceApprove(router, p.liquidity);
 
         (uint256 amountToken, uint256 amountETH) = IUniswapV2Router02(router).removeLiquidity(
@@ -199,7 +213,8 @@ contract LPModule is IModule, ReentrancyGuard, Ownable {
         address pair = IUniswapV2Factory(IUniswapV2Router02(router).factory()).getPair(p.token, weth);
         require(pair != address(0), "no pair");
 
-        IERC20(pair).safeTransferFrom(ctx.caller, DEAD, p.liquidity);
+        address src = ctx.tokenSource != address(0) ? ctx.tokenSource : ctx.caller;
+        IERC20(pair).safeTransferFrom(src, DEAD, p.liquidity);
         emit LPBurned(ctx.caller, p.token, p.liquidity);
         return abi.encode(p.liquidity);
     }
@@ -217,7 +232,7 @@ contract LPModule is IModule, ReentrancyGuard, Ownable {
 
         _collectFee(ctx, p.lp.usdcFee);
 
-        IERC20(p.lp.token).safeTransferFrom(ctx.caller, address(this), p.lp.tokenAmount);
+        _pullToken(ctx, p.lp.token, p.lp.tokenAmount);
         IERC20(p.lp.token).forceApprove(router, p.lp.tokenAmount);
 
         (uint256 amountToken, uint256 amountETH, uint256 liquidity) = IUniswapV2Router02(router).addLiquidityETH{value: p.lp.ethAmount}(
@@ -243,6 +258,67 @@ contract LPModule is IModule, ReentrancyGuard, Ownable {
         return abi.encode(amountToken, amountETH, liquidity, amounts[amounts.length - 1]);
     }
 
+    // ───────────────── cross-chain LP from bridged USDC ──────────────────
+
+    struct CrossChainLPParams {
+        address token;
+        uint256 usdcTotal;
+        uint16  tokenShareBps;    // e.g. 5000 = 50% USDC → token, rest → native
+        uint256 amountTokenMin;   // min token out from USDC→token swap
+        uint256 amountNativeMin;  // min native out from USDC→native swap
+        uint256 lpAmountTokenMin; // min token accepted by addLiquidityETH
+        uint256 lpAmountNativeMin;// min native accepted by addLiquidityETH
+        uint256 deadline;
+    }
+
+    event LPCreatedFromUsdc(
+        address indexed caller, address indexed token,
+        uint256 usdcUsed, uint256 amountToken, uint256 amountNative, uint256 liquidity
+    );
+
+    function _createLPFromBridgedUsdc(Context calldata ctx, bytes calldata raw) internal returns (bytes memory) {
+        CrossChainLPParams memory p = abi.decode(raw, (CrossChainLPParams));
+        require(p.tokenShareBps > 0 && p.tokenShareBps < 10_000, "bad share");
+
+        _pullToken(ctx, usdc, p.usdcTotal);
+
+        uint256 usdcForToken = (p.usdcTotal * p.tokenShareBps) / 10_000;
+        uint256 usdcForNative = p.usdcTotal - usdcForToken;
+        address weth = IUniswapV2Router02(router).WETH();
+
+        // USDC → token via MagnetaSwap
+        IERC20(usdc).forceApprove(magnetaSwap, p.usdcTotal);
+        uint256 tokenReceived = IMagnetaSwap(magnetaSwap).swap(
+            usdc, p.token, usdcForToken, p.amountTokenMin, address(this), p.deadline
+        );
+
+        // USDC → WETH via MagnetaSwap, then unwrap to native
+        uint256 wethReceived = IMagnetaSwap(magnetaSwap).swap(
+            usdc, weth, usdcForNative, p.amountNativeMin, address(this), p.deadline
+        );
+        IWETH(weth).withdraw(wethReceived);
+        uint256 nativeReceived = wethReceived;
+
+        // Add liquidity: token + native → LP via V2 router
+        IERC20(p.token).forceApprove(router, tokenReceived);
+        (uint256 amountToken, uint256 amountETH, uint256 liquidity) = IUniswapV2Router02(router)
+            .addLiquidityETH{value: nativeReceived}(
+                p.token, tokenReceived, p.lpAmountTokenMin, p.lpAmountNativeMin, ctx.caller, p.deadline
+            );
+
+        // Refund dust to user (same address on destination EVM chain)
+        uint256 tokenDust = tokenReceived - amountToken;
+        if (tokenDust > 0) IERC20(p.token).safeTransfer(ctx.caller, tokenDust);
+        uint256 nativeDust = nativeReceived - amountETH;
+        if (nativeDust > 0) {
+            (bool ok, ) = ctx.caller.call{value: nativeDust}("");
+            require(ok, "native refund failed");
+        }
+
+        emit LPCreatedFromUsdc(ctx.caller, p.token, p.usdcTotal, amountToken, amountETH, liquidity);
+        return abi.encode(amountToken, amountETH, liquidity);
+    }
+
     // ───────────────────── fees ─────────────────────
 
     /// @dev Pulls `amount` USDC from ctx.caller into the gateway's feeVault.
@@ -252,5 +328,11 @@ contract LPModule is IModule, ReentrancyGuard, Ownable {
         if (amount == 0) return;
         if (ctx.originChainId != block.chainid) return;
         IERC20(usdc).safeTransferFrom(ctx.caller, ctx.feeVault, amount);
+    }
+
+    /// @dev Pull tokens from tokenSource (cross-chain) or caller (local).
+    function _pullToken(Context calldata ctx, address token, uint256 amount) internal {
+        address src = ctx.tokenSource != address(0) ? ctx.tokenSource : ctx.caller;
+        IERC20(token).safeTransferFrom(src, address(this), amount);
     }
 }
