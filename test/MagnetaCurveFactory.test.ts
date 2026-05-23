@@ -183,6 +183,41 @@ describe("MagnetaCurveFactory — Sentinelle hardening", function () {
     });
   });
 
+  describe("MagnetaCurveToken hardening (Sentinelle MED SC01 + LOW SC03)", function () {
+    it("factory() returns the deploying MagnetaCurveFactory address", async function () {
+      const tx = await curveFactory.connect(alice).createCurveToken(
+        "Tok", "T", "ipfs://t", TOTAL_SUPPLY, CURVE_ALLOC, VIRTUAL_RES, GRAD_THRESH,
+      );
+      const receipt = await tx.wait();
+      const event = receipt!.logs.find((l: any) => {
+        try { return curveFactory.interface.parseLog(l as any)?.name === "CurveTokenCreated"; }
+        catch { return false; }
+      });
+      const parsed = curveFactory.interface.parseLog(event as any);
+      const tokenAddr: string = parsed!.args.token;
+      const token = await ethers.getContractAt("MagnetaCurveToken", tokenAddr);
+      expect(await token.factory()).to.equal(await curveFactory.getAddress());
+    });
+
+    it("burnFrom always reverts (allowance-griefing surface closed)", async function () {
+      const tx = await curveFactory.connect(alice).createCurveToken(
+        "Tok2", "T2", "ipfs://t", TOTAL_SUPPLY, CURVE_ALLOC, VIRTUAL_RES, GRAD_THRESH,
+      );
+      const receipt = await tx.wait();
+      const event = receipt!.logs.find((l: any) => {
+        try { return curveFactory.interface.parseLog(l as any)?.name === "CurveTokenCreated"; }
+        catch { return false; }
+      });
+      const parsed = curveFactory.interface.parseLog(event as any);
+      const tokenAddr: string = parsed!.args.token;
+      const token = await ethers.getContractAt("MagnetaCurveToken", tokenAddr);
+
+      await expect(
+        token.connect(alice).burnFrom(owner.address, 1n),
+      ).to.be.revertedWithCustomError(token, "BurnFromDisabled");
+    });
+  });
+
   describe("MEDIUM SC10 — paginated getters", function () {
     beforeEach(async function () {
       // Create 5 tokens for pagination tests

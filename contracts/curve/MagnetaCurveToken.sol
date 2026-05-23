@@ -30,7 +30,18 @@ contract MagnetaCurveToken is ERC20, ERC20Burnable {
     /// @notice The curve creator (informational — no admin powers attached).
     address public immutable creator;
 
+    /// @notice Address that deployed this token. Used by UIs / indexers to
+    ///         verify factory provenance — only tokens whose `factory()`
+    ///         returns the canonical MagnetaCurveFactory address should be
+    ///         displayed as fair-launch tokens. Anyone can deploy this
+    ///         bytecode standalone, so source-code match alone is NOT
+    ///         enough to assert legitimacy (Sentinelle MEDIUM SC01
+    ///         2026-05-22).
+    address public immutable factory;
+
     event MetadataSet(string uri);
+
+    error BurnFromDisabled();
 
     /**
      * @param name_         ERC20 name
@@ -57,6 +68,7 @@ contract MagnetaCurveToken is ERC20, ERC20Burnable {
 
         _tokenURI = uri_;
         creator   = creator_;
+        factory   = msg.sender;
         _mint(initialHolder, totalSupply_);
         emit MetadataSet(uri_);
     }
@@ -64,5 +76,15 @@ contract MagnetaCurveToken is ERC20, ERC20Burnable {
     /// @notice Off-chain metadata URI.
     function tokenURI() external view returns (string memory) {
         return _tokenURI;
+    }
+
+    /// @dev Disable third-party `burnFrom` to neutralise the
+    ///      allowance-griefing surface: a user who approves a router /
+    ///      curve pool / OFT adapter for full balance could otherwise
+    ///      have those tokens permanently burned by a compromised approvee
+    ///      instead of transferred (Sentinelle LOW SC03 2026-05-22).
+    ///      Self-burn via `burn()` remains available.
+    function burnFrom(address /*account*/, uint256 /*value*/) public pure override {
+        revert BurnFromDisabled();
     }
 }
