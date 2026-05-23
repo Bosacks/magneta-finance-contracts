@@ -1,6 +1,19 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.20;
 
+/// ⚠️ NOT FOR PRODUCTION ⚠️
+///
+/// MagnetaLending is V1.1+ scope — lending / flash-loan surface is
+/// outside V1 launch. Sentinelle Multi-AI 2026-05-22 returned
+/// CAUTION 52/100 with:
+///   - HIGH SC02: borrow() and flashLoan() use raw
+///     `balanceOf(address(this))` for collateral / liquidity math,
+///     making them trivially manipulable via direct ERC20 donations
+///     (Venus Protocol March 2026 $2M+ pattern).
+/// Replace balanceOf with internal per-token reserve accounting
+/// before any production use. Do NOT deploy until the V1.1 audit
+/// pass is complete.
+
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";

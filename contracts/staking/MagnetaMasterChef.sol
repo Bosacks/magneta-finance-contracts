@@ -1,6 +1,17 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.20;
 
+/// ⚠️ NOT FOR PRODUCTION ⚠️
+///
+/// MagnetaMasterChef is V1.1+ scope — staking is outside V1 launch.
+/// Sentinelle Multi-AI 2026-05-22 returned CAUTION 62/100 with:
+///   - HIGH SC01: all privileged ops (addPool/setPool/setRewardsPerSecond/
+///     setEndTime/fundRewards) gated by single-EOA Ownable with no
+///     timelock or multisig. Drift Protocol / TrustedVolumes 2026 pattern.
+///   - LOW SC01: single-step Ownable (no Ownable2Step).
+/// Migrate to Ownable2Step + transfer ownership to a Safe with timelock
+/// before any production use.
+
 import { IERC20 }          from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { SafeERC20 }       from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { Ownable }         from "@openzeppelin/contracts/access/Ownable.sol";

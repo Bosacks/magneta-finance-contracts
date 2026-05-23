@@ -1,6 +1,23 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.20;
 
+/// ⚠️ NOT FOR PRODUCTION ⚠️
+///
+/// MagnetaStakingRewards is V1.1+ scope — staking is outside V1 launch.
+/// Sentinelle Multi-AI 2026-05-22 returned CAUTION 58/100 with:
+///   - HIGH SC02 ACC-1: notifyRewardAmount uses
+///     `balanceOf(address(this))` for solvency check; attacker can
+///     game it via direct ERC20 transfer to double-count already-owed
+///     rewards (Venus Protocol March 2026 pattern).
+///   - HIGH SC01: rescueERC20 lets owner drain reward tokens that are
+///     economically owed to users who unstaked-but-not-yet-claimed.
+///   - HIGH SC01: centralized single-EOA ownership across all
+///     privileged functions.
+///   - MEDIUM: fee-on-transfer token risk; reward truncation.
+/// Rework: internal accounting for reward token, scope rescueERC20 to
+/// non-reward tokens only, migrate to Safe + timelock. Do NOT deploy
+/// to production until V1.1 audit pass complete.
+
 import { IERC20 }          from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { SafeERC20 }       from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { Ownable }         from "@openzeppelin/contracts/access/Ownable.sol";

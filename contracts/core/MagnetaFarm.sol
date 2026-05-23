@@ -1,6 +1,19 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.20;
 
+/// ⚠️ NOT FOR PRODUCTION ⚠️
+///
+/// MagnetaFarm is V1.1+ scope — staking is outside Magneta V1 launch.
+/// Sentinelle Multi-AI 2026-05-22 returned CAUTION 72/100 with:
+///   - MEDIUM SC04: withdrawNFT reads external pool.positions() to
+///     determine the deduct amount; if the NFT's underlying liquidity
+///     changed since deposit (fee accrual, partial removal in the
+///     source pool), accounting drift / underflow panics are possible.
+///   - MEDIUM SC06: emergencyRewardWithdraw is owner-callable with no
+///     cap or timelock — drains all reward tokens unilaterally.
+/// Rework these before enabling on production. Do NOT register this
+/// contract as a Gateway target until the V1.1 audit pass is complete.
+
 import "@openzeppelin/contracts/access/Ownable2Step.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";

@@ -1,6 +1,24 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.20;
 
+/// ⚠️ NOT FOR PRODUCTION ⚠️
+///
+/// MagnetaMultiPool is V1.1+ scope — Magneta V1 ships V2-only AMM
+/// (MagnetaPool) for the launcher. This contract is referenced by
+/// MagnetaFactory.createMultiPool but the factory's `liquidityAdditionEnabled`
+/// gate keeps the public surface disabled until rework.
+///
+/// Sentinelle Multi-AI 2026-05-22 returned FAIL 22/100 with 3 HIGH SC02
+/// findings: addLiquidity, removeLiquidity, and swap all derive
+/// pricing/share math from `balanceOf(address(this))`, which is
+/// manipulable via direct ERC20 donation (Venus Protocol March 2026
+/// $2M+ pattern). Pre-deployment rework MUST replace balanceOf with
+/// per-token internal reserve tracking. Also documented:
+/// MEDIUM SC06 — Balancer weighted-pool formula not actually
+/// implemented; LOW — weight-equality enforced at swap but free at
+/// constructor. Track as V1.1 refactor; do NOT enable on factory
+/// until resolved.
+
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";

@@ -1,6 +1,17 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.20;
 
+/// ⚠️ NOT FOR PRODUCTION ⚠️
+///
+/// MagnetaStakingFactory is V1.1+ scope — staking is outside V1 launch.
+/// Sentinelle Multi-AI 2026-05-22 returned CAUTION 62/100 with:
+///   - MEDIUM SC01 OWN-1: single-step Ownable.
+///   - MEDIUM SC05 FACT-2: createPool() lacks zero-address validation
+///     on stakingToken and rewardsToken, can produce permanently
+///     bricked pools.
+/// Migrate to Ownable2Step, add createPool input validation, and
+/// transfer ownership to a Safe before any production use.
+
 import { Ownable }              from "@openzeppelin/contracts/access/Ownable.sol";
 import { ReentrancyGuard }      from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import { MagnetaStakingRewards } from "./MagnetaStakingRewards.sol";
