@@ -417,6 +417,47 @@ describe("SwapModule", function () {
         expect(await usdc.balanceOf(feeVault.address)).to.equal(fee);
         expect(await usdc.balanceOf(await messenger.getAddress())).to.equal(amountIn - fee);
     });
+
+    it("Sentinelle HIGH SC02 — pre-call USDC donation does NOT inflate fee/burn (uses router return value)", async () => {
+        const Messenger = await ethers.getContractFactory("MockCctpMessenger");
+        const messenger = await Messenger.deploy();
+        await swapModule.setCctpMessenger(await messenger.getAddress());
+
+        const amountIn = ethers.parseUnits("100", 6);
+        await tokenIn.mint(user.address, amountIn);
+        await tokenIn.connect(user).approve(await swapModule.getAddress(), amountIn);
+
+        // Attacker donates 1000 USDC directly to the module BEFORE the swap.
+        // Pre-patch this would have inflated usdcOut from 100 → 1100 and
+        // exploded the fee (15bps × 1100) + burn (1100 - fee).
+        const donation = ethers.parseUnits("1000", 6);
+        await usdc.mint(await swapModule.getAddress(), donation);
+
+        const encoded = coder.encode(
+            [
+                "tuple(address tokenIn,uint256 amountIn,uint256 amountOutMin,address[] path,uint32 dstDomain,bytes32 recipient,uint256 deadline)"
+            ],
+            [[
+                await tokenIn.getAddress(), amountIn, 0n,
+                [await tokenIn.getAddress(), await usdc.getAddress()],
+                6, ethers.zeroPadValue(user.address, 32),
+                (await ethers.provider.getBlock("latest"))!.timestamp + 3600,
+            ]]
+        );
+        const params = ethers.concat(["0x0c", encoded]);
+
+        const vaultBefore = await usdc.balanceOf(feeVault.address);
+        const messengerBefore = await usdc.balanceOf(await messenger.getAddress());
+
+        await gateway.connect(user).executeOperation(OP_SWAP_OUT, params);
+
+        const fee = (amountIn * 15n) / 10_000n;
+        // Fee and burn reflect ONLY the router output, not the donation.
+        expect((await usdc.balanceOf(feeVault.address)) - vaultBefore).to.equal(fee);
+        expect((await usdc.balanceOf(await messenger.getAddress())) - messengerBefore).to.equal(amountIn - fee);
+        // The donation stays on the module (rescuable separately).
+        expect(await usdc.balanceOf(await swapModule.getAddress())).to.equal(donation);
+    });
 });
 
 describe("TaxClaimModule", function () {

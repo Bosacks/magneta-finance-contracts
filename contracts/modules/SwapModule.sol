@@ -4,7 +4,7 @@ pragma solidity 0.8.20;
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/access/Ownable2Step.sol";
 
 import "../interfaces/IModule.sol";
 import "../interfaces/IMagnetaGateway.sol";
@@ -53,7 +53,7 @@ interface ICCTPMessenger {
 ///         (LI.FI quote + user-confirmed tx).
 /// @dev    This contract handles the SWAP_LOCAL and SWAP_OUT OpTypes. SWAP_OUT
 ///         is swap-then-CCTP-burn (USDC only); anything else stays off-chain.
-contract SwapModule is IModule, ReentrancyGuard, Ownable {
+contract SwapModule is IModule, ReentrancyGuard, Ownable2Step {
     using SafeERC20 for IERC20;
 
     uint16 public constant FEE_BPS = 15; // 0.15%
@@ -197,22 +197,27 @@ contract SwapModule is IModule, ReentrancyGuard, Ownable {
         SwapOutParams memory p = abi.decode(raw, (SwapOutParams));
         if (p.path[p.path.length - 1] != usdc) revert OutputNotUsdc();
 
-        uint256 usdcBefore = IERC20(usdc).balanceOf(address(this));
+        // Sentinelle HIGH SC02: use the router's return value (final element
+        // of `amounts`) as the authoritative swap output. The previous
+        // `balanceOf(this)` delta could be inflated by any caller making an
+        // ERC20 transfer of USDC to the module before the call, skewing fee
+        // and CCTP-burn amounts (Venus Protocol March 2026 pattern).
+        uint256[] memory amounts;
 
         if (p.tokenIn == address(0)) {
             if (msg.value != p.amountIn) revert EthMismatch();
-            IV2RouterSwap(router).swapExactETHForTokens{value: p.amountIn}(
+            amounts = IV2RouterSwap(router).swapExactETHForTokens{value: p.amountIn}(
                 p.amountOutMin, p.path, address(this), p.deadline
             );
         } else {
             _pullToken(ctx, p.tokenIn, p.amountIn);
             IERC20(p.tokenIn).forceApprove(router, p.amountIn);
-            IV2RouterSwap(router).swapExactTokensForTokens(
+            amounts = IV2RouterSwap(router).swapExactTokensForTokens(
                 p.amountIn, p.amountOutMin, p.path, address(this), p.deadline
             );
         }
 
-        uint256 usdcOut = IERC20(usdc).balanceOf(address(this)) - usdcBefore;
+        uint256 usdcOut = amounts[amounts.length - 1];
         uint256 magnetaFee = (usdcOut * FEE_BPS) / 10_000;
         uint256 adminNet   = usdcOut - magnetaFee;
 
