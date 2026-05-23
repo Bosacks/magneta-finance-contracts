@@ -562,4 +562,40 @@ describe("TaxClaimModule", function () {
         // Admin does NOT receive USDC locally — it lands at the destination domain.
         expect(await usdc.balanceOf(admin.address)).to.equal(0n);
     });
+
+    describe("Sentinelle hardening (audit 2026-05-22)", function () {
+        it("MEDIUM SC01 — non-owner non-registrar cannot register", async () => {
+            const TaxToken = await ethers.getContractFactory("MockTaxToken");
+            const t = await TaxToken.deploy("X", "X");
+            await expect(
+                tax.connect(admin).registerToken(await t.getAddress(), admin.address)
+            ).to.be.revertedWith("not authorized");
+        });
+
+        it("MEDIUM SC01 — trusted registrar can register, revoke works", async () => {
+            const TaxToken = await ethers.getContractFactory("MockTaxToken");
+            const t = await TaxToken.deploy("Y", "Y");
+
+            await expect(tax.setTrustedRegistrar(admin.address, true))
+                .to.emit(tax, "TrustedRegistrarUpdated")
+                .withArgs(admin.address, true);
+
+            await expect(
+                tax.connect(admin).registerToken(await t.getAddress(), admin.address)
+            ).to.emit(tax, "TokenRegistered");
+
+            await tax.setTrustedRegistrar(admin.address, false);
+            const t2 = await TaxToken.deploy("Z", "Z");
+            await expect(
+                tax.connect(admin).registerToken(await t2.getAddress(), admin.address)
+            ).to.be.revertedWith("not authorized");
+        });
+
+        it("setTrustedRegistrar rejects zero, owner-only", async () => {
+            await expect(tax.setTrustedRegistrar(ethers.ZeroAddress, true))
+                .to.be.revertedWith("zero registrar");
+            await expect(tax.connect(admin).setTrustedRegistrar(admin.address, true))
+                .to.be.reverted;
+        });
+    });
 });

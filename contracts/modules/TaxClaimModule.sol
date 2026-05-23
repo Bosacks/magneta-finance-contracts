@@ -4,7 +4,7 @@ pragma solidity 0.8.20;
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/access/Ownable2Step.sol";
 
 import "../interfaces/IModule.sol";
 import "../interfaces/IMagnetaGateway.sol";
@@ -52,7 +52,7 @@ interface ICCTPTokenMessenger {
 ///           5. Magneta takes a 0.15% markup on the USDC; the rest is either
 ///              held for the admin on this chain OR `depositForBurn`ed via
 ///              CCTP to the configured destination domain + treasury address.
-contract TaxClaimModule is IModule, ReentrancyGuard, Ownable {
+contract TaxClaimModule is IModule, ReentrancyGuard, Ownable2Step {
     using SafeERC20 for IERC20;
 
     uint16  public constant FEE_BPS = 15;       // 0.15%
@@ -74,6 +74,13 @@ contract TaxClaimModule is IModule, ReentrancyGuard, Ownable {
     /// @notice token => user admin (same semantics as TokenOpsModule.tokenAdmin).
     mapping(address => address) public tokenAdmin;
 
+    /// @notice Allow-list of addresses authorised to call `registerToken`.
+    ///         Closes the soft-check branch (marketingWallet == address(this)
+    ///         && msg.sender == admin) that previously let any caller who
+    ///         controlled a token's marketingWallet register arbitrary
+    ///         admins (Sentinelle MEDIUM SC01 2026-05-22).
+    mapping(address => bool) public trustedRegistrars;
+
     event TokenRegistered(address indexed token, address indexed admin);
     event TaxClaimed(
         address indexed token,
@@ -86,6 +93,7 @@ contract TaxClaimModule is IModule, ReentrancyGuard, Ownable {
     );
     event CctpRouteSet(address messenger, uint32 domain, bytes32 recipient);
     event MinUsdcUpdated(uint256 previous, uint256 current);
+    event TrustedRegistrarUpdated(address indexed registrar, bool trusted);
 
     error OnlyGateway();
     error NotRegistered();
@@ -109,15 +117,27 @@ contract TaxClaimModule is IModule, ReentrancyGuard, Ownable {
 
     /// @notice Register a token with this module as its revenue sink.
     /// @dev Token owner must have set `marketingWallet` = address(this) so the
-    ///      fees withdrawn via token.withdrawFees() land here.
+    ///      fees withdrawn via token.withdrawFees() land here. Sentinelle
+    ///      MEDIUM SC01: hardened the auth check — soft self-attestation
+    ///      via marketingWallet replaced with an explicit owner /
+    ///      trusted-registrar gate.
     function registerToken(address token, address admin) external {
         require(token != address(0) && admin != address(0), "zero address");
         require(tokenAdmin[token] == address(0), "already registered");
-        bool ok = (msg.sender == owner())
-            || (IMagnetaManagedTokenTax(token).marketingWallet() == address(this) && msg.sender == admin);
-        require(ok, "not authorized");
+        require(
+            msg.sender == owner() || trustedRegistrars[msg.sender],
+            "not authorized"
+        );
         tokenAdmin[token] = admin;
         emit TokenRegistered(token, admin);
+    }
+
+    /// @notice Owner-managed allow-list for `registerToken` callers. Wire
+    ///         trusted factories / dispatchers here at deploy time.
+    function setTrustedRegistrar(address registrar, bool trusted) external onlyOwner {
+        require(registrar != address(0), "zero registrar");
+        trustedRegistrars[registrar] = trusted;
+        emit TrustedRegistrarUpdated(registrar, trusted);
     }
 
     function setCctpRoute(address messenger, uint32 domain, bytes32 recipient) external onlyOwner {
@@ -158,27 +178,41 @@ contract TaxClaimModule is IModule, ReentrancyGuard, Ownable {
         if (ctx.caller != admin) revert NotAdmin();
 
         // 1. Pull fees out of the token contract (we are its marketingWallet).
+        //
+        // Sentinelle SC02 (HIGH on line 161 balanceOf) — the snapshot-delta
+        // pattern is robust against pre-call donations: any token donated
+        // before this call is captured in `beforeBal` and therefore
+        // EXCLUDED from `tokensWithdrawn`. No alternative source exists
+        // because the token's `withdrawFees()` is non-returning. Donated
+        // tokens linger on this module and can be rescued separately by
+        // governance — they cannot influence the fee/burn math here.
         uint256 beforeBal = IERC20(p.token).balanceOf(address(this));
         IMagnetaManagedTokenTax(p.token).withdrawFees();
         uint256 tokensWithdrawn = IERC20(p.token).balanceOf(address(this)) - beforeBal;
         if (tokensWithdrawn == 0) revert NothingToClaim();
 
         // 2. Swap token → WETH → USDC on the local V2 router.
+        //
+        // Sentinelle HIGH SC02 — use the router's return value
+        // (`amounts[amounts.length - 1]`) as the authoritative swap
+        // output rather than the balanceOf delta. The delta pattern was
+        // safe here too (usdcBefore captures any donation) but the return
+        // value is cleaner and matches the SwapModule pattern. Donation
+        // USDC is invisible to the fee/bridge math either way.
         IERC20(p.token).forceApprove(router, tokensWithdrawn);
         address[] memory path = new address[](3);
         path[0] = p.token;
         path[1] = IV2RouterSwapper(router).WETH();
         path[2] = usdc;
 
-        uint256 usdcBefore = IERC20(usdc).balanceOf(address(this));
-        IV2RouterSwapper(router).swapExactTokensForTokens(
+        uint256[] memory amounts = IV2RouterSwapper(router).swapExactTokensForTokens(
             tokensWithdrawn,
             p.amountOutMin,
             path,
             address(this),
             p.deadline
         );
-        uint256 usdcGross = IERC20(usdc).balanceOf(address(this)) - usdcBefore;
+        uint256 usdcGross = amounts[amounts.length - 1];
 
         // 3. Enforce $20 threshold.
         if (usdcGross < minUsdc) revert BelowThreshold(usdcGross);
