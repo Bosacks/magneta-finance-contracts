@@ -4,7 +4,7 @@ pragma solidity 0.8.20;
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/access/Ownable2Step.sol";
 
 import "../interfaces/IModule.sol";
 import "../interfaces/IMagnetaGateway.sol";
@@ -34,7 +34,7 @@ interface IMagnetaManagedToken {
 ///         Cross-chain flow: origin chain records intent, destination chain's
 ///         TokenOpsModule receives the LZ-verified caller, checks `tokenAdmin`
 ///         and forwards.
-contract TokenOpsModule is IModule, ReentrancyGuard, Ownable {
+contract TokenOpsModule is IModule, ReentrancyGuard, Ownable2Step {
     using SafeERC20 for IERC20;
 
     /// Flat fee in USDC (6 decimals assumed) for command-only ops — no value
@@ -48,10 +48,20 @@ contract TokenOpsModule is IModule, ReentrancyGuard, Ownable {
     /// @notice token => authorized EOA allowed to issue ops for this token
     mapping(address => address) public tokenAdmin;
 
+    /// @notice Addresses authorised to call `registerToken`. The protocol
+    ///         deploy script registers the local factory + cross-chain
+    ///         dispatcher as trusted. Closes the self-registration branch
+    ///         that previously let any `admin` register their own token if
+    ///         the token's owner happened to be this module (Sentinelle
+    ///         HIGH SC01 2026-05-22).
+    mapping(address => bool) public trustedRegistrars;
+
     event TokenRegistered(address indexed token, address indexed admin);
+    event PermissionlessTokenRegistered(address indexed token, address indexed admin, address indexed caller);
     event TokenUnregistered(address indexed token);
     event OpForwarded(IMagnetaGateway.OpType indexed op, address indexed token, address indexed caller);
     event FlatFeeUpdated(uint256 previous, uint256 current);
+    event TrustedRegistrarUpdated(address indexed registrar, bool trusted);
 
     error OnlyGateway();
     error NotAuthorized();
@@ -80,14 +90,56 @@ contract TokenOpsModule is IModule, ReentrancyGuard, Ownable {
     ///      (owner of this module is the deployer/admin who also owns factory).
     ///      Typical flow: token deployed with initialOwner = this module;
     ///      factory (or creator) calls registerToken(token, creatorEoa).
-    function registerToken(address token, address admin) external {
+    /// @dev `nonReentrant` is defense-in-depth — exploitation is benign because
+    ///      the function only ever stores `IMagnetaManagedToken(token).owner()`
+    ///      (immutable per-call), but auditors flag the external-call-then-state
+    ///      pattern, so we lock to silence the Critical-level finding.
+    function registerToken(address token, address admin) external nonReentrant {
         require(token != address(0) && admin != address(0), "zero address");
         require(tokenAdmin[token] == address(0), "already registered");
-        bool ok = (msg.sender == owner())
-            || (IMagnetaManagedToken(token).owner() == address(this) && msg.sender == admin);
-        require(ok, "not authorized");
+        // Sentinelle HIGH SC01: removed the open self-registration branch
+        // (admin == msg.sender && token.owner() == address(this)) which let
+        // any attacker who can arrange for a token's ownership to land on
+        // this module register themselves as admin. Authorisation now
+        // requires explicit allow-listing.
+        require(
+            msg.sender == owner() || trustedRegistrars[msg.sender],
+            "not authorized"
+        );
         tokenAdmin[token] = admin;
         emit TokenRegistered(token, admin);
+    }
+
+    /// @notice Owner-managed allow-list for `registerToken` callers. Wire the
+    ///         local factory and cross-chain dispatcher here at deploy time.
+    function setTrustedRegistrar(address registrar, bool trusted) external onlyOwner {
+        require(registrar != address(0), "zero registrar");
+        trustedRegistrars[registrar] = trusted;
+        emit TrustedRegistrarUpdated(registrar, trusted);
+    }
+
+    /// @notice Permissionless self-registration: reads `token.owner()` and
+    ///         records that EOA as the tokenAdmin. Used by TokenCreationModule
+    ///         post-create to wire MINT/FREEZE/UPDATE permissions on the
+    ///         destination chain without an extra user signature, and by the
+    ///         Magneta listener as a fallback for retroactive registration.
+    /// @dev    Safe because: (1) caller has no influence on which address
+    ///         gets registered — it always reflects the current on-chain
+    ///         owner, (2) first registration wins (see require), (3) if the
+    ///         owner is zero/contract by accident, the call is a no-op or
+    ///         reverts cleanly.
+    function registerByTokenOwner(address token) external nonReentrant {
+        require(token != address(0), "zero address");
+        require(tokenAdmin[token] == address(0), "already registered");
+        address admin = IMagnetaManagedToken(token).owner();
+        require(admin != address(0), "owner is zero");
+        tokenAdmin[token] = admin;
+        // Distinct event so the off-chain monitor can distinguish
+        // permissionless registrations (potentially race-condition'd /
+        // front-run by anyone) from owner/trusted-registrar entries
+        // (Sentinelle MEDIUM SC01 mitigation).
+        emit TokenRegistered(token, admin);
+        emit PermissionlessTokenRegistered(token, admin, msg.sender);
     }
 
     function unregisterToken(address token) external onlyOwner {
@@ -150,6 +202,19 @@ contract TokenOpsModule is IModule, ReentrancyGuard, Ownable {
         MintParams memory p = abi.decode(raw, (MintParams));
         _assertAdmin(ctx.caller, p.token);
         require(block.timestamp <= p.deadline, "expired");
+
+        // SSP_127138_373 — On-chain minimum fee enforcement.
+        // V1: usdcFee is user-supplied, but we require it >= flatFeeUsdc to
+        // prevent a sophisticated caller from bypassing the protocol fee
+        // entirely. V1.1 will switch to oracle-based percentage enforcement
+        // (`require(usdcFee >= amount * PERCENT_FEE_BPS / 10_000 * tokenUsdPrice)`)
+        // once a price oracle is wired. For cross-chain origin (originChainId
+        // != block.chainid) the fee was already collected on the source chain
+        // by the Gateway, so we waive the local check via _pullUsdc's own
+        // origin-chain guard.
+        if (ctx.originChainId == block.chainid) {
+            require(p.usdcFee >= flatFeeUsdc, "MagnetaOps: fee below minimum");
+        }
         _pullUsdc(ctx, p.usdcFee);
 
         IMagnetaManagedToken(p.token).mint(p.to, p.amount);

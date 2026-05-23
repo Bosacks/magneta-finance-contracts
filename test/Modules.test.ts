@@ -75,10 +75,12 @@ describe("TokenOpsModule", function () {
         expect(await tokenOps.tokenAdmin(await token.getAddress())).to.equal(admin.address);
     });
 
-    it("mints to a recipient and charges the 0.15% fee", async () => {
+    it("mints to a recipient and charges at least the flat fee", async () => {
+        // Sprint 9.5 SSP_127138_373 fix: usdcFee must be >= flatFeeUsdc on
+        // local-origin mints. We pass exactly the flat fee (V1 minimum); V1.1
+        // will compute the percentage value-based fee via price oracle.
         const amount = ethers.parseEther("1000");
-        const valueUsdc = ethers.parseUnits("10", 6);
-        const fee = (valueUsdc * 15n) / 10_000n;
+        const fee = await tokenOps.flatFeeUsdc();
 
         const encoded = coder.encode(
             ["tuple(address token,address to,uint256 amount,uint256 usdcFee,uint256 deadline)"],
@@ -101,10 +103,29 @@ describe("TokenOpsModule", function () {
         expect(await usdc.balanceOf(feeVault.address) - vaultBefore).to.equal(fee);
     });
 
-    it("rejects MINT from a non-admin caller", async () => {
+    it("rejects MINT with usdcFee below the flat-fee minimum (Sprint 9.5)", async () => {
         const encoded = coder.encode(
             ["tuple(address token,address to,uint256 amount,uint256 usdcFee,uint256 deadline)"],
-            [[await token.getAddress(), user.address, 1n, 0n, (await ethers.provider.getBlock("latest"))!.timestamp + 3600]]
+            [[
+                await token.getAddress(),
+                user.address,
+                ethers.parseEther("1000"),
+                0n,                                                            // bypass attempt
+                (await ethers.provider.getBlock("latest"))!.timestamp + 3600,
+            ]]
+        );
+        const params = ethers.concat(["0x04", encoded]);
+
+        await expect(
+            gateway.connect(admin).executeOperation(OP_MINT, params),
+        ).to.be.revertedWith("MagnetaOps: fee below minimum");
+    });
+
+    it("rejects MINT from a non-admin caller", async () => {
+        const fee = await tokenOps.flatFeeUsdc();
+        const encoded = coder.encode(
+            ["tuple(address token,address to,uint256 amount,uint256 usdcFee,uint256 deadline)"],
+            [[await token.getAddress(), user.address, 1n, fee, (await ethers.provider.getBlock("latest"))!.timestamp + 3600]]
         );
         const params = ethers.concat(["0x04", encoded]);
 
@@ -161,6 +182,113 @@ describe("TokenOpsModule", function () {
         await expect(
             gateway.connect(admin).executeOperation(OP_MINT, ethers.concat(["0x04", mintEncoded]))
         ).to.be.reverted;
+    });
+
+    // ─── Sprint 9.5 — permissionless registerByTokenOwner ──────────────────
+    //
+    // Critical fix: under the OFT pattern (Sprint 1+) the token's owner is the
+    // creator, not the TokenOpsModule. The original `registerToken` paths
+    // (owner/admin self-attestation when token is owned by module) don't
+    // apply, so a fresh token can never be registered without this fallback.
+    //
+    // `registerByTokenOwner` is permissionless — anyone calls it, the module
+    // reads `token.owner()` on-chain and registers that address. Used by:
+    //   1. TokenCreationModule._maybeRegisterToken (auto-on-create)
+    //   2. Magneta listener as a retroactive backstop
+    //   3. The user themselves if both above paths fail
+
+    describe("registerByTokenOwner (Sprint 9.5)", function () {
+        it("registers the on-chain owner as admin without any auth check", async () => {
+            // Deploy a fresh managed token owned by `user` (not by tokenOps).
+            const Managed = await ethers.getContractFactory("MockManagedToken");
+            const freshToken = await Managed.deploy("Solo", "SOLO");
+            await freshToken.transferOwnership(user.address);
+
+            expect(await tokenOps.tokenAdmin(await freshToken.getAddress())).to.equal(ethers.ZeroAddress);
+
+            // Anyone (admin signer here, but truly any EOA) can call this.
+            await expect(
+                tokenOps.connect(admin).registerByTokenOwner(await freshToken.getAddress())
+            )
+                .to.emit(tokenOps, "TokenRegistered")
+                .withArgs(await freshToken.getAddress(), user.address);
+
+            expect(await tokenOps.tokenAdmin(await freshToken.getAddress())).to.equal(user.address);
+        });
+
+        it("reverts if already registered (idempotent guard)", async () => {
+            // `token` was already registered with `admin` in the outer beforeEach.
+            await expect(
+                tokenOps.connect(user).registerByTokenOwner(await token.getAddress())
+            ).to.be.revertedWith("already registered");
+        });
+
+        it("emits PermissionlessTokenRegistered for off-chain monitoring (Sentinelle MED SC01)", async () => {
+            const Managed = await ethers.getContractFactory("MockManagedToken");
+            const freshToken = await Managed.deploy("Solo2", "SOLO2");
+            await freshToken.transferOwnership(user.address);
+            await expect(
+                tokenOps.connect(admin).registerByTokenOwner(await freshToken.getAddress())
+            )
+                .to.emit(tokenOps, "PermissionlessTokenRegistered")
+                .withArgs(await freshToken.getAddress(), user.address, admin.address);
+        });
+    });
+
+    describe("Sentinelle HIGH SC01 — registerToken trusted-registrar gate", function () {
+        it("removed self-registration branch: admin cannot self-register even when module owns the token", async () => {
+            const Managed = await ethers.getContractFactory("MockManagedToken");
+            const t = await Managed.deploy("X", "X");
+            // Token's owner == module — the OLD self-reg attack precondition.
+            await t.transferOwnership(await tokenOps.getAddress());
+            // `user` (not owner, not trusted) tries to register themselves
+            // as admin. Pre-patch this would have succeeded.
+            await expect(
+                tokenOps.connect(user).registerToken(await t.getAddress(), user.address)
+            ).to.be.revertedWith("not authorized");
+        });
+
+        it("owner-set trusted registrar can call registerToken", async () => {
+            const Managed = await ethers.getContractFactory("MockManagedToken");
+            const t = await Managed.deploy("Y", "Y");
+            await t.transferOwnership(await tokenOps.getAddress());
+
+            // user is not trusted yet
+            await expect(
+                tokenOps.connect(user).registerToken(await t.getAddress(), admin.address)
+            ).to.be.revertedWith("not authorized");
+
+            // Owner whitelists user
+            await expect(tokenOps.setTrustedRegistrar(user.address, true))
+                .to.emit(tokenOps, "TrustedRegistrarUpdated")
+                .withArgs(user.address, true);
+
+            // Now user can call
+            await expect(
+                tokenOps.connect(user).registerToken(await t.getAddress(), admin.address)
+            ).to.emit(tokenOps, "TokenRegistered");
+
+            // Revoke and re-confirm closed
+            await tokenOps.setTrustedRegistrar(user.address, false);
+            const Managed2 = await ethers.getContractFactory("MockManagedToken");
+            const t2 = await Managed2.deploy("Z", "Z");
+            await t2.transferOwnership(await tokenOps.getAddress());
+            await expect(
+                tokenOps.connect(user).registerToken(await t2.getAddress(), admin.address)
+            ).to.be.revertedWith("not authorized");
+        });
+
+        it("non-owner cannot set trusted registrars", async () => {
+            await expect(
+                tokenOps.connect(user).setTrustedRegistrar(user.address, true)
+            ).to.be.reverted;
+        });
+
+        it("setTrustedRegistrar rejects zero address", async () => {
+            await expect(
+                tokenOps.setTrustedRegistrar(ethers.ZeroAddress, true)
+            ).to.be.revertedWith("zero registrar");
+        });
     });
 });
 
