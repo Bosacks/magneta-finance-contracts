@@ -77,9 +77,15 @@ async function main() {
   // self-referencing architecture) and, on a chain with an adapter, the
   // adapter. Override via env ROUTER_WHITELIST (comma-separated) if needed.
   const c = dep.contracts || {};
+  const cc = dep.chainConfig || {};
   const routerCandidates: string[] = (process.env.ROUTER_WHITELIST
     ? process.env.ROUTER_WHITELIST.split(",")
     : [
+        // chainConfig.defaultRouter is the canonical swap router the DEX
+        // routes through on every chain — the external V2 DEX (Swapr,
+        // PancakeSwap, …) where there's no in-house router, or our own
+        // MagnetaV2Router02 / adapter where there is. Whitelist it first.
+        cc.defaultRouter,
         c.MagnetaV2Router02,
         c.MoeRouterAdapter, c.TraderJoeAvaxAdapter,
         c.UbeswapCeloAdapter, c.DragonSwapSeiAdapter,
@@ -102,14 +108,33 @@ async function main() {
     console.log(`[${net}] Whitelisted router (target+spender): ${r}`);
   }
 
-  // Hand ownership to the Safe (multi-sig) so future changes require quorum.
-  if (safe && ethers.isAddress(safe)) {
-    console.log(`[${net}] Transferring ownership to Safe ${safe}…`);
-    const tx = await proxy.transferOwnership(safe);
+  // Hand ownership to the same owner the EXISTING MagnetaProxyV2 has — that's
+  // the canonical owner for this chain (the main Safe 0xC4c9…717a on most
+  // chains, the in-house Safe on Cronos/Abstract, or the deployer EOA on
+  // Sei/Flare where Safe UI isn't supported). Reading it on-chain is more
+  // reliable than the (often-missing) `safe` field in the deployment JSON.
+  let target: string = safe && ethers.isAddress(safe) ? safe : "";
+  const existingV2: string | undefined = (dep.contracts || {}).MagnetaProxyV2;
+  if (existingV2 && ethers.isAddress(existingV2)) {
+    try {
+      const prev = await ethers.getContractAt("MagnetaProxy", existingV2);
+      const prevOwner: string = await prev.owner();
+      if (ethers.isAddress(prevOwner) && prevOwner !== ethers.ZeroAddress) {
+        target = prevOwner;
+        console.log(`[${net}] Existing MagnetaProxyV2 owner: ${prevOwner}`);
+      }
+    } catch {
+      console.warn(`[${net}] Could not read existing proxy owner; falling back to safe field`);
+    }
+  }
+
+  if (target && ethers.isAddress(target) && target.toLowerCase() !== deployer.address.toLowerCase()) {
+    console.log(`[${net}] Transferring ownership to ${target} (Ownable2Step → pendingOwner)…`);
+    const tx = await proxy.transferOwnership(target);
     await tx.wait();
-    console.log(`[${net}] Ownership transferred (tx: ${tx.hash})`);
+    console.log(`[${net}] transferOwnership sent (tx: ${tx.hash}); ${target} must acceptOwnership()`);
   } else {
-    console.warn(`[${net}] No 'safe' in deployment JSON — ownership stays with deployer`);
+    console.warn(`[${net}] Target owner == deployer (or unknown) — ownership stays with deployer`);
   }
 
   // Persist to deployments/<network>.json
