@@ -171,6 +171,22 @@ describe("MagnetaXChainLpReceiver", () => {
         )
       ).to.be.revertedWith("MockRouter: INSUFFICIENT_ETH");
     });
+
+    it("reverts on InsufficientTokenOut when the MEASURED delta < minTokenOut (fee-on-transfer)", async () => {
+      // The router reports it sent 0.5 token (passes its own amountOutMin), but a
+      // 10%-fee-on-transfer token delivers only 0.45 to the receiver. The
+      // measured-delta floor must catch this before pairing.
+      const FeeToken = await ethers.getContractFactory("MockFeeToken");
+      const feeToken = await FeeToken.deploy(1_000); // 10%
+      await feeToken.mint(await router.getAddress(), ethers.parseEther("1000")); // mint = no fee
+      // half = 0.5 → router out = 0.5 (>= minTokenOut 0.48, router passes);
+      // receiver actually receives 0.45 (10% burned) < 0.48 → revert.
+      await expect(
+        receiver.connect(executor).addLiquidityNative(
+          await feeToken.getAddress(), user.address, ethers.parseEther("0.48"), 0, 0, ethers.MaxUint256, { value: ONE }
+        )
+      ).to.be.revertedWithCustomError(receiver, "InsufficientTokenOut");
+    });
   });
 
   describe("dust refund", () => {

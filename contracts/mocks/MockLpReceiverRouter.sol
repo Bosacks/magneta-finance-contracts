@@ -11,6 +11,25 @@ contract MockReceiverLP is ERC20 {
     function mint(address to, uint256 amount) external { require(msg.sender == minter, "not minter"); _mint(to, amount); }
 }
 
+/// @dev Fee-on-transfer token: every transfer delivers (amount - fee%) to the
+///      recipient and burns the rest. Used to prove the receiver's measured-delta
+///      floor check (tokenReceived < minTokenOut → revert) fires when a token
+///      delivers less than the router claimed it sent.
+contract MockFeeToken is ERC20 {
+    uint256 public immutable feeBps; // e.g. 1000 = 10%
+    constructor(uint256 _feeBps) ERC20("Fee Token", "FEE") { feeBps = _feeBps; }
+    function mint(address to, uint256 amount) external { _mint(to, amount); } // no fee on mint
+    function _transfer(address from, address to, uint256 value) internal override {
+        if (feeBps > 0) {
+            uint256 fee = (value * feeBps) / 10_000;
+            _burn(from, fee);                       // burn the fee
+            super._transfer(from, to, value - fee); // deliver the rest
+        } else {
+            super._transfer(from, to, value);
+        }
+    }
+}
+
 /**
  * @dev Configurable V2-router stand-in for MagnetaXChainLpReceiver tests.
  *      Unlike MockV2Router (always 1:1, always full consumption), this lets a

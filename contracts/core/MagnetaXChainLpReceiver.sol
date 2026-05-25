@@ -82,6 +82,7 @@ contract MagnetaXChainLpReceiver is Ownable2Step, ReentrancyGuard {
     error ZeroAddress();
     error NotAContract();
     error TokenIsNative();
+    error InsufficientTokenOut();
     error NativeRefundFailed();
     error RescueFailed();
 
@@ -145,6 +146,12 @@ contract MagnetaXChainLpReceiver is Ownable2Step, ReentrancyGuard {
             minTokenOut, path, address(this), deadline
         );
         uint256 tokenReceived = IERC20(token).balanceOf(address(this)) - tokenBefore;
+        // Re-validate the MEASURED delta against the caller's floor — not just
+        // the router's internal amountOutMin (Sentinelle 2026-05-25, SC02 MEDIUM
+        // CVSS 5.3). A fee-on-transfer token, or one whose router-reported output
+        // exceeds what actually landed, is caught here before we approve and
+        // pair it — independent of what the router claimed it sent.
+        if (tokenReceived < minTokenOut) revert InsufficientTokenOut();
 
         // 2. Add liquidity: token + native → LP, minted directly to `to`.
         IERC20(token).forceApprove(router, tokenReceived);
