@@ -19,6 +19,7 @@ describe("MagnetaBundler V2 — fee forwarding on sell paths", function () {
   let user: SignerWithAddress;
 
   const SERVICE_FEE = ethers.parseEther("0.001");
+  const DEADLINE = ethers.MaxUint256; // far-future expiry for the ensure() guard
 
   beforeEach(async function () {
     [owner, feeRecipient, user] = await ethers.getSigners();
@@ -55,6 +56,7 @@ describe("MagnetaBundler V2 — fee forwarding on sell paths", function () {
           [await tokenA.getAddress()],
           [ethers.parseEther("10")],
           [0n],
+          DEADLINE,
           { value: SERVICE_FEE },
         ),
       )
@@ -74,6 +76,7 @@ describe("MagnetaBundler V2 — fee forwarding on sell paths", function () {
         [await tokenA.getAddress()],
         [ethers.parseEther("5")],
         [0n],
+        DEADLINE,
         { value: 0 },
       );
       const after = await ethers.provider.getBalance(feeRecipient.address);
@@ -87,6 +90,7 @@ describe("MagnetaBundler V2 — fee forwarding on sell paths", function () {
           [await tokenA.getAddress(), await tokenB.getAddress()],
           [ethers.parseEther("1")],
           [0n],
+          DEADLINE,
           { value: SERVICE_FEE },
         ),
       ).to.be.revertedWith("Arrays length mismatch");
@@ -111,9 +115,10 @@ describe("MagnetaBundler V2 — fee forwarding on sell paths", function () {
           sellAmount,
           0n,
           await tokenB.getAddress(),
-          0n,
+          [0n],
           [user.address],
           [ethers.parseEther("1")],
+          DEADLINE,
           { value: SERVICE_FEE },
         ),
       ).to.emit(bundler, "FeeForwarded").withArgs(feeRecipient.address, SERVICE_FEE);
@@ -129,9 +134,10 @@ describe("MagnetaBundler V2 — fee forwarding on sell paths", function () {
           ethers.parseEther("1"),
           0n,
           await tokenB.getAddress(),
-          0n,
+          [0n],
           [user.address],
           [ethers.parseEther("1"), ethers.parseEther("1")],
+          DEADLINE,
           { value: SERVICE_FEE },
         ),
       ).to.be.revertedWith("Arrays length mismatch");
@@ -152,6 +158,7 @@ describe("MagnetaBundler V2 — fee forwarding on sell paths", function () {
             [await tokenA.getAddress()],
             [ethers.parseEther("10")],
             [0n],
+            DEADLINE,
             { value: ethers.parseEther("2") },
           ),
         ).to.be.revertedWith("MagnetaBundler: fee exceeds cap");
@@ -234,6 +241,134 @@ describe("MagnetaBundler V2 — fee forwarding on sell paths", function () {
         await expect(
           bundler.rescueTokens(await tokenA.getAddress(), 0n),
         ).to.be.revertedWith("MagnetaBundler: zero amount");
+      });
+    });
+  });
+
+  // ── Sentinelle 2026-05-25 post-scan hardening ──────────────────────────────
+  describe("Sentinelle 2026-05-25", function () {
+    describe("SC01: router two-step timelock", function () {
+      it("propose → wait → apply changes the router; cancel aborts it", async function () {
+        const Router2 = await ethers.getContractFactory("MockV2Router");
+        const newRouter = await Router2.deploy(await weth.getAddress());
+
+        await expect(bundler.proposeRouter(await newRouter.getAddress()))
+          .to.emit(bundler, "RouterChangeProposed");
+        expect(await bundler.pendingRouter()).to.equal(await newRouter.getAddress());
+
+        // Too early — timelock active.
+        await expect(bundler.applyRouter()).to.be.revertedWith("MagnetaBundler: timelock active");
+
+        // Advance past ROUTER_TIMELOCK (24h).
+        await ethers.provider.send("evm_increaseTime", [24 * 60 * 60 + 1]);
+        await ethers.provider.send("evm_mine", []);
+
+        await expect(bundler.applyRouter())
+          .to.emit(bundler, "RouterChanged")
+          .withArgs(await router.getAddress(), await newRouter.getAddress());
+        expect(await bundler.router()).to.equal(await newRouter.getAddress());
+        expect(await bundler.pendingRouter()).to.equal(ethers.ZeroAddress);
+      });
+
+      it("cancelRouterChange clears the pending router", async function () {
+        const Router2 = await ethers.getContractFactory("MockV2Router");
+        const newRouter = await Router2.deploy(await weth.getAddress());
+        await bundler.proposeRouter(await newRouter.getAddress());
+        await expect(bundler.cancelRouterChange())
+          .to.emit(bundler, "RouterChangeCancelled")
+          .withArgs(await newRouter.getAddress());
+        expect(await bundler.pendingRouter()).to.equal(ethers.ZeroAddress);
+        await expect(bundler.applyRouter()).to.be.revertedWith("MagnetaBundler: no pending router");
+      });
+
+      it("propose/apply are owner-only", async function () {
+        await expect(bundler.connect(user).proposeRouter(user.address)).to.be.reverted;
+        await expect(bundler.connect(user).applyRouter()).to.be.reverted;
+      });
+    });
+
+    describe("SC03: user-supplied deadline", function () {
+      it("reverts an expired bundleSell", async function () {
+        await tokenA.connect(user).approve(await bundler.getAddress(), ethers.parseEther("5"));
+        await expect(
+          bundler.connect(user).bundleSell(
+            [await tokenA.getAddress()],
+            [ethers.parseEther("5")],
+            [0n],
+            1n, // deadline in the past
+            { value: 0 },
+          ),
+        ).to.be.revertedWith("MagnetaBundler: expired");
+      });
+    });
+
+    describe("SC03: per-leg amountOutMins[]", function () {
+      it("bundleBuy requires amountOutMins length == recipients length", async function () {
+        await expect(
+          bundler.connect(user).bundleBuy(
+            await tokenB.getAddress(),
+            [0n], // 1 min
+            [user.address, owner.address], // 2 recipients
+            [ethers.parseEther("1"), ethers.parseEther("1")],
+            DEADLINE,
+            { value: ethers.parseEther("2") },
+          ),
+        ).to.be.revertedWith("Arrays length mismatch");
+      });
+    });
+
+    describe("SC08: disperseEther skip-and-log + sender refund", function () {
+      it("skips a recipient that rejects ETH and refunds its share to the sender", async function () {
+        // tokenA (an ERC20 with no receive()) is a recipient that rejects ETH.
+        const badRecipient = await tokenA.getAddress();
+        const goodRecipient = owner.address;
+
+        const goodBefore = await ethers.provider.getBalance(goodRecipient);
+        const total = ethers.parseEther("3"); // 1 to good, 2 to bad
+
+        await expect(
+          bundler.connect(user).disperseEther(
+            [goodRecipient, badRecipient],
+            [ethers.parseEther("1"), ethers.parseEther("2")],
+            { value: total },
+          ),
+        ).to.emit(bundler, "DisperseSkipped").withArgs(badRecipient, ethers.parseEther("2"));
+
+        // Good recipient funded; bad recipient's 2 ETH refunded to sender (user
+        // is an EOA so the push refund succeeds — nothing credited).
+        expect(await ethers.provider.getBalance(goodRecipient)).to.equal(goodBefore + ethers.parseEther("1"));
+        expect(await ethers.provider.getBalance(await bundler.getAddress())).to.equal(0n);
+        expect(await bundler.totalPendingWithdrawals()).to.equal(0n);
+      });
+    });
+
+    describe("SC08: pull-payment fallback + bounded rescueETH", function () {
+      it("credits a failed refund and lets the payee withdraw later; rescueETH can't touch it", async function () {
+        const Rejecter = await ethers.getContractFactory("EtherRejecter");
+        const rej = await Rejecter.deploy();
+
+        // Rejecter calls disperseEther sending 3 ETH but only dispersing 1 to an
+        // EOA; the 2 ETH refund bounces (accept=false) → credited to rejecter.
+        await rej.setAccept(false);
+        await rej.callDisperse(
+          await bundler.getAddress(),
+          [user.address],
+          [ethers.parseEther("1")],
+          { value: ethers.parseEther("3") },
+        );
+
+        expect(await bundler.pendingWithdrawals(await rej.getAddress())).to.equal(ethers.parseEther("2"));
+        expect(await bundler.totalPendingWithdrawals()).to.equal(ethers.parseEther("2"));
+
+        // Owner rescueETH must NOT be able to take the 2 ETH owed to the rejecter.
+        await expect(bundler.rescueETH()).to.be.revertedWith("MagnetaBundler: nothing to rescue");
+
+        // Rejecter accepts now and pulls its credit.
+        await rej.setAccept(true);
+        const before = await ethers.provider.getBalance(await rej.getAddress());
+        await rej.claim(await bundler.getAddress());
+        expect(await ethers.provider.getBalance(await rej.getAddress())).to.equal(before + ethers.parseEther("2"));
+        expect(await bundler.totalPendingWithdrawals()).to.equal(0n);
       });
     });
   });

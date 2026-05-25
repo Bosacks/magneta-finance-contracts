@@ -12,7 +12,7 @@ interface IUniswapV2Router02 {
         external
         payable
         returns (uint[] memory amounts);
-    
+
     function swapExactTokensForETH(uint amountIn, uint amountOutMin, address[] calldata path, address to, uint deadline)
         external
         returns (uint[] memory amounts);
@@ -20,6 +20,34 @@ interface IUniswapV2Router02 {
     function WETH() external pure returns (address);
 }
 
+/**
+ * @title MagnetaBundler
+ * @notice Batched buy/sell/disperse helper over a V2 router. Hardened per the
+ *         Sentinelle audit 2026-05-25 (CAUTION 42/100):
+ *           - SC01 CRITICAL (mutable router rug vector): router changes go
+ *             through a 24h propose→apply timelock with public cancellation,
+ *             so a swap of the router (which receives unlimited forceApprove
+ *             allowances) is observable on-chain before it can take effect.
+ *           - SC08 HIGH (CEI / refund DoS): failed transfers no longer revert
+ *             the whole batch — `disperseEther` skips-and-logs, and every
+ *             sender refund / fee forward falls back to a pull-payment
+ *             (`pendingWithdrawals` + `withdraw()`) when the push fails.
+ *           - SC05 MEDIUM (fee-recipient liveness): `_forwardFee` credits the
+ *             recipient on push failure instead of reverting fee-paying flows.
+ *           - SC03 MEDIUM (stale deadline): all user-facing swap functions take
+ *             a caller-supplied `deadline` instead of `block.timestamp`.
+ *           - SC03 MEDIUM (single slippage min): `bundleBuy` / `sellAndBundleBuy`
+ *             take a per-leg `amountOutMins[]` so a large leg can't be
+ *             under-protected by a min calibrated for a small one.
+ *
+ * @dev    ABI CHANGE vs the pre-audit version (frontend must update):
+ *           bundleBuy(token, amountOutMins[], recipients[], ethAmounts[], deadline)
+ *           bundleSell(tokens[], amounts[], amountsOutMin[], deadline)
+ *           atomicVolumeBrush(token, ethAmount, minEthReturned, minTokensExpected, deadline)
+ *           sellAndBundleBuy(sellToken, sellAmount, minEthFromSell, buyToken,
+ *                            minTokensPerBuy[], recipients[], buyAmounts[], deadline)
+ *           setRouter(addr) → proposeRouter(addr) + applyRouter() + cancelRouterChange()
+ */
 contract MagnetaBundler is ReentrancyGuard, Pausable, Ownable2Step {
     using SafeERC20 for IERC20;
 
@@ -42,18 +70,44 @@ contract MagnetaBundler is ReentrancyGuard, Pausable, Ownable2Step {
     ///         pause-guardian pattern elsewhere in Magneta).
     address public pauseGuardian;
 
+    // ── Router timelock (SC01) ───────────────────────────────────────────────
+    /// @notice Minimum delay between proposing and applying a router change.
+    uint256 public constant ROUTER_TIMELOCK = 24 hours;
+    address public pendingRouter;
+    uint256 public routerChangeETA;
+
+    // ── Pull-payment fallback (SC08 / SC05) ──────────────────────────────────
+    /// @notice Native owed to an address whose push transfer failed (failed
+    ///         refund, failed fee forward, failed disperse leg refund). The
+    ///         owed party calls withdraw() to claim. Decouples batch success
+    ///         from any single recipient's ability to receive ETH.
+    mapping(address => uint256) public pendingWithdrawals;
+    /// @notice Sum of pendingWithdrawals — rescueETH may not dip below it.
+    uint256 public totalPendingWithdrawals;
+
     event BundleBuy(address indexed sender, address token, uint256 totalEthAmount, uint256 successCount);
     event BundleSell(address indexed sender, address token, uint256 totalTokenAmount, uint256 successCount);
     event FeeRecipientUpdated(address indexed oldRecipient, address indexed newRecipient);
     event FeeForwarded(address indexed to, uint256 amount);
     event MaxFeePerTxUpdated(uint256 oldCap, uint256 newCap);
     event PauseGuardianUpdated(address indexed oldGuardian, address indexed newGuardian);
+    event RouterChangeProposed(address indexed newRouter, uint256 eta);
+    event RouterChanged(address indexed oldRouter, address indexed newRouter);
+    event RouterChangeCancelled(address indexed cancelledRouter);
+    event DisperseSkipped(address indexed recipient, uint256 amount);
+    event WithdrawalPending(address indexed account, uint256 amount);
+    event Withdrawn(address indexed account, uint256 amount);
 
     modifier onlyOwnerOrGuardian() {
         require(
             msg.sender == owner() || msg.sender == pauseGuardian,
             "MagnetaBundler: not owner or guardian"
         );
+        _;
+    }
+
+    modifier ensure(uint256 deadline) {
+        require(block.timestamp <= deadline, "MagnetaBundler: expired");
         _;
     }
 
@@ -66,46 +120,82 @@ contract MagnetaBundler is ReentrancyGuard, Pausable, Ownable2Step {
     receive() external payable {}
 
     /// @notice Forward an arbitrary native amount to `feeRecipient` if set.
-    ///         Called by mutating functions that accept `msg.value` excess
-    ///         (atomicVolumeBrush, bundleBuy) so fees route on-chain to the
-    ///         Magneta FeeVault without manual rescueETH.
+    ///         Called by mutating functions that accept `msg.value` excess so
+    ///         fees route on-chain to the Magneta FeeVault without manual
+    ///         rescueETH. On push failure the fee is CREDITED to the recipient
+    ///         (pull) rather than reverting — removes the protocol-wide
+    ///         liveness dependency on feeRecipient (Sentinelle SC05).
     function _forwardFee(uint256 amount) internal {
         if (amount == 0 || feeRecipient == address(0)) return;
         // Hard cap to neutralise a buggy/malicious frontend that sends
-        // far more native than intended as fee. Owner can update the cap
-        // via setMaxFeePerTx for chains where 1 native unit is too low.
+        // far more native than intended as fee.
         require(amount <= maxFeePerTx, "MagnetaBundler: fee exceeds cap");
         (bool ok, ) = payable(feeRecipient).call{value: amount}("");
-        require(ok, "fee forward failed");
-        emit FeeForwarded(feeRecipient, amount);
+        if (ok) {
+            emit FeeForwarded(feeRecipient, amount);
+        } else {
+            _credit(feeRecipient, amount);
+        }
+    }
+
+    /// @notice Try to push `amount` native to `to`; on failure credit it to the
+    ///         pull-payment ledger so the caller's batch never reverts because a
+    ///         recipient can't receive ETH (Sentinelle SC08).
+    function _refundOrCredit(address to, uint256 amount) internal {
+        if (amount == 0) return;
+        (bool ok, ) = payable(to).call{value: amount}("");
+        if (!ok) _credit(to, amount);
+    }
+
+    function _credit(address to, uint256 amount) internal {
+        pendingWithdrawals[to] += amount;
+        totalPendingWithdrawals += amount;
+        emit WithdrawalPending(to, amount);
+    }
+
+    /// @notice Claim native owed from a failed push (refund / fee / disperse leg).
+    function withdraw() external nonReentrant {
+        uint256 amount = pendingWithdrawals[msg.sender];
+        require(amount > 0, "MagnetaBundler: nothing to withdraw");
+        pendingWithdrawals[msg.sender] = 0;
+        totalPendingWithdrawals -= amount;
+        (bool ok, ) = payable(msg.sender).call{value: amount}("");
+        require(ok, "MagnetaBundler: withdraw failed");
+        emit Withdrawn(msg.sender, amount);
     }
 
     // --- Core Bundling Logic ---
 
     /**
-     * @dev Buy a specific token using ETH for multiple recipient addresses in one transaction.
-     * @param token The token address to buy.
-     * @param amountOutMin The minimum amount of tokens to receive per buy (slippage protection).
-     * @param recipients The addresses that will receive the purchased tokens.
-     * @param ethAmounts The amount of ETH to spend for each recipient.
+     * @dev Buy a token using ETH for multiple recipients in one transaction.
+     * @param token         Token to buy.
+     * @param amountOutMins  Per-recipient minimum tokens out (slippage). Length
+     *                       must equal recipients.length — one min per leg so a
+     *                       large buy isn't under-protected (Sentinelle SC03).
+     * @param recipients     Addresses that receive the purchased tokens.
+     * @param ethAmounts     ETH to spend per recipient.
+     * @param deadline       Unix expiry passed to the router (Sentinelle SC03).
      */
     function bundleBuy(
         address token,
-        uint256 amountOutMin,
+        uint256[] calldata amountOutMins,
         address[] calldata recipients,
-        uint256[] calldata ethAmounts
-    ) external payable nonReentrant whenNotPaused {
-        require(recipients.length == ethAmounts.length, "Arrays length mismatch");
+        uint256[] calldata ethAmounts,
+        uint256 deadline
+    ) external payable nonReentrant whenNotPaused ensure(deadline) {
+        require(
+            recipients.length == ethAmounts.length && recipients.length == amountOutMins.length,
+            "Arrays length mismatch"
+        );
         require(token != address(0), "Invalid token");
-        
+
         uint256 totalRequired = 0;
         for (uint i = 0; i < ethAmounts.length; i++) {
             totalRequired += ethAmounts[i];
         }
         require(msg.value >= totalRequired, "Insufficient ETH sent");
 
-        // Forward Magneta service fee (msg.value excess over the swap totals)
-        // directly to the FeeVault — auto-collection, no manual rescue needed.
+        // Forward the Magneta service fee (msg.value excess over swap totals).
         uint256 fee = msg.value - totalRequired;
         _forwardFee(fee);
 
@@ -119,54 +209,43 @@ contract MagnetaBundler is ReentrancyGuard, Pausable, Ownable2Step {
         for (uint i = 0; i < recipients.length; i++) {
             require(recipients[i] != address(0), "Zero address");
             try IUniswapV2Router02(router).swapExactETHForTokens{value: ethAmounts[i]}(
-                amountOutMin, // Note: Simplification used here. In prod, strict per-recipient slippage required.
+                amountOutMins[i],
                 path,
                 recipients[i],
-                block.timestamp
+                deadline
             ) {
                 successCount++;
                 ethSpent += ethAmounts[i];
             } catch {
-                // If a swap fails, we continue. 
-                // In production, you might want to refund the ETH for failed swaps to the sender.
-                // For simplified implementation, remaining ETH stays in contract for sender to rescue.
+                // Leg failed — its ETH stays in the contract and is refunded
+                // to the sender below (never reverts the whole batch).
             }
         }
 
-        // Refund excess ETH if any (from failures or overpayment).
-        // CRITICAL: refund must NOT include `fee` — that's already been
-        // forwarded to feeRecipient earlier in the same tx via _forwardFee.
-        // Pre-patch the refund used `msg.value - ethSpent` which always tried
-        // to send back the fee on top of the unused buy budget, exceeding the
-        // contract's remaining balance and reverting the entire bundleBuy
-        // (require "ETH refund failed"). Post-patch we only refund the
-        // unused portion of the *buy budget* (`totalRequired - ethSpent`),
-        // which is what the contract actually still holds.
+        // Refund only the unused buy budget — the fee was already forwarded.
         uint256 unspentEth = totalRequired - ethSpent;
-        if (unspentEth > 0) {
-            (bool success, ) = msg.sender.call{value: unspentEth}("");
-            require(success, "ETH refund failed");
-        }
+        _refundOrCredit(msg.sender, unspentEth);
 
         emit BundleBuy(msg.sender, token, totalRequired, successCount);
     }
 
     /**
      * @dev Sell multiple tokens for ETH in one transaction.
-     * @param tokens List of token addresses to sell.
-     * @param amounts List of token amounts to sell.
-     * @param amountsOutMin List of minimum ETH amounts to receive (slippage).
+     * @param tokens        Token addresses to sell.
+     * @param amounts       Token amounts to sell.
+     * @param amountsOutMin Per-token minimum ETH out (slippage).
+     * @param deadline      Unix expiry passed to the router.
      */
     function bundleSell(
         address[] calldata tokens,
         uint256[] calldata amounts,
-        uint256[] calldata amountsOutMin
-    ) external payable nonReentrant whenNotPaused {
+        uint256[] calldata amountsOutMin,
+        uint256 deadline
+    ) external payable nonReentrant whenNotPaused ensure(deadline) {
         require(msg.sender != address(0), "Invalid sender");
         require(tokens.length == amounts.length && amounts.length == amountsOutMin.length, "Arrays length mismatch");
 
         // Forward the service fee (any native sent with the call) to FeeVault.
-        // V1 had no fee on bundleSell — V2 unifies with bundleBuy/atomicVolumeBrush.
         _forwardFee(msg.value);
 
         uint256 totalEthReceived = 0;
@@ -176,10 +255,7 @@ contract MagnetaBundler is ReentrancyGuard, Pausable, Ownable2Step {
         path[1] = IUniswapV2Router02(router).WETH();
 
         for (uint i = 0; i < tokens.length; i++) {
-            // transfer tokens from user to contract
             IERC20(tokens[i]).safeTransferFrom(msg.sender, address(this), amounts[i]);
-            
-            // approve router
             IERC20(tokens[i]).forceApprove(router, amounts[i]);
 
             path[0] = tokens[i];
@@ -189,13 +265,14 @@ contract MagnetaBundler is ReentrancyGuard, Pausable, Ownable2Step {
                 amountsOutMin[i],
                 path,
                 msg.sender, // Send ETH directly to user
-                block.timestamp
+                deadline
             ) returns (uint[] memory resultAmounts) {
                 totalEthReceived += resultAmounts[resultAmounts.length - 1];
                 successCount++;
             } catch {
-                // If swap fails, return tokens to user
-                 IERC20(tokens[i]).safeTransfer(msg.sender, amounts[i]);
+                // If swap fails, return tokens to user and clear the allowance.
+                IERC20(tokens[i]).forceApprove(router, 0);
+                IERC20(tokens[i]).safeTransfer(msg.sender, amounts[i]);
             }
         }
 
@@ -205,21 +282,22 @@ contract MagnetaBundler is ReentrancyGuard, Pausable, Ownable2Step {
     // --- Advanced Tools ---
 
     /**
-     * @dev Buy a token and immediately sell it back in the same transaction (Volume Generation).
-     * @param token The token to brush volume for.
-     * @param ethAmount The amount of ETH to use for buying.
-     * @param minEthReturned The minimum ETH expected back (slippage).
+     * @dev Buy a token and immediately sell it back in one tx (volume gen).
+     * @param token            Token to brush volume for.
+     * @param ethAmount        ETH to use for buying.
+     * @param minEthReturned   Minimum ETH expected back (slippage).
+     * @param minTokensExpected Minimum tokens from the buy leg (slippage).
+     * @param deadline         Unix expiry passed to the router.
      */
     function atomicVolumeBrush(
         address token,
         uint256 ethAmount,
         uint256 minEthReturned,
-        uint256 minTokensExpected
-    ) external payable nonReentrant whenNotPaused {
+        uint256 minTokensExpected,
+        uint256 deadline
+    ) external payable nonReentrant whenNotPaused ensure(deadline) {
         require(msg.value >= ethAmount, "Insufficient ETH");
 
-        // Forward msg.value excess (the Magneta service fee) directly to the
-        // FeeVault instead of stockpiling in this contract.
         uint256 fee = msg.value - ethAmount;
         _forwardFee(fee);
 
@@ -232,13 +310,13 @@ contract MagnetaBundler is ReentrancyGuard, Pausable, Ownable2Step {
             minTokensExpected,
             buyPath,
             address(this),
-            block.timestamp
+            deadline
         );
         uint256 tokenAmount = amounts[1];
 
         // 2. Sell Tokens
         IERC20(token).forceApprove(router, tokenAmount);
-        
+
         address[] memory sellPath = new address[](2);
         sellPath[0] = token;
         sellPath[1] = IUniswapV2Router02(router).WETH();
@@ -248,43 +326,46 @@ contract MagnetaBundler is ReentrancyGuard, Pausable, Ownable2Step {
             minEthReturned,
             sellPath,
             msg.sender,
-            block.timestamp
+            deadline
         );
 
         emit BundleSell(msg.sender, token, returnAmounts[1], 1);
     }
 
     /**
-     * @dev Sell one token and use the proceeds to bundle buy another token.
-     * @param sellToken Token to sell.
-     * @param sellAmount Amount of token to sell.
-     * @param minEthFromSell Minimum ETH to receive from the sell (slippage protection).
-     * @param buyToken Token to buy.
-     * @param minTokensPerBuy Minimum tokens per recipient buy (slippage protection).
-     * @param recipients List of recipients for the buy.
-     * @param buyAmounts List of ETH amounts to spend per recipient (must sum < proceeds).
+     * @dev Sell one token and use the proceeds to bundle-buy another.
+     * @param sellToken      Token to sell.
+     * @param sellAmount     Amount of token to sell.
+     * @param minEthFromSell Minimum ETH from the sell (slippage).
+     * @param buyToken       Token to buy.
+     * @param minTokensPerBuy Per-recipient minimum tokens out (slippage),
+     *                        length must equal recipients.length (Sentinelle SC03).
+     * @param recipients     Recipients for the buy.
+     * @param buyAmounts     ETH to spend per recipient (sum must be ≤ proceeds).
+     * @param deadline       Unix expiry passed to the router.
      */
     function sellAndBundleBuy(
         address sellToken,
         uint256 sellAmount,
         uint256 minEthFromSell,
         address buyToken,
-        uint256 minTokensPerBuy,
+        uint256[] calldata minTokensPerBuy,
         address[] calldata recipients,
-        uint256[] calldata buyAmounts
-    ) external payable nonReentrant whenNotPaused {
+        uint256[] calldata buyAmounts,
+        uint256 deadline
+    ) external payable nonReentrant whenNotPaused ensure(deadline) {
         require(msg.sender != address(0), "Invalid sender");
-        require(recipients.length == buyAmounts.length, "Arrays length mismatch");
+        require(
+            recipients.length == buyAmounts.length && recipients.length == minTokensPerBuy.length,
+            "Arrays length mismatch"
+        );
 
-        // Forward the service fee (any native sent with the call) to FeeVault.
-        // V1 had no fee on sellAndBundleBuy — V2 unifies with bundleBuy.
         _forwardFee(msg.value);
 
-        // 1. Transfer Sell Token
+        // 1. Transfer + sell the input token for ETH (proceeds held here).
         IERC20(sellToken).safeTransferFrom(msg.sender, address(this), sellAmount);
         IERC20(sellToken).forceApprove(router, sellAmount);
 
-        // 2. Sell for ETH
         address[] memory sellPath = new address[](2);
         sellPath[0] = sellToken;
         sellPath[1] = IUniswapV2Router02(router).WETH();
@@ -294,11 +375,11 @@ contract MagnetaBundler is ReentrancyGuard, Pausable, Ownable2Step {
             minEthFromSell,
             sellPath,
             address(this),
-            block.timestamp
+            deadline
         );
         uint256 ethProceeds = amounts[1];
 
-        // 3. Bundle Buy Logic
+        // 2. Bundle buy with the proceeds.
         uint256 totalRequired = 0;
         for (uint i = 0; i < buyAmounts.length; i++) {
             totalRequired += buyAmounts[i];
@@ -314,59 +395,88 @@ contract MagnetaBundler is ReentrancyGuard, Pausable, Ownable2Step {
         for (uint i = 0; i < recipients.length; i++) {
             require(recipients[i] != address(0), "Zero address recipient");
             try IUniswapV2Router02(router).swapExactETHForTokens{value: buyAmounts[i]}(
-                minTokensPerBuy,
+                minTokensPerBuy[i],
                 buyPath,
                 recipients[i],
-                block.timestamp
+                deadline
             ) {
                 successCount++;
                 ethSpent += buyAmounts[i];
             } catch {}
         }
 
-        // Refund remaining ETH
+        // Refund unused proceeds to the seller (pull-fallback on failure).
         uint256 unspentEth = ethProceeds - ethSpent;
-        if (unspentEth > 0) {
-            (bool success, ) = msg.sender.call{value: unspentEth}("");
-            require(success, "Refund failed");
-        }
+        _refundOrCredit(msg.sender, unspentEth);
+
+        emit BundleBuy(msg.sender, buyToken, totalRequired, successCount);
     }
 
     /**
-     * @dev Disperse ETH to multiple recipients (for funding wallets).
+     * @dev Disperse ETH to multiple recipients (for funding wallets). A failed
+     *      recipient is skipped-and-logged (never reverts the batch), and its
+     *      ETH is folded into the sender refund (Sentinelle SC08).
      * @param recipients List of recipient addresses.
-     * @param values List of ETH amounts (in wei) for each recipient.
+     * @param values     List of ETH amounts (wei) per recipient.
      */
-    function disperseEther(address[] calldata recipients, uint256[] calldata values) external payable nonReentrant whenNotPaused {
+    function disperseEther(
+        address[] calldata recipients,
+        uint256[] calldata values
+    ) external payable nonReentrant whenNotPaused {
         require(msg.sender != address(0), "Invalid sender");
         require(recipients.length == values.length, "Arrays length mismatch");
-        
+
         uint256 total = 0;
-        for (uint256 i = 0; i < recipients.length; i++)
-            total += values[i];
-        
+        for (uint256 i = 0; i < recipients.length; i++) total += values[i];
         require(total <= msg.value, "Insufficient ETH sent");
 
-        uint256 ethSpent = 0;
+        uint256 ethSent = 0;
         for (uint256 i = 0; i < recipients.length; i++) {
             require(recipients[i] != address(0), "Zero address");
-            (bool success, ) = recipients[i].call{value: values[i]}("");
-            require(success, "Transfer failed"); // Simple transfer failure revert whole tx
-            ethSpent += values[i];
+            (bool ok, ) = recipients[i].call{value: values[i]}("");
+            if (ok) {
+                ethSent += values[i];
+            } else {
+                // Skip the bad recipient — its value is refunded to the sender
+                // via the unspent total below, instead of reverting everyone.
+                emit DisperseSkipped(recipients[i], values[i]);
+            }
         }
 
-        uint256 unspentEth = msg.value - ethSpent;
-        if (unspentEth > 0) {
-             (bool success, ) = msg.sender.call{value: unspentEth}("");
-             require(success, "Refund failed");
-        }
+        uint256 unspentEth = msg.value - ethSent;
+        _refundOrCredit(msg.sender, unspentEth);
     }
 
     // --- Admin ---
 
-    function setRouter(address _router) external onlyOwner {
+    /// @notice Step 1 of a router change: propose a new router. Takes effect
+    ///         only after ROUTER_TIMELOCK via applyRouter(); cancellable
+    ///         meanwhile. The router receives unlimited forceApprove allowances
+    ///         per swap, so this delay makes a malicious swap observable
+    ///         on-chain before it can drain anything (Sentinelle SC01).
+    function proposeRouter(address _router) external onlyOwner {
         require(_router != address(0), "Invalid router");
-        router = _router;
+        pendingRouter = _router;
+        routerChangeETA = block.timestamp + ROUTER_TIMELOCK;
+        emit RouterChangeProposed(_router, routerChangeETA);
+    }
+
+    /// @notice Step 2: apply the pending router once the timelock has elapsed.
+    function applyRouter() external onlyOwner {
+        require(pendingRouter != address(0), "MagnetaBundler: no pending router");
+        require(block.timestamp >= routerChangeETA, "MagnetaBundler: timelock active");
+        emit RouterChanged(router, pendingRouter);
+        router = pendingRouter;
+        pendingRouter = address(0);
+        routerChangeETA = 0;
+    }
+
+    /// @notice Cancel a pending router change before it is applied.
+    function cancelRouterChange() external onlyOwner {
+        require(pendingRouter != address(0), "MagnetaBundler: no pending router");
+        emit RouterChangeCancelled(pendingRouter);
+        pendingRouter = address(0);
+        routerChangeETA = 0;
     }
 
     /// @notice Update the FeeVault address. Set to address(0) to fall back
@@ -382,14 +492,16 @@ contract MagnetaBundler is ReentrancyGuard, Pausable, Ownable2Step {
         IERC20(token).safeTransfer(msg.sender, amount);
     }
 
+    /// @notice Rescue idle native — bounded so it can never dip into funds owed
+    ///         to pull-payment claimants (pendingWithdrawals).
     function rescueETH() external onlyOwner {
-        (bool success, ) = msg.sender.call{value: address(this).balance}("");
+        uint256 rescuable = address(this).balance - totalPendingWithdrawals;
+        require(rescuable > 0, "MagnetaBundler: nothing to rescue");
+        (bool success, ) = msg.sender.call{value: rescuable}("");
         require(success, "Transfer failed");
     }
 
-    /// @notice Update the per-tx fee cap. Owner-only. Useful on chains
-    ///         where 1 native unit denominates an unusual value
-    ///         (e.g. cheap-native L2s where legitimate fees exceed 1 unit).
+    /// @notice Update the per-tx fee cap. Owner-only.
     function setMaxFeePerTx(uint256 newCap) external onlyOwner {
         require(newCap > 0, "MagnetaBundler: zero cap");
         emit MaxFeePerTxUpdated(maxFeePerTx, newCap);
