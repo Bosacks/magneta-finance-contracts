@@ -231,6 +231,16 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
     /// @notice Fulfill a pending cross-chain value op after CCTP tokens have
     ///         been minted to this gateway. Callable by anyone (permissionless
     ///         — the op was already authorized by LZ message verification).
+    /// @dev    Permissionless by design: the Magneta relayer is the normal
+    ///         caller, but anyone may fulfill so a stuck op is never censorable.
+    ///         This is theft-safe — the op's params (incl. slippage minimums)
+    ///         were fixed at send time on the origin chain and re-validated by
+    ///         the module, the earmark invariant below blocks borrowing another
+    ///         op's funds, and effects precede the module call under
+    ///         nonReentrant. The residual is griefing/MEV (an adversary picking
+    ///         an unfavorable block); bounded by the caller-supplied minimums,
+    ///         so worst case the op reverts and stays pending. (Sentinelle
+    ///         2026-05-25 SC01 MEDIUM — acknowledged, behaviour intentional.)
     function fulfillValueOp(bytes32 _guid) external override nonReentrant whenNotPaused {
         PendingValueOp memory p = pendingValueOps[_guid];
         require(p.bridgedAmount > 0, "MagnetaGateway: no pending op");
@@ -418,6 +428,17 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
         address /*_executor*/,
         bytes calldata /*_extraData*/
     ) internal override whenNotPaused {
+        // Defense-in-depth trusted-sender check. OAppReceiver.lzReceive already
+        // enforces OnlyPeer (`_getPeerOrRevert(srcEid) == sender`) before
+        // dispatching here, so this is redundant today — but asserting it
+        // locally keeps the cross-chain-forgery invariant inside _lzReceive
+        // itself, surviving any future refactor of the inherited entrypoint.
+        // (Sentinelle 2026-05-25 SC05 / DVN-spoof class, Kelp DAO $292M pattern.)
+        require(
+            peers[_origin.srcEid] != bytes32(0) && _origin.sender == peers[_origin.srcEid],
+            "MagnetaGateway: unauthorized sender"
+        );
+
         require(!processedGuid[_guid], "MagnetaGateway: guid already processed");
         processedGuid[_guid] = true;
 
@@ -560,9 +581,12 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
     function rescueETH(address to, uint256 amount) external onlyOwner nonReentrant {
         require(to != address(0), "MagnetaGateway: zero to");
         require(amount > 0, "MagnetaGateway: zero amount");
+        // CEI: emit before the external call so no state/log mutation follows it
+        // (Sentinelle 2026-05-25 SC08 REE-1). onlyOwner + nonReentrant already
+        // bound the risk; a failed call reverts the whole tx incl. this event.
+        emit Rescued(address(0), to, amount);
         (bool ok, ) = payable(to).call{value: amount}("");
         require(ok, "MagnetaGateway: rescue failed");
-        emit Rescued(address(0), to, amount);
     }
 
     /// @notice Map a LayerZero endpoint ID to an EVM chain ID (bidirectional).

@@ -164,6 +164,9 @@ contract MagnetaPool is ERC721, ERC721Enumerable, Ownable2Step, Pausable, Reentr
     ) external returns (uint256 poolId) {
         require(poolCreationEnabled || msg.sender == owner(), "MagnetaPool: pool creation disabled");
         require(token0 != token1, "MagnetaPool: identical tokens");
+        // Reject the zero address so a pool can't be created against a non-token
+        // (Sentinelle 2026-05-25 SC01 MEDIUM). Checked pre-sort, before any state.
+        require(token0 != address(0) && token1 != address(0), "MagnetaPool: zero token");
         require(
             fee == FEE_TIER_LOWEST || 
             fee == FEE_TIER_LOW || 
