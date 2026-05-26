@@ -342,6 +342,11 @@ describe("MagnetaXChainLpReceiver", () => {
       await expect(receiver.connect(stranger).setKeeper(stranger.address)).to.be.reverted;
     });
 
+    it("setKeeper rejects the zero address (would brick fulfillSigned)", async () => {
+      await expect(receiver.connect(owner).setKeeper(ethers.ZeroAddress))
+        .to.be.revertedWithCustomError(receiver, "ZeroAddress");
+    });
+
     it("keeper fulfils a user-signed intent from bridged native → LP to the user", async () => {
       // Simulate the LI.FI plain bridge landing native in the receiver.
       await stranger.sendTransaction({ to: await receiver.getAddress(), value: ONE });

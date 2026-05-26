@@ -81,8 +81,13 @@ contract MagnetaXChainLpReceiver is Ownable2Step, ReentrancyGuard, EIP712 {
         uint256 minTokenOut;  // swap floor
         uint256 minTokenLp;   // addLiquidityETH token floor
         uint256 minNativeLp;  // addLiquidityETH native floor
-        uint256 deadline;     // unix expiry
-        uint256 nonce;        // per-user uniqueness / replay scope
+        uint256 deadline;     // unix expiry (also the abort/cancellation mechanism)
+        uint256 nonce;        // uniqueness only: lets a user sign two otherwise-
+                              // identical intents. NOT user-cancellable — replay is
+                              // scoped by the full digest (intentFulfilled[digest]),
+                              // and an unwanted intent is abandoned by letting its
+                              // `deadline` pass. There is deliberately no per-user
+                              // nonce counter (Sentinelle SC04).
     }
 
     bytes32 private constant LP_INTENT_TYPEHASH = keccak256(
@@ -140,7 +145,12 @@ contract MagnetaXChainLpReceiver is Ownable2Step, ReentrancyGuard, EIP712 {
     }
 
     /// @notice Set/rotate the trusted keeper. Owner-only.
+    /// @dev The keeper MAY be a multisig/Safe — nothing here requires an EOA — which
+    ///      is the recommended hardening against single-key compromise (Sentinelle
+    ///      SC01). Reverts on the zero address to avoid bricking fulfillSigned
+    ///      (Sentinelle LOW SC01); rotate to a fresh keeper to retire the old one.
     function setKeeper(address newKeeper) external onlyOwner {
+        if (newKeeper == address(0)) revert ZeroAddress();
         emit KeeperUpdated(keeper, newKeeper);
         keeper = newKeeper;
     }
@@ -257,11 +267,16 @@ contract MagnetaXChainLpReceiver is Ownable2Step, ReentrancyGuard, EIP712 {
         path[1] = token;
 
         uint256 tokenBefore = IERC20(token).balanceOf(address(this));
-        IUniswapV2Router02(router).swapExactETHForTokens{value: half}(
+        uint256[] memory amounts = IUniswapV2Router02(router).swapExactETHForTokens{value: half}(
             minTokenOut, path, address(this), deadline
         );
-        uint256 tokenReceived = IERC20(token).balanceOf(address(this)) - tokenBefore;
-        // Re-validate the MEASURED delta against the floor (Sentinelle SC02).
+        uint256 delta = IERC20(token).balanceOf(address(this)) - tokenBefore;
+        // Cap the amount we treat as swapped at the router's OWN reported output, so
+        // a token donated into this contract can't inflate the measured delta and be
+        // folded into the LP / floor check (Sentinelle SC02). The min() still honors
+        // fee-on-transfer tokens, where the actually-received `delta` is the smaller.
+        uint256 swapReported = amounts[amounts.length - 1];
+        uint256 tokenReceived = delta < swapReported ? delta : swapReported;
         if (tokenReceived < minTokenOut) revert InsufficientTokenOut();
 
         // 2. Add liquidity: token + native → LP, minted directly to `to`.
