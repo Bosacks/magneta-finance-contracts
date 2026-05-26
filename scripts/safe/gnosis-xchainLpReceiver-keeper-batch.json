@@ -1,0 +1,40 @@
+{
+  "version": "1.0",
+  "chainId": "100",
+  "createdAt": 1748275200000,
+  "meta": {
+    "name": "Magneta — XChainLpReceiver acceptOwnership + setKeeper (Gnosis)",
+    "description": "Finalize Ownable2Step transfer of MagnetaXChainLpReceiver (0xeca6092e37E9d0692C21294473aDD604D9331fA9) to the Safe, then set the keeper to the Cronos relayer wallet 0x2B898219Ce1dbEb3ECd3956223b9Ff0C0B126aC2 so it can call fulfillSigned for the relayer/intent cross-chain LP path.",
+    "txBuilderVersion": "1.17.0",
+    "createdFromSafeAddress": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a",
+    "createdFromOwnerAddress": ""
+  },
+  "transactions": [
+    {
+      "to": "0xeca6092e37E9d0692C21294473aDD604D9331fA9",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [],
+        "name": "acceptOwnership",
+        "payable": false
+      },
+      "contractInputsValues": {}
+    },
+    {
+      "to": "0xeca6092e37E9d0692C21294473aDD604D9331fA9",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [
+          { "internalType": "address", "name": "newKeeper", "type": "address" }
+        ],
+        "name": "setKeeper",
+        "payable": false
+      },
+      "contractInputsValues": {
+        "newKeeper": "0x2B898219Ce1dbEb3ECd3956223b9Ff0C0B126aC2"
+      }
+    }
+  ]
+}
