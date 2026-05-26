@@ -290,4 +290,118 @@ describe("MagnetaXChainLpReceiver", () => {
       expect(await receiver.owner()).to.equal(user.address);
     });
   });
+
+  // ── Relayer/intent path (fulfillSigned) — non-custodial keeper completion ──
+  describe("fulfillSigned (relayer/intent)", () => {
+    const keeper = () => executor; // reuse executor as the trusted keeper
+
+    async function makeIntent(overrides: any = {}) {
+      const net = await ethers.provider.getNetwork();
+      const intent = {
+        token: await token.getAddress(),
+        to: user.address,
+        amountNative: ONE,
+        minTokenOut: 0n,
+        minTokenLp: 0n,
+        minNativeLp: 0n,
+        deadline: ethers.MaxUint256,
+        nonce: 1n,
+        ...overrides,
+      };
+      const domain = {
+        name: "MagnetaXChainLpReceiver",
+        version: "1",
+        chainId: net.chainId,
+        verifyingContract: await receiver.getAddress(),
+      };
+      const types = {
+        LpIntent: [
+          { name: "token", type: "address" },
+          { name: "to", type: "address" },
+          { name: "amountNative", type: "uint256" },
+          { name: "minTokenOut", type: "uint256" },
+          { name: "minTokenLp", type: "uint256" },
+          { name: "minNativeLp", type: "uint256" },
+          { name: "deadline", type: "uint256" },
+          { name: "nonce", type: "uint256" },
+        ],
+      };
+      // Signed by `to` (the user / LP recipient).
+      const signer = overrides.signer ?? user;
+      const sig = await signer.signTypedData(domain, types, intent);
+      return { intent, sig };
+    }
+
+    beforeEach(async () => {
+      await receiver.connect(owner).setKeeper(keeper().address);
+    });
+
+    it("setKeeper is owner-only + emits", async () => {
+      await expect(receiver.connect(owner).setKeeper(stranger.address))
+        .to.emit(receiver, "KeeperUpdated");
+      await expect(receiver.connect(stranger).setKeeper(stranger.address)).to.be.reverted;
+    });
+
+    it("keeper fulfils a user-signed intent from bridged native → LP to the user", async () => {
+      // Simulate the LI.FI plain bridge landing native in the receiver.
+      await stranger.sendTransaction({ to: await receiver.getAddress(), value: ONE });
+      const { intent, sig } = await makeIntent();
+
+      await expect(receiver.connect(keeper()).fulfillSigned(intent, sig))
+        .to.emit(receiver, "IntentFulfilled");
+
+      expect(await lp.balanceOf(user.address)).to.be.gt(0n);
+      // 1:1 mock: 1 native fully consumed (0.5 swap + 0.5 LP), nothing left.
+      expect(await ethers.provider.getBalance(await receiver.getAddress())).to.equal(0n);
+    });
+
+    it("reverts for a non-keeper caller", async () => {
+      await stranger.sendTransaction({ to: await receiver.getAddress(), value: ONE });
+      const { intent, sig } = await makeIntent();
+      await expect(receiver.connect(stranger).fulfillSigned(intent, sig))
+        .to.be.revertedWithCustomError(receiver, "OnlyKeeper");
+    });
+
+    it("reverts if the signer isn't intent.to (keeper can't redirect funds)", async () => {
+      await stranger.sendTransaction({ to: await receiver.getAddress(), value: ONE });
+      // Intent says to=user, but signed by stranger.
+      const { intent, sig } = await makeIntent({ signer: stranger });
+      await expect(receiver.connect(keeper()).fulfillSigned(intent, sig))
+        .to.be.revertedWithCustomError(receiver, "BadSignature");
+    });
+
+    it("reverts on replay (same intent twice)", async () => {
+      await stranger.sendTransaction({ to: await receiver.getAddress(), value: ONE * 2n });
+      const { intent, sig } = await makeIntent();
+      await receiver.connect(keeper()).fulfillSigned(intent, sig);
+      await expect(receiver.connect(keeper()).fulfillSigned(intent, sig))
+        .to.be.revertedWithCustomError(receiver, "IntentAlreadyFulfilled");
+    });
+
+    it("reverts on an expired intent", async () => {
+      await stranger.sendTransaction({ to: await receiver.getAddress(), value: ONE });
+      const { intent, sig } = await makeIntent({ deadline: 1n });
+      await expect(receiver.connect(keeper()).fulfillSigned(intent, sig))
+        .to.be.revertedWithCustomError(receiver, "Expired");
+    });
+
+    it("reverts if the bridged native hasn't arrived yet", async () => {
+      // No funds sent to the receiver.
+      const { intent, sig } = await makeIntent();
+      await expect(receiver.connect(keeper()).fulfillSigned(intent, sig))
+        .to.be.revertedWithCustomError(receiver, "InsufficientBridgedNative");
+    });
+
+    it("spends ONLY the intent's native — never another intent's funds or a donation", async () => {
+      // Receiver holds intent A's 1 native + a 1-native donation = 2 total.
+      await stranger.sendTransaction({ to: await receiver.getAddress(), value: ONE * 2n });
+      const { intent, sig } = await makeIntent({ amountNative: ONE });
+
+      await receiver.connect(keeper()).fulfillSigned(intent, sig);
+
+      // Built LP from exactly 1 native; the other 1 native is untouched.
+      expect(await lp.balanceOf(user.address)).to.be.gt(0n);
+      expect(await ethers.provider.getBalance(await receiver.getAddress())).to.equal(ONE);
+    });
+  });
 });
