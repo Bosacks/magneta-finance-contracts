@@ -3,6 +3,32 @@
 > Fil chronologique des sessions. Anti-chronologique (plus récent en haut).
 > Voir `~/CLAUDE.md` pour la règle d'édition.
 
+## 2026-05-27
+
+- Scan Sentinelle `MagnetaXChainLpReceiver` (CAUTION 52) trié + corrigé : SC02 cap sortie routeur `min(delta, amounts[last])`, guard `setKeeper` zero-addr, doc nonce/keeper ; 290 tests OK (commit `c02564c`)
+- Ajout chemin relayer/intent : `fulfillSigned` (EIP-712 LpIntent, onlyKeeper, replay-guard digest) + keeper ; 32 tests receiver
+- Receiver redéployé Gnosis (build durci) `0xeca6092…` ; batch Safe `acceptOwnership` + `setKeeper(0x2B89…)` exécuté + keeper financé 1 xDAI
+- **PARQUÉ** : modèle receiver/keeper prouvé inalimentable sur routes non-CCTP (bridges livrent à l'EOA, pas au contrat) — pivot côté Tokens vers bridge→wallet + LP sur destination
+- Commits contracts locaux (`c02564c`/`b2b9578`/`66d5c8b`) — **push en attente** (remote HTTPS, creds requises)
+
+## 2026-05-25
+
+- Ajout `MagnetaXChainLpReceiver.sol` (core) — receiver permissionless pour LP cross-chain via LI.FI (chaînes non-CCTP)
+- Native-only input : swap moitié → token, puis addLiquidityETH ; non-custodial, donation-safe, Ownable2Step + ReentrancyGuard
+- Mock configurable `MockLpReceiverRouter.sol` + 22 tests (dust refund, donation safety, slippage) ; suite full 273 passing
+- Slither : findings bénins seulement (unused swap return intentionnel, event-after-call rescue owner, low-level native calls)
+- `deployXChainLpReceiver.ts` prêt (lit router + WETH on-chain, transfer owner = proxy existant) — attend scan Sentinelle + wiring frontend avant deploy
+- Scan receiver CAUTION 72/100 → fix MEDIUM : floor explicite `tokenReceived < minTokenOut` + MockFeeToken (23 tests) — `72db0b2`
+- Triage 6 scans (Gateway/Pool/Swap/V2Router02/V2Library + Bundler) — détail dans memory + ci-dessous
+- Gateway FAIL 28/100 : CRITICAL `_lzReceive` = FAUX POSITIF (OAppReceiver.lzReceive enforce déjà OnlyPeer, vérifié dans node_modules LZ 3.0.168) → garde defense-in-depth ajoutée + rescueETH CEI + doc fulfillValueOp — `e35f0d8`
+- Pool : check zero-address `createPool` (SC01 MEDIUM) — `e35f0d8`
+- V2Router02 + V2Library HIGH = propriétés canoniques UniswapV2 (balanceOf stateless-router / getAmountsOut spot-price) → AUCUN changement (ne pas toucher au code AMM audité)
+- ⚠️ PDF Bundler = doublon mal-nommé du rapport Gateway (audit ID a8b7fccd) → re-scanné depuis
+- Bundler re-scanné CAUTION 42/100 → full hardening (`608b577`) : router timelock 24h (propose/apply/cancel), disperseEther skip-and-log + pull-payment fallback (withdraw + pendingWithdrawals), rescueETH borné, deadline user partout, per-leg amountOutMins[]/minTokensPerBuy[]
+- Bundler = ABI CHANGE → frontend à mettre à jour AU MOMENT du redeploy (pas avant) ; ~10 call sites (BundledBuy/Sell, SellBundledBuy, AntiMEVVolumeBot, Dex*, orchestrator bots) + lib/abis/MagnetaBundler.json
+- Swap MEDIUM getAmountOut caller-relative = imprécision bornée à 0.3% (fee), 0 pour user normal → skip / V1.1
+- Suite full 281 passing ; commits locaux sur main (pas push)
+
 ## 2026-05-07
 
 - Magneta AMM live sur Base (router `0xc1a6e0Ad…bccb`) et Arbitrum (`0xfC232723…3D8d`) — gas total $0.45
