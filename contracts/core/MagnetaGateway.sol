@@ -659,6 +659,30 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
         }
     }
 
+    /// @dev Override OAppSender._payNative to relax the default strict
+    ///      `msg.value == _nativeFee` to `msg.value >= _nativeFee`. The
+    ///      default check is broken for two of our flows:
+    ///        1. Fan-out (sendFanOut*Op): the loop calls _lzSend per
+    ///           destination. msg.value covers the SUM of all per-leg fees,
+    ///           but each leg's _payNative compares the whole msg.value to
+    ///           that ONE leg's fee — guaranteed to revert when N > 1 or
+    ///           even N == 1 if the SDK quoted from a slightly different
+    ///           block (gas oracle drift).
+    ///        2. Single-leg value op (sendCrossChainValueOp): the SDK can't
+    ///           predict the block-current fee exactly, so any drift between
+    ///           quote-time and execute-time reverts the entire tx.
+    ///      Accept any over-payment and forward only what's needed; the
+    ///      callers already refund the excess at the end (see lines 318,
+    ///      381) so no value gets stuck.
+    function _payNative(uint256 _nativeFee)
+        internal
+        override
+        returns (uint256 nativeFee)
+    {
+        if (msg.value < _nativeFee) revert NotEnoughNative(msg.value);
+        return _nativeFee;
+    }
+
     /// @dev Ownable2Step requires overriding `_transferOwnership`? No —
     ///      OApp inherits from OAppCore which uses OZ Ownable. Ownable2Step
     ///      extends Ownable without clashing, but `transferOwnership` must

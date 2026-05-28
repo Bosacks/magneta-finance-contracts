@@ -286,4 +286,127 @@ describe("MagnetaGateway", function () {
             expect(events.length).to.equal(2);
         });
     });
+
+    describe("MG-6: _payNative override accepts msg.value >= fee", () => {
+        // Pre-patch (default OAppSender) enforced strict equality `msg.value ==
+        // _nativeFee`. That made fan-out fundamentally broken (loop iteration
+        // i compares the SAME outer msg.value against fee_i, so only one leg
+        // could ever match) and single-leg fragile (any gas-price drift
+        // between SDK quote and on-chain execute reverted the whole tx).
+        // The override below accepts overpayment; the calling op refunds the
+        // excess from its own balance at the end. These tests cover both the
+        // strict-revert that the override removes and the new permissive
+        // behavior.
+
+        const DST_EID_BASE = 30184;
+        const CCTP_DOMAIN_BASE = 6;
+        const QUOTE_FEE = ethers.parseEther("0.001"); // MockLayerZeroEndpoint constant
+        // Minimal LZ v2 type-3 option (1.5M lzReceive gas) — content unused
+        // by the mock endpoint (it returns a fixed fee) but required to
+        // exist as non-empty calldata.
+        const LZ_OPT = "0x0003010011010000000000000000000000000016e360";
+
+        let cctp: any;
+        let peerBytes32: string;
+
+        beforeEach(async () => {
+            // Wire CCTP, USDC, peer for a single destination (Base).
+            const Cctp = await ethers.getContractFactory("MockCctpMessenger");
+            cctp = await Cctp.deploy();
+
+            await gateway.setUsdc(await usdc.getAddress());
+            await gateway.setCctp(await cctp.getAddress(), 7 /* Polygon CCTP domain */);
+            await gateway.setEidCctpDomain(DST_EID_BASE, CCTP_DOMAIN_BASE);
+
+            // Set the peer (Base Gateway address — any 32-byte non-zero
+            // will do for the mock; the mock endpoint doesn't validate).
+            peerBytes32 = ethers.zeroPadValue("0x9F9A3DC819e5229b63b504d7A0FDE93FA436919E", 32);
+            await gateway.setPeer(DST_EID_BASE, peerBytes32);
+
+            // Alice approves Gateway to pull USDC (max — covers both fee
+            // and bridged amount).
+            await usdc.connect(alice).approve(await gateway.getAddress(), ethers.MaxUint256);
+        });
+
+        const lpParams = () => {
+            // CrossChainLPParams: (token, usdcTotal, tokenShareBps, mins×4, deadline)
+            const deadline = Math.floor(Date.now() / 1000) + 1800;
+            return ethers.AbiCoder.defaultAbiCoder().encode(
+                ["address", "uint256", "uint16", "uint256", "uint256", "uint256", "uint256", "uint256"],
+                [
+                    "0x878aA594a574DA6F57b4b72456ab4a04946D7229",
+                    1_000_000, // 1 USDC bridged
+                    5000,
+                    0, 0, 0, 0,
+                    deadline,
+                ]
+            );
+        };
+
+        it("sendFanOutValueOp accepts msg.value > quoted fee (excess refunded)", async () => {
+            const params = lpParams();
+            const overpay = QUOTE_FEE * 5n;
+            const balBefore = await ethers.provider.getBalance(alice.address);
+
+            const tx = await gateway.connect(alice).sendFanOutValueOp(
+                [DST_EID_BASE], 0 /* CREATE_LP */, [params], [1_000_000], LZ_OPT,
+                { value: overpay }
+            );
+            const receipt = await tx.wait();
+            const gasCost = receipt.gasUsed * receipt.gasPrice;
+
+            // Without the override, this whole call would revert NotEnoughNative.
+            // With the override, only QUOTE_FEE leaves the user; the rest is
+            // refunded by the trailing block in sendFanOutValueOp.
+            const balAfter = await ethers.provider.getBalance(alice.address);
+            const spent = balBefore - balAfter - gasCost;
+            expect(spent).to.equal(QUOTE_FEE);
+        });
+
+        it("sendFanOutValueOp accepts msg.value == quoted fee (no excess)", async () => {
+            const params = lpParams();
+            await expect(
+                gateway.connect(alice).sendFanOutValueOp(
+                    [DST_EID_BASE], 0, [params], [1_000_000], LZ_OPT,
+                    { value: QUOTE_FEE }
+                )
+            ).to.emit(gateway, "CrossChainFanOut");
+        });
+
+        it("sendFanOutValueOp still reverts msg.value < quoted fee", async () => {
+            const params = lpParams();
+            await expect(
+                gateway.connect(alice).sendFanOutValueOp(
+                    [DST_EID_BASE], 0, [params], [1_000_000], LZ_OPT,
+                    { value: QUOTE_FEE - 1n }
+                )
+            ).to.be.reverted; // NotEnoughNative or InsufficientLzFee depending on which check trips first
+        });
+
+        it("sendFanOutValueOp with 2 destinations: msg.value must cover SUM, not require per-leg equality", async () => {
+            // Wire a second destination (Arbitrum).
+            const DST_EID_ARB = 30110;
+            await gateway.setEidCctpDomain(DST_EID_ARB, 3);
+            await gateway.setPeer(DST_EID_ARB, peerBytes32);
+
+            const params = lpParams();
+            const totalFee = QUOTE_FEE * 2n;
+            const balBefore = await ethers.provider.getBalance(alice.address);
+
+            // Send EXACTLY 2× the quoted fee — this is the case that would
+            // ALWAYS revert under strict equality (each leg's _payNative
+            // would compare 2×QUOTE against QUOTE).
+            const tx = await gateway.connect(alice).sendFanOutValueOp(
+                [DST_EID_BASE, DST_EID_ARB], 0,
+                [params, params], [1_000_000, 1_000_000], LZ_OPT,
+                { value: totalFee }
+            );
+            const receipt = await tx.wait();
+            const gasCost = receipt.gasUsed * receipt.gasPrice;
+
+            const balAfter = await ethers.provider.getBalance(alice.address);
+            const spent = balBefore - balAfter - gasCost;
+            expect(spent).to.equal(totalFee);
+        });
+    });
 });
