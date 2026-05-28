@@ -1,0 +1,31 @@
+{
+  "version": "1.0",
+  "chainId": "137",
+  "createdAt": 1748462000000,
+  "meta": {
+    "name": "Magneta — Polygon MagnetaSwap whitelistTokenBatch (USDC, WMATIC)",
+    "description": "Whitelist USDC + WMATIC on the Polygon MagnetaSwap so LPModule._createLPFromBridgedUsdc can route cross-chain LP add through the Magneta-first swap path. Needed for v3 Gateway fulfillValueOp (MG-7).",
+    "txBuilderVersion": "1.17.0",
+    "createdFromSafeAddress": "0x4AeA3A398Db41b45e146c08131aD27c75b02EC2F",
+    "createdFromOwnerAddress": ""
+  },
+  "transactions": [
+    {
+      "to": "0xDa43c95Fb2ccf6bDE904Ece558eDeA6B506641B9",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [
+          { "internalType": "address[]", "name": "tokens", "type": "address[]" },
+          { "internalType": "bool",      "name": "whitelisted", "type": "bool" }
+        ],
+        "name": "whitelistTokenBatch",
+        "payable": false
+      },
+      "contractInputsValues": {
+        "tokens": "[0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359,0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270]",
+        "whitelisted": "true"
+      }
+    }
+  ]
+}

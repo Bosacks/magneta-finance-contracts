@@ -1,0 +1,31 @@
+{
+  "version": "1.0",
+  "chainId": "8453",
+  "createdAt": 1748462000000,
+  "meta": {
+    "name": "Magneta — Base MagnetaSwap whitelistTokenBatch (USDC, WETH, TMC)",
+    "description": "Whitelist USDC + WETH + TMC (test memecoin) on the Base MagnetaSwap so LPModule._createLPFromBridgedUsdc can route the bridged USDC into TMC + WETH for addLiquidityETH. Needed for v3 Gateway fulfillValueOp (MG-7).",
+    "txBuilderVersion": "1.17.0",
+    "createdFromSafeAddress": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a",
+    "createdFromOwnerAddress": ""
+  },
+  "transactions": [
+    {
+      "to": "0x3c21016E57e7A29333f38d200EC8945bfc6BA537",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [
+          { "internalType": "address[]", "name": "tokens", "type": "address[]" },
+          { "internalType": "bool",      "name": "whitelisted", "type": "bool" }
+        ],
+        "name": "whitelistTokenBatch",
+        "payable": false
+      },
+      "contractInputsValues": {
+        "tokens": "[0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913,0x4200000000000000000000000000000000000006,0x878aA594a574DA6F57b4b72456ab4a04946D7229]",
+        "whitelisted": "true"
+      }
+    }
+  ]
+}
