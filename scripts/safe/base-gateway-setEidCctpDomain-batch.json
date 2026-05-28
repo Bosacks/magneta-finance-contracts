@@ -1,0 +1,31 @@
+{
+  "version": "1.0",
+  "chainId": "8453",
+  "createdAt": 1748378000000,
+  "meta": {
+    "name": "Magneta — Base Gateway setEidCctpDomainBatch (LZ EIDs → Circle CCTP domains)",
+    "description": "Map LZ EIDs to Circle CCTP domains on Base Gateway. Self (base eid 30184) excluded. Covers: ethereum=0, arbitrum=3, polygon=7, optimism=2, avalanche=1, linea=11.",
+    "txBuilderVersion": "1.17.0",
+    "createdFromSafeAddress": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a",
+    "createdFromOwnerAddress": ""
+  },
+  "transactions": [
+    {
+      "to": "0x9F9A3DC819e5229b63b504d7A0FDE93FA436919E",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [
+          { "internalType": "uint32[]", "name": "eids", "type": "uint32[]" },
+          { "internalType": "uint32[]", "name": "domains", "type": "uint32[]" }
+        ],
+        "name": "setEidCctpDomainBatch",
+        "payable": false
+      },
+      "contractInputsValues": {
+        "eids": "[30101,30110,30109,30111,30106,30183]",
+        "domains": "[0,3,7,2,1,11]"
+      }
+    }
+  ]
+}

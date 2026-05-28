@@ -1,0 +1,31 @@
+{
+  "version": "1.0",
+  "chainId": "137",
+  "createdAt": 1748378000000,
+  "meta": {
+    "name": "Magneta — Polygon Gateway setEidCctpDomainBatch (LZ EIDs → Circle CCTP domains)",
+    "description": "Map LayerZero EIDs to Circle CCTP domains on the Polygon Gateway so depositForBurn routes USDC to the correct destination chain (otherwise unset entries default to 0 = Ethereum). Covers the 6 CCTP destinations from the BETA list (self excluded): ethereum=0, arbitrum=3, base=6, optimism=2, avalanche=1, linea=11.",
+    "txBuilderVersion": "1.17.0",
+    "createdFromSafeAddress": "0x4AeA3A398Db41b45e146c08131aD27c75b02EC2F",
+    "createdFromOwnerAddress": ""
+  },
+  "transactions": [
+    {
+      "to": "0x3c21016E57e7A29333f38d200EC8945bfc6BA537",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [
+          { "internalType": "uint32[]", "name": "eids", "type": "uint32[]" },
+          { "internalType": "uint32[]", "name": "domains", "type": "uint32[]" }
+        ],
+        "name": "setEidCctpDomainBatch",
+        "payable": false
+      },
+      "contractInputsValues": {
+        "eids": "[30101,30110,30184,30111,30106,30183]",
+        "domains": "[0,3,6,2,1,11]"
+      }
+    }
+  ]
+}

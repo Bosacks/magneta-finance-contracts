@@ -1,0 +1,31 @@
+{
+  "version": "1.0",
+  "chainId": "43114",
+  "createdAt": 1748378000000,
+  "meta": {
+    "name": "Magneta — Avalanche Gateway setEidCctpDomainBatch (LZ EIDs → Circle CCTP domains)",
+    "description": "Map LZ EIDs to Circle CCTP domains on Avalanche Gateway. Self (avalanche eid 30106) excluded. Covers: ethereum=0, arbitrum=3, base=6, polygon=7, optimism=2, linea=11.",
+    "txBuilderVersion": "1.17.0",
+    "createdFromSafeAddress": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a",
+    "createdFromOwnerAddress": ""
+  },
+  "transactions": [
+    {
+      "to": "0x3c21016E57e7A29333f38d200EC8945bfc6BA537",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [
+          { "internalType": "uint32[]", "name": "eids", "type": "uint32[]" },
+          { "internalType": "uint32[]", "name": "domains", "type": "uint32[]" }
+        ],
+        "name": "setEidCctpDomainBatch",
+        "payable": false
+      },
+      "contractInputsValues": {
+        "eids": "[30101,30110,30184,30109,30111,30183]",
+        "domains": "[0,3,6,7,2,11]"
+      }
+    }
+  ]
+}
