@@ -463,22 +463,29 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
             emit OperationExecuted(op, module, caller, ctx.originChainId, keccak256(result));
 
         } else if (version == 1) {
-            // Value op — store as pending, wait for CCTP tokens
+            // Value op — store as pending, wait for CCTP tokens.
+            //
+            // The source-chain payload includes its own `address(usdc)` for
+            // traceability, but CCTP V1 mints LOCAL USDC on the destination
+            // (Circle's USDC has a different address on every chain). We
+            // store this gateway's configured `usdc` so fulfillValueOp can
+            // check the right balance and approve the module on the right
+            // ERC-20. The source-encoded address is intentionally discarded.
             (, OpType op, address caller, bytes memory params,
-             address bridgedToken, uint256 bridgedAmount) =
+             /* address payloadBridgedToken */, uint256 bridgedAmount) =
                 abi.decode(_payload, (uint8, OpType, address, bytes, address, uint256));
 
             pendingValueOps[_guid] = PendingValueOp({
                 op: op,
                 caller: caller,
                 params: params,
-                bridgedToken: bridgedToken,
+                bridgedToken: address(usdc),
                 bridgedAmount: bridgedAmount,
                 createdAt: block.timestamp
             });
             totalEarmarked += bridgedAmount;
 
-            emit ValueOpPending(_guid, op, caller, bridgedToken, bridgedAmount);
+            emit ValueOpPending(_guid, op, caller, address(usdc), bridgedAmount);
         }
     }
 
@@ -657,6 +664,21 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
         if (fee > 0) {
             usdc.safeTransferFrom(msg.sender, _feeVault, fee);
         }
+    }
+
+    /// @notice Owner-only escape hatch for a pending value op that can never
+    ///         be fulfilled (e.g. CCTP attestation lost; module misconfigured
+    ///         when the op was queued; pre-MG-7 ops with the wrong bridgedToken).
+    /// @dev    Clears the pending op and decrements totalEarmarked, freeing
+    ///         the corresponding USDC for rescueERC20. Does NOT refund the
+    ///         caller directly — the operator is expected to reimburse off-
+    ///         chain (or use rescueERC20 to send the USDC back).
+    function adminClearPendingValueOp(bytes32 guid) external onlyOwner {
+        PendingValueOp memory p = pendingValueOps[guid];
+        require(p.bridgedAmount > 0, "MagnetaGateway: no pending op");
+        totalEarmarked -= p.bridgedAmount;
+        delete pendingValueOps[guid];
+        emit ValueOpFulfilled(guid, p.op, p.caller);
     }
 
     /// @dev Override OAppSender._payNative to relax the default strict

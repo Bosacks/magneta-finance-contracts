@@ -287,6 +287,97 @@ describe("MagnetaGateway", function () {
         });
     });
 
+    describe("MG-7: _lzReceive normalizes bridgedToken to local usdc", () => {
+        // Pre-patch (MG-6 contract) stored `pendingValueOps[guid].bridgedToken`
+        // verbatim from the source-chain payload. That payload contains the
+        // SOURCE chain's USDC address, which on the destination chain is
+        // either a different contract or no contract at all — making
+        // fulfillValueOp revert at the IERC20(bridgedToken).balanceOf() check.
+        // The MG-7 patch substitutes the destination's own `address(usdc)`
+        // when storing the pending op so the rest of the flow always touches
+        // the right ERC-20 (the one CCTP V1 actually mints locally).
+
+        // Polygon-style USDC address that is NOT a contract on hardhat — any
+        // non-zero address different from the local mock USDC will do.
+        const FOREIGN_USDC = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359";
+
+        let endpointSigner: SignerWithAddress;
+
+        beforeEach(async () => {
+            await gateway.setUsdc(await usdc.getAddress());
+
+            // Configure a peer so the OApp accepts incoming messages from
+            // ourselves (the test impersonates the endpoint).
+            const peerB32 = ethers.zeroPadValue(await gateway.getAddress(), 32);
+            await gateway.setPeer(EID, peerB32);
+
+            // Impersonate the LZ endpoint to call _lzReceive via the public
+            // lzReceive wrapper exposed by OApp.
+            await ethers.provider.send("hardhat_impersonateAccount", [await endpoint.getAddress()]);
+            await ethers.provider.send("hardhat_setBalance", [
+                await endpoint.getAddress(),
+                "0x" + ethers.parseEther("10").toString(16),
+            ]);
+            endpointSigner = await ethers.getSigner(await endpoint.getAddress()) as any;
+        });
+
+        const buildValuePayload = (caller: string, params: string, bridgedToken: string, amount: bigint) => {
+            return ethers.AbiCoder.defaultAbiCoder().encode(
+                ["uint8", "uint8", "address", "bytes", "address", "uint256"],
+                [1, 0 /* CREATE_LP */, caller, params, bridgedToken, amount]
+            );
+        };
+
+        it("stores local usdc as bridgedToken even when payload carries a foreign address", async () => {
+            const guid = ethers.id("test-foreign-token");
+            const innerParams = ethers.AbiCoder.defaultAbiCoder().encode(
+                ["address", "uint256", "uint16", "uint256", "uint256", "uint256", "uint256", "uint256"],
+                ["0x0000000000000000000000000000000000000001", 1_000_000, 5000, 0, 0, 0, 0, Math.floor(Date.now() / 1000) + 1800]
+            );
+            const payload = buildValuePayload(alice.address, innerParams, FOREIGN_USDC, 1_000_000n);
+            const origin = { srcEid: EID, sender: ethers.zeroPadValue(await gateway.getAddress(), 32), nonce: 1 };
+
+            await (gateway.connect(endpointSigner) as any).lzReceive(origin, guid, payload, ethers.ZeroAddress, "0x");
+
+            const pending = await gateway.pendingValueOps(guid);
+            expect(pending.bridgedToken).to.equal(await usdc.getAddress());
+            expect(pending.bridgedAmount).to.equal(1_000_000n);
+            expect(pending.caller).to.equal(alice.address);
+        });
+
+        it("adminClearPendingValueOp frees the earmark and lets rescueERC20 recover funds", async () => {
+            // Seed: simulate a pending op + USDC sitting in the gateway.
+            const guid = ethers.id("test-clear-pending");
+            const innerParams = "0x";
+            const payload = buildValuePayload(alice.address, innerParams, FOREIGN_USDC, 1_000_000n);
+            const origin = { srcEid: EID, sender: ethers.zeroPadValue(await gateway.getAddress(), 32), nonce: 2 };
+            await (gateway.connect(endpointSigner) as any).lzReceive(origin, guid, payload, ethers.ZeroAddress, "0x");
+            await usdc.mint(await gateway.getAddress(), 1_000_000n);
+
+            expect(await gateway.totalEarmarked()).to.equal(1_000_000n);
+
+            // Non-owner can't clear.
+            await expect(gateway.connect(alice).adminClearPendingValueOp(guid)).to.be.reverted;
+
+            // Owner clears, totalEarmarked drops, pending op gone.
+            await expect(gateway.adminClearPendingValueOp(guid))
+                .to.emit(gateway, "ValueOpFulfilled");
+            expect(await gateway.totalEarmarked()).to.equal(0n);
+            const cleared = await gateway.pendingValueOps(guid);
+            expect(cleared.bridgedAmount).to.equal(0n);
+
+            // rescueERC20 can now extract the orphaned USDC.
+            const before = await usdc.balanceOf(owner.address);
+            await gateway.rescueERC20(await usdc.getAddress(), owner.address, 1_000_000n);
+            expect(await usdc.balanceOf(owner.address)).to.equal(before + 1_000_000n);
+        });
+
+        it("adminClearPendingValueOp reverts on unknown guid", async () => {
+            await expect(gateway.adminClearPendingValueOp(ethers.id("never-existed")))
+                .to.be.revertedWith("MagnetaGateway: no pending op");
+        });
+    });
+
     describe("MG-6: _payNative override accepts msg.value >= fee", () => {
         // Pre-patch (default OAppSender) enforced strict equality `msg.value ==
         // _nativeFee`. That made fan-out fundamentally broken (loop iteration
