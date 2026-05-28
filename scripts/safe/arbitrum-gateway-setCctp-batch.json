@@ -1,0 +1,31 @@
+{
+  "version": "1.0",
+  "chainId": "42161",
+  "createdAt": 1748376000000,
+  "meta": {
+    "name": "Magneta — Arbitrum Gateway setCctp (wire CCTP V1 TokenMessenger)",
+    "description": "Wire the canonical Circle CCTP V1 TokenMessenger on the Arbitrum Gateway. Verified on-chain 2026-05-27: messenger 0x19330d10D9Cc8751218eaf51E8885D058642E08A → MessageTransmitter.localDomain() = 3 (Arbitrum CCTP domain). Gateway owner = this Safe.",
+    "txBuilderVersion": "1.17.0",
+    "createdFromSafeAddress": "0x4AeA3A398Db41b45e146c08131aD27c75b02EC2F",
+    "createdFromOwnerAddress": ""
+  },
+  "transactions": [
+    {
+      "to": "0x714d0Ae0Ba1420D046CD2818697E41EF69448Ff0",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [
+          { "internalType": "address", "name": "messenger", "type": "address" },
+          { "internalType": "uint32",  "name": "_localDomain", "type": "uint32" }
+        ],
+        "name": "setCctp",
+        "payable": false
+      },
+      "contractInputsValues": {
+        "messenger": "0x19330d10D9Cc8751218eaf51E8885D058642E08A",
+        "_localDomain": "3"
+      }
+    }
+  ]
+}

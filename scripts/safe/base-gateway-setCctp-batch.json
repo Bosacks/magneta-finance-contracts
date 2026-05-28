@@ -1,0 +1,31 @@
+{
+  "version": "1.0",
+  "chainId": "8453",
+  "createdAt": 1748376000000,
+  "meta": {
+    "name": "Magneta — Base Gateway setCctp (wire CCTP V1 TokenMessenger)",
+    "description": "Wire the canonical Circle CCTP V1 TokenMessenger on the Base Gateway. Verified on-chain 2026-05-27: messenger 0x1682Ae6375C4E4A97e4B583BC394c861A46D8962 → MessageTransmitter.localDomain() = 6 (Base CCTP domain). Gateway owner = this Safe.",
+    "txBuilderVersion": "1.17.0",
+    "createdFromSafeAddress": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a",
+    "createdFromOwnerAddress": ""
+  },
+  "transactions": [
+    {
+      "to": "0x9F9A3DC819e5229b63b504d7A0FDE93FA436919E",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [
+          { "internalType": "address", "name": "messenger", "type": "address" },
+          { "internalType": "uint32",  "name": "_localDomain", "type": "uint32" }
+        ],
+        "name": "setCctp",
+        "payable": false
+      },
+      "contractInputsValues": {
+        "messenger": "0x1682Ae6375C4E4A97e4B583BC394c861A46D8962",
+        "_localDomain": "6"
+      }
+    }
+  ]
+}
