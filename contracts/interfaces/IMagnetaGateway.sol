@@ -8,6 +8,9 @@ pragma solidity ^0.8.20;
 ///         via a LayerZero message (cross-chain ops from another gateway).
 interface IMagnetaGateway {
     /// @notice Operation catalogue. Each OpType is handled by exactly one module.
+    /// @dev    APPEND ONLY — the numeric value of each entry is part of the
+    ///         cross-chain payload encoding and must not shift. New ops go at
+    ///         the end of the enum.
     enum OpType {
         // LP
         CREATE_LP,
@@ -25,7 +28,11 @@ interface IMagnetaGateway {
         CLAIM_TAX_FEES,
         // Swap
         SWAP_LOCAL,
-        SWAP_OUT
+        SWAP_OUT,
+        // Token creation (multi-chain via Gateway.sendFanOut). Sub-op
+        // (Standard | AutoLiquidity) selected by the first byte of the
+        // params payload — see TokenCreationModule.TemplateKind.
+        CREATE_TOKEN
     }
 
     /// @notice Emitted when a module processes an operation.
@@ -107,4 +114,27 @@ interface IMagnetaGateway {
         bytes calldata lzOptions,
         bool payInLzToken
     ) external view returns (uint256 totalNativeFee, uint256 totalLzTokenFee);
+
+    // ───────────────────── cross-chain value ops ─────────────────────
+
+    /// @notice Send a cross-chain value op: bridge USDC via CCTP + dispatch on destination.
+    function sendCrossChainValueOp(
+        uint32 dstEid,
+        OpType op,
+        bytes calldata moduleParams,
+        uint256 usdcAmount,
+        bytes calldata lzOptions
+    ) external payable returns (bytes32 guid);
+
+    /// @notice Fan-out value op: bridge USDC via CCTP + send LZ messages to N chains.
+    function sendFanOutValueOp(
+        uint32[] calldata dstEids,
+        OpType op,
+        bytes[] calldata moduleParamsPerChain,
+        uint256[] calldata usdcAmountsPerChain,
+        bytes calldata lzOptions
+    ) external payable returns (bytes32[] memory guids);
+
+    /// @notice Fulfill a pending value op after CCTP tokens arrive on this chain.
+    function fulfillValueOp(bytes32 guid) external;
 }

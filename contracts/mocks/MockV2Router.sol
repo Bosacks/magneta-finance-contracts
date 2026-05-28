@@ -95,5 +95,20 @@ contract MockV2Router {
         IERC20(path[path.length - 1]).safeTransfer(to, amountIn);
     }
 
+    function swapExactTokensForETH(
+        uint amountIn,
+        uint /*amountOutMin*/,
+        address[] calldata path,
+        address to,
+        uint /*deadline*/
+    ) external returns (uint[] memory amounts) {
+        amounts = new uint[](path.length);
+        amounts[0] = amountIn;
+        amounts[path.length - 1] = amountIn; // 1:1
+        IERC20(path[0]).safeTransferFrom(msg.sender, address(this), amountIn);
+        (bool ok, ) = to.call{value: amountIn}("");
+        require(ok, "ETH send failed");
+    }
+
     receive() external payable {}
 }

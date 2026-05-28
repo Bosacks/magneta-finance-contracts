@@ -11,10 +11,13 @@ interface IModule {
     /// @param originChainId  Chain id where the op was initiated (== block.chainid
     ///                       for local calls; differs for LZ-forwarded messages)
     /// @param feeVault       Address that must receive the Magneta markup
+    /// @param tokenSource    For cross-chain value ops: address holding bridged
+    ///                       tokens (typically the gateway). Zero = pull from caller.
     struct Context {
         address caller;
         uint256 originChainId;
         address feeVault;
+        address tokenSource;
     }
 
     /// @notice Run the module's operation.
