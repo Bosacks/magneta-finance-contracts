@@ -237,9 +237,13 @@ describe("Cross-chain integration", function () {
 
         const bridgedUsdc = ethers.parseUnits("200", 6); // $200 USDC total
 
-        // Fund MockSwapRouter with tokens + WETH for 1:1 swaps
+        // V1.1: LPModule._createLPFromBridgedUsdc now routes via the V2
+        // router directly (not MagnetaSwap), so seed routerB with both the
+        // intermediary WETH and the destination token. magnetaSwapB stays
+        // funded too because _createLPAndBuy (a different op) still uses it.
+        await tokenB.mint(await routerB.getAddress(), ethers.parseEther("10000"));
+        await wethB.mint(await routerB.getAddress(), ethers.parseUnits("100", 6));
         await tokenB.mint(await magnetaSwapB.getAddress(), ethers.parseEther("10000"));
-        // Fund WETH: deposit ETH to get WETH, then transfer to swap mock
         await wethB.mint(await magnetaSwapB.getAddress(), ethers.parseUnits("100", 6));
         // Fund mock WETH contract with actual ETH so withdraw() works
         await owner.sendTransaction({ to: await wethB.getAddress(), value: ethers.parseEther("10") });
@@ -341,11 +345,15 @@ describe("Cross-chain integration", function () {
         await gatewayC.setModule(OP_CREATE_LP, await lpModuleC.getAddress());
         await gatewayC.setUsdc(await usdcC.getAddress());
 
-        // Fund mock swaps + WETH contracts
+        // Fund routers (V1.1 V2-direct path) + mock swaps (kept for buy op).
+        await tokenB.mint(await routerB.getAddress(), ethers.parseEther("10000"));
+        await wethB.mint(await routerB.getAddress(), ethers.parseUnits("100", 6));
         await tokenB.mint(await swapB.getAddress(), ethers.parseEther("10000"));
         await wethB.mint(await swapB.getAddress(), ethers.parseUnits("100", 6));
         await owner.sendTransaction({ to: await wethB.getAddress(), value: ethers.parseEther("10") });
 
+        await tokenC.mint(await routerC.getAddress(), ethers.parseEther("10000"));
+        await wethC.mint(await routerC.getAddress(), ethers.parseUnits("100", 6));
         await tokenC.mint(await swapC.getAddress(), ethers.parseEther("10000"));
         await wethC.mint(await swapC.getAddress(), ethers.parseUnits("100", 6));
         await owner.sendTransaction({ to: await wethC.getAddress(), value: ethers.parseEther("10") });

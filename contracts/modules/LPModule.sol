@@ -56,6 +56,13 @@ interface IUniswapV2Router02 {
         uint deadline
     ) external payable returns (uint[] memory amounts);
 
+    function swapExactTokensForTokens(
+        uint amountIn,
+        uint amountOutMin,
+        address[] calldata path,
+        address to,
+        uint deadline
+    ) external returns (uint[] memory amounts);
 }
 
 interface IUniswapV2Factory {
@@ -286,18 +293,40 @@ contract LPModule is IModule, ReentrancyGuard, Ownable2Step {
         uint256 usdcForNative = p.usdcTotal - usdcForToken;
         address weth = IUniswapV2Router02(router).WETH();
 
-        // USDC → token via MagnetaSwap
-        IERC20(usdc).forceApprove(magnetaSwap, p.usdcTotal);
-        uint256 tokenReceived = IMagnetaSwap(magnetaSwap).swap(
-            usdc, p.token, usdcForToken, p.amountTokenMin, address(this), p.deadline
-        );
+        // V1.1 pivot — bypass MagnetaSwap on the cross-chain LP path. The
+        // Magneta-first guideline (feedback_self_referencing_architecture)
+        // creates a per-chain × per-token bootstrap deadlock for cross-chain
+        // because MagnetaSwap requires MagnetaPool registry + liquidity for
+        // EVERY pair, which the token launcher cannot maintain. V2 router is
+        // universally available (BaseSwap, QuickSwap, PancakeSwap, Sushi…)
+        // and routes through WNATIVE-paired pools — the same pool we add LP
+        // into via addLiquidityETH below — so 1 swap + 1 add is self-consistent.
+        // Local Token Manage swaps still use MagnetaSwap (this only impacts
+        // cross-chain dest fulfillment).
+        IERC20(usdc).forceApprove(router, p.usdcTotal);
 
-        // USDC → WETH via MagnetaSwap, then unwrap to native
-        uint256 wethReceived = IMagnetaSwap(magnetaSwap).swap(
-            usdc, weth, usdcForNative, p.amountNativeMin, address(this), p.deadline
+        // USDC → WNATIVE (1-hop)
+        address[] memory pathToNative = new address[](2);
+        pathToNative[0] = usdc;
+        pathToNative[1] = weth;
+        uint256[] memory nativeAmounts = IUniswapV2Router02(router).swapExactTokensForTokens(
+            usdcForNative, p.amountNativeMin, pathToNative, address(this), p.deadline
         );
+        uint256 wethReceived = nativeAmounts[nativeAmounts.length - 1];
         IWETH(weth).withdraw(wethReceived);
         uint256 nativeReceived = wethReceived;
+
+        // USDC → WNATIVE → token (2-hop — the dest token is paired with
+        // WNATIVE in the pool we're adding to, so a direct USDC→token route
+        // typically doesn't exist on the V2 DEX).
+        address[] memory pathToToken = new address[](3);
+        pathToToken[0] = usdc;
+        pathToToken[1] = weth;
+        pathToToken[2] = p.token;
+        uint256[] memory tokenAmounts = IUniswapV2Router02(router).swapExactTokensForTokens(
+            usdcForToken, p.amountTokenMin, pathToToken, address(this), p.deadline
+        );
+        uint256 tokenReceived = tokenAmounts[tokenAmounts.length - 1];
 
         // Add liquidity: token + native → LP via V2 router
         IERC20(p.token).forceApprove(router, tokenReceived);
