@@ -85,13 +85,18 @@ describe("LPSourceWrapper", function () {
         await usdc.mint(await router.getAddress(), ethers.parseUnits("100000000000", 6));
     });
 
+    // Mirrors SDK gatewaySdk.ts:encodeCrossChainLPParams — abi.encode of the
+    // CrossChainLPParams tuple, prefixed with a 1-byte OpType (0x00 for
+    // CREATE_LP). The wrapper expects this exact layout because LPModule on
+    // the destination chain reads `params[0]` as the op and decodes
+    // `params[1:]` as the tuple.
     const buildModuleParams = async (
         token: string,
         placeholderUsdcTotal: bigint,
         tokenShareBps: number = 5000,
     ) => {
         const coder = new ethers.AbiCoder();
-        return coder.encode(
+        const tuple = coder.encode(
             ["address", "uint256", "uint16", "uint256", "uint256", "uint256", "uint256", "uint256"],
             [
                 token,
@@ -101,6 +106,7 @@ describe("LPSourceWrapper", function () {
                 BigInt(Math.floor(Date.now() / 1000) + 1800),
             ],
         );
+        return ethers.concat(["0x00", tuple]); // 0x00 = OpType.CREATE_LP
     };
     const LZ_OPT = "0x0003010011010000000000000000000000000016e360";
 

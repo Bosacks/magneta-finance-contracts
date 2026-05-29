@@ -135,22 +135,27 @@ contract LPSourceWrapper is ReentrancyGuard {
         uint256 usdcReceived = (swapOut * 10_000) / (10_000 + uint256(bps));
 
         // ─── 2. Patch moduleParams.usdcTotal in place ─────────────────────
-        // CrossChainLPParams layout (abi.encode of a struct/tuple):
-        //   offset  0: token            (address, left-padded uint256)
-        //   offset 32: usdcTotal        (uint256)
-        //   offset 64: tokenShareBps    (uint16, padded)
-        //   offset 96: amountTokenMin   (uint256)
-        //   offset 128: amountNativeMin (uint256)
-        //   offset 160: lpAmountTokenMin
-        //   offset 192: lpAmountNativeMin
-        //   offset 224: deadline
-        // We rewrite the 32 bytes at offset [32, 64) with usdcReceived.
+        // The SDK encodes moduleParams as [op:1 byte][abi.encode(tuple)] —
+        // the leading byte is the OpType (LPModule.execute reads `params[0]`
+        // as op and decodes `params[1:]` as the tuple). We require op = 0
+        // (CREATE_LP); other ops have different param shapes that don't
+        // match the assumed `usdcTotal at offset 1` layout.
+        //
+        // CrossChainLPParams layout (data after the op byte):
+        //   offset  1: token            (address, left-padded uint256)
+        //   offset 33: usdcTotal        (uint256)
+        //   offset 65: tokenShareBps    (uint16, padded)
+        //   offset 97: amountTokenMin
+        //   …
+        // We rewrite the 32 bytes at data offset 33 with usdcReceived.
+        require(moduleParams.length >= 1 + 256, "params too short");
+        require(uint8(moduleParams[0]) == uint8(IMagnetaGateway.OpType.CREATE_LP), "op != CREATE_LP");
         bytes memory patched = abi.encodePacked(moduleParams); // copy to memory
         assembly {
-            // patched layout in memory: 32-byte length prefix, then bytes.
-            // First field starts at patched + 32. usdcTotal is the SECOND
-            // field, so offset 32 from the start of the data = patched + 64.
-            mstore(add(patched, 64), usdcReceived)
+            // patched memory layout: [length:32][data].
+            // data offset for usdcTotal is 33 (1 op byte + 32 token bytes).
+            // Memory address of that slot = patched + 32 + 33 = patched + 65.
+            mstore(add(patched, 65), usdcReceived)
         }
 
         // ─── 3. Forward to Gateway ─────────────────────────────────────────
