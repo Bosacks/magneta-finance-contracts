@@ -3,6 +3,16 @@
 > Fil chronologique des sessions. Anti-chronologique (plus récent en haut).
 > Voir `~/CLAUDE.md` pour la règle d'édition.
 
+## 2026-05-28 — patches MG-6 + MG-7, 3 redéploys Polygon+Base, blocage MagnetaPool
+
+- **MG-6 patch** `MagnetaGateway._payNative` override : `msg.value == _nativeFee` (strict) → `>=` ; fan-out multi-dest était structurellement broken (chaque itération comparait `msg.value` au fee d'UN leg) ; 4 nouveaux tests
+- **MG-7 patch** `_lzReceive` substitue `address(usdc)` local au `bridgedToken` du payload source-chain (CCTP V1 mint l'USDC LOCAL sur dest, pas le contrat source) + ajout `adminClearPendingValueOp` owner escape ; 3 nouveaux tests (296/297 passing, 1 préexistant flaky pair-address)
+- Workflow découvert : modules `address public immutable gateway` → chaque patch Gateway impose redéploy de LP/Swap/TaxClaim/TokenOps + re-`setModule`×13 + re-`setUsdc` + re-`setPauseGuardian` + re-`setCctp` + re-`setEidCctpDomainBatch` + re-`setPeer`
+- Stack v3 live Polygon+Base : Polygon Gateway `0x7fd77D02…850cf`, Base `0x05b853e7…cebe9` ; CCTP+LZ peer mesh bidirectionnel
+- Polygon→Base CCTP validé end-to-end : burn + Iris attestation + LZ delivery + `fulfillValueOp` atteint ; revert final dans `MagnetaSwap.swap` "no corresponding pool found" → MagnetaPool registry non bootstrappé sur Base (bootstrap par chaîne × token non scalable pour un token launcher)
+- **Décision V1.1** : LPModule cross-chain dest passera à V2 router direct + `ISwapProvider` abstraction (V2/LiFi/Jupiter/…) pour port non-EVM facile ; LPSourceWrapper fera native→USDC source-side en 1 tx
+- 8 commits poussés sur `origin/main` (`f42fae7` interfaces manquantes → `0419bd0` clear/rescue) ; 6 nouveaux scripts hardhat (`redeployGatewayStack`, `resumeGatewayWiring`, `wireGatewayPair`, `claimAndFulfillCctp`, `clearAndRescueValueOp`, `whitelistMagnetaSwapTokens`) ; 2 Safe batches MagnetaSwap whitelist exécutés
+
 ## 2026-05-27
 
 - Scan Sentinelle `MagnetaXChainLpReceiver` (CAUTION 52) trié + corrigé : SC02 cap sortie routeur `min(delta, amounts[last])`, guard `setKeeper` zero-addr, doc nonce/keeper ; 290 tests OK (commit `c02564c`)
