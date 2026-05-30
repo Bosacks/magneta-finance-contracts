@@ -3,6 +3,14 @@
 > Fil chronologique des sessions. Anti-chronologique (plus récent en haut).
 > Voir `~/CLAUDE.md` pour la règle d'édition.
 
+## 2026-05-30 — V1.1 LPModule V2-direct + LPSourceWrapper + keeper bot opérationnel
+
+- **LPModule V1.1** patché : `_createLPFromBridgedUsdc` route dest swap via V2 router direct (USDC→WNATIVE 1-hop puis USDC→WNATIVE→token 2-hop), bypass MagnetaSwap pour cross-chain. Magneta-first reste valide pour Token Manage swaps locaux (commit `a75fe17`)
+- LPModule redéployé Polygon `0x42233fDC…189b` + Base `0x43FDA452…96f6` ; `setModule(0..3)` × 2 chains via `redeployLPModule.ts` (commit `a56dbd0`)
+- **LPSourceWrapper** : nouveau contrat 200 lignes pour cross-chain LP en 1 tx native-only — swap native→USDC via V2, patch `usdcTotal` in-place, forward à Gateway.sendFanOutValueOp, refund l'excédent. Bug critique trouvé/fixé : offset assembly à 1+32 au lieu de 32 (le SDK prepend un opByte). 2/2 tests. Déployé Polygon `0x0A0D2fBe…e745` + Base `0xFf08089D…2f3E` (commits `42bd0e3`, `677ea37`)
+- **Scripts** : `redeployLPModule.ts`, `deployLPSourceWrapper.ts`, `clearAndRescueValueOp.ts` (escape hatch pour pendingValueOps coincés)
+- **Full CCTP loop validé** : Polygon→Base `0xaf583037…` dispatch → keeper bot autonomement fulfill (`0x4fd0bebf…`). Pipeline contracts end-to-end opérationnel sans intervention humaine.
+
 ## 2026-05-28 — patches MG-6 + MG-7, 3 redéploys Polygon+Base, blocage MagnetaPool
 
 - **MG-6 patch** `MagnetaGateway._payNative` override : `msg.value == _nativeFee` (strict) → `>=` ; fan-out multi-dest était structurellement broken (chaque itération comparait `msg.value` au fee d'UN leg) ; 4 nouveaux tests
