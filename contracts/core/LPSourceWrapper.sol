@@ -183,16 +183,19 @@ contract LPSourceWrapper is ReentrancyGuard {
 
         emit CrossChainLPDispatched(msg.sender, dstEid, nativeToSwap, usdcReceived, lzNativeFeeReserve);
 
-        // ─── 4. Refund any leftover native (Gateway refunds excess LZ to
-        //       msg.sender = this contract) and any stray USDC. ────────────
+        // ─── 4. Refund leftovers. USDC first — no callback surface, no
+        //       state to corrupt mid-flight. Native last — even though it
+        //       hands control to msg.sender, by this point USDC is already
+        //       gone, the Gateway call has returned, and the wrapper holds
+        //       no other value to drain. CEI-clean for Sentinelle SC08. ────
+        uint256 usdcLeft = IERC20(usdc).balanceOf(address(this));
+        if (usdcLeft > 0) {
+            IERC20(usdc).safeTransfer(msg.sender, usdcLeft);
+        }
         uint256 nativeLeft = address(this).balance;
         if (nativeLeft > 0) {
             (bool ok, ) = msg.sender.call{value: nativeLeft}("");
             require(ok, "native refund failed");
-        }
-        uint256 usdcLeft = IERC20(usdc).balanceOf(address(this));
-        if (usdcLeft > 0) {
-            IERC20(usdc).safeTransfer(msg.sender, usdcLeft);
         }
     }
 

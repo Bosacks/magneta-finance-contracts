@@ -493,6 +493,13 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
 
     /// @inheritdoc IMagnetaGateway
     function setModule(OpType op, address module) external override onlyOwner {
+        // Zero-address would silently brick all executeOperation /
+        // _lzReceive paths for this op (every call reverts ModuleNotSet,
+        // and any in-flight LZ messages targeting it land permanently
+        // stuck in pendingValueOps). Force callers to use a real
+        // implementation; nothing in the protocol uses address(0) as a
+        // 'disable' sentinel. (Sentinelle 2026-05-30 SC01 MEDIUM.)
+        if (module == address(0)) revert ZeroAddress();
         _modules[op] = module;
         emit ModuleSet(op, module);
     }
@@ -588,12 +595,13 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
     function rescueETH(address to, uint256 amount) external onlyOwner nonReentrant {
         require(to != address(0), "MagnetaGateway: zero to");
         require(amount > 0, "MagnetaGateway: zero amount");
-        // CEI: emit before the external call so no state/log mutation follows it
-        // (Sentinelle 2026-05-25 SC08 REE-1). onlyOwner + nonReentrant already
-        // bound the risk; a failed call reverts the whole tx incl. this event.
-        emit Rescued(address(0), to, amount);
+        // onlyOwner + nonReentrant already bound the reentrancy risk. To be
+        // strict-CEI compliant (Sentinelle 2026-05-30 SC08 LOW), emit the
+        // Rescued event AFTER the require(ok), so a failed call doesn't log
+        // an event for a transfer that didn't happen.
         (bool ok, ) = payable(to).call{value: amount}("");
         require(ok, "MagnetaGateway: rescue failed");
+        emit Rescued(address(0), to, amount);
     }
 
     /// @notice Map a LayerZero endpoint ID to an EVM chain ID (bidirectional).

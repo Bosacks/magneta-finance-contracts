@@ -335,6 +335,15 @@ contract LPModule is IModule, ReentrancyGuard, Ownable2Step {
                 p.token, tokenReceived, p.lpAmountTokenMin, p.lpAmountNativeMin, ctx.caller, p.deadline
             );
 
+        // Reset residual allowances. swapExactTokensForTokens consumes the
+        // full amountIn so usdc allowance is already 0, but addLiquidityETH
+        // can use less than tokenReceived if the pool ratio mismatches —
+        // leaving a token allowance on the router. A compromised router
+        // could re-pull that allowance in a future call. (Sentinelle
+        // 2026-05-30 SC03 MEDIUM.)
+        IERC20(usdc).forceApprove(router, 0);
+        IERC20(p.token).forceApprove(router, 0);
+
         // Refund dust to user (same address on destination EVM chain)
         uint256 tokenDust = tokenReceived - amountToken;
         if (tokenDust > 0) IERC20(p.token).safeTransfer(ctx.caller, tokenDust);
@@ -353,6 +362,14 @@ contract LPModule is IModule, ReentrancyGuard, Ownable2Step {
     /// @dev Pulls `amount` USDC from ctx.caller into the gateway's feeVault.
     ///      Caller must have approved this module for at least `amount` USDC.
     ///      Skips on zero to allow owner-sponsored or fee-less future ops.
+    ///
+    ///      Cross-chain bypass (`ctx.originChainId != block.chainid → return`)
+    ///      is INTENTIONAL — not a fee evasion. The Magneta 0.15% markup on
+    ///      cross-chain value ops is collected SOURCE-side by
+    ///      MagnetaGateway._collectCrossChainFee (BPS on totalUsdc, sent to
+    ///      _feeVault on the source chain) at the time the user signs the
+    ///      sendFanOutValueOp tx. Collecting again on the destination would
+    ///      double-charge. (Sentinelle 2026-05-30 SC06 MEDIUM acknowledged.)
     function _collectFee(Context calldata ctx, uint256 amount) internal {
         if (amount == 0) return;
         if (ctx.originChainId != block.chainid) return;
