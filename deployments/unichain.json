@@ -5,7 +5,7 @@
   "gnosisSafe": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a",
   "feeVault": "0x68109132Ecf7540A0A983e1Aaa7DebC469d9d68b",
   "pauseGuardian": "0x479ED5228DCcef6CD05C98A5fe81aCF08F2f5998",
-  "timestamp": "2026-04-24T17:37:46.994Z",
+  "timestamp": "2026-06-02T10:39:10.810853+00:00",
   "chainConfig": {
     "lzEndpoint": "0x6F475642a6e85809B1c36Fa62763669b1b48DD5B",
     "lzEid": 30320,
@@ -28,6 +28,14 @@
     "TokenOpsModule": "0x9F9A3DC819e5229b63b504d7A0FDE93FA436919E",
     "MagnetaCurveFactory": "0x7534FC227a1e30dF6F5E99d506DB6c148F8cFd15",
     "MagnetaStakingFactory": "0xA0ea39EC7503b4A18018fAC8d34450967c69788A",
-    "MAG": "0xFc0c499c6a59014EB63c3CDaC7A382d9A2EED6EF"
-  }
+    "MAG": "0xFc0c499c6a59014EB63c3CDaC7A382d9A2EED6EF",
+    "PromotionPayment": "0xf7803051bEC935Cec413B87f50E30737cDb9A79E",
+    "MagnetaProxyV2": "0xaC3B726A7582F2B12aE1C7865CBeE93CC0418C8a",
+    "MagnetaBundlerV2": "0x414dC3f0670227Ab3DDAd8B0A52aF7AdebC4a504",
+    "MagnetaProxy": "0xBcfEcCE7AfC5C9f4b5B1C67671D2CCbf1c8d6124",
+    "LPSourceWrapper": "0x8151c725cd637e1664225Cebf32353258F5daaEc"
+  },
+  "notes": [
+    "2026-06-02 \u2014 LPSourceWrapper deployed (V1.1 native\u2192USDC source-side entry point). Address recovered via CREATE rule after the ethers v6 wnative() sanity-read crash; on-chain code verified."
+  ]
 }

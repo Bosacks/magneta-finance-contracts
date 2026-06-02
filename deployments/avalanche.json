@@ -5,7 +5,7 @@
   "gnosisSafe": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a",
   "feeVault": "0x68109132Ecf7540A0A983e1Aaa7DebC469d9d68b",
   "pauseGuardian": "0x479ED5228DCcef6CD05C98A5fe81aCF08F2f5998",
-  "timestamp": "2026-04-24T23:24:48.799Z",
+  "timestamp": "2026-06-02T10:36:36.822Z",
   "chainConfig": {
     "lzEndpoint": "0x1a44076050125825900e736c501f859c50fE728c",
     "lzEid": 30106,
@@ -28,6 +28,14 @@
     "TokenOpsModule": "0xB38e7427D81f755c65AC6bfc865Bfe9918BA7a9b",
     "MagnetaCurveFactory": "0xFc0c499c6a59014EB63c3CDaC7A382d9A2EED6EF",
     "MagnetaStakingFactory": "0xcdF3e1377Cfcbfe5336D79344DC074433F6854AE",
-    "MAG": "0xE7c9bE3B890A3132c3172599b434Db5305Ba3533"
-  }
+    "MAG": "0xE7c9bE3B890A3132c3172599b434Db5305Ba3533",
+    "PromotionPayment": "0xaC3B726A7582F2B12aE1C7865CBeE93CC0418C8a",
+    "MagnetaProxyV2": "0x414dC3f0670227Ab3DDAd8B0A52aF7AdebC4a504",
+    "MagnetaBundlerV2": "0x749eeB253c7988590651D83bBF005d7b3385E287",
+    "MagnetaProxy": "0x802135E39fb56FAe17d26eC1B02261BF7cf1D426",
+    "LPSourceWrapper": "0xd418e7dee5De6B822c3Ef368BA1410988619C962"
+  },
+  "notes": [
+    "2026-06-02 — LPSourceWrapper deployed (V1.1 native→USDC source-side entry point)."
+  ]
 }
