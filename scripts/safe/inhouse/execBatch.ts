@@ -106,9 +106,9 @@ async function main() {
     process.exit(1);
   }
   const dep = JSON.parse(fs.readFileSync(depPath, "utf-8"));
-  const safeAddress: string = dep.gnosisSafe;
+  const safeAddress: string = dep.gnosisSafe ?? dep.safe;
   if (!safeAddress) {
-    console.error(`deployments/${network.name}.json missing 'gnosisSafe' field`);
+    console.error(`deployments/${network.name}.json missing 'gnosisSafe' or 'safe' field`);
     process.exit(1);
   }
   console.log(`Safe       : ${safeAddress}`);
@@ -220,6 +220,16 @@ async function main() {
   ]);
 
   console.log(`Submitting execTransaction (sender=${deployerAddr})...`);
+  // GAS_LIMIT override bypasses ethers' estimateGas preflight. Use when an
+  // RPC simulator (e.g. some Sei nodes 2026-06-05) wrongly rejects multi-tx
+  // batches whose later txs depend on earlier txs' state changes. The actual
+  // on-chain EVM has no such bug — set to a comfortably-high gas limit and
+  // let the chain decide if it actually reverts.
+  const txOverrides: { gasLimit?: bigint } = {};
+  if (process.env.GAS_LIMIT) {
+    txOverrides.gasLimit = BigInt(process.env.GAS_LIMIT);
+    console.log(`  (gasLimit override: ${txOverrides.gasLimit.toString()})`);
+  }
   const tx = await safe.execTransaction(
     safeTx.to,
     safeTx.value,
@@ -231,6 +241,7 @@ async function main() {
     safeTx.gasToken,
     safeTx.refundReceiver,
     signatures,
+    txOverrides,
   );
   console.log(`Tx hash    : ${tx.hash}`);
   const receipt = await tx.wait();
