@@ -1,0 +1,9 @@
+{
+  "network": "linea",
+  "chainId": "59144",
+  "adapter": "0x0cf3481f35338963C86404a6adFE5400330f2E0D",
+  "v2Messenger": "0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d",
+  "cctpDomain": 11,
+  "deployer": "0x620684F822da9adF36F41e3554791D889947e25E",
+  "timestamp": "2026-06-05T20:42:18.108Z"
+}

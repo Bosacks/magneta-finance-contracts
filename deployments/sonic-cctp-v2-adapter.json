@@ -1,0 +1,9 @@
+{
+  "network": "sonic",
+  "chainId": "146",
+  "adapter": "0xD91FfA3393ebe2A42E47F7b70b89e610Ccdd4033",
+  "v2Messenger": "0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d",
+  "cctpDomain": 13,
+  "deployer": "0x620684F822da9adF36F41e3554791D889947e25E",
+  "timestamp": "2026-06-05T20:44:16.661Z"
+}
