@@ -34,7 +34,7 @@ export interface ChainConfig {
   cctpDomain: number | null;    // null → CCTP routing not available
   usdc: string | null;          // null → skip TokenOps/TaxClaim/Swap-USDC config
   defaultRouter: string | null; // null → skip LPModule + SwapModule + TaxClaimModule
-  router: "uniV2" | "solidly" | "v3" | "orderbook" | null;
+  router: "uniV2" | "solidly" | "v3" | "orderbook" | "magnetaV2" | null;
 }
 
 export const CHAIN_CONFIG: Record<number, ChainConfig> = {
@@ -73,6 +73,14 @@ export const CHAIN_CONFIG: Record<number, ChainConfig> = {
     cctpDomain: 6,
     usdc: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
     defaultRouter: "0x327Df1E6de05895d2ab08513aaDD9313Fe505d86", // BaseSwap V2
+    router: "uniV2",
+  },
+  84532: { // Base Sepolia (testnet — Magneta Testsites)
+    lzEndpoint: "0x6EDCE65403992e310A62460808c4b910D972f10f", // LZ V2 testnet endpoint
+    lzEid: 40245,
+    cctpDomain: 6,
+    usdc: "0xCdE833673E1684803EC72083Ff09C1EA19bd6d9d", // MockUSDC (deployed 2026-04-18)
+    defaultRouter: "0xD48c6f423214d37cedB72DbA776c80F32B97705D", // MockV2Router (deployed 2026-04-18)
     router: "uniV2",
   },
   137: { // Polygon
@@ -229,8 +237,15 @@ export const CHAIN_CONFIG: Record<number, ChainConfig> = {
     lzEid: 30324,
     cctpDomain: null,
     usdc: "0x84A71ccD554Cc1b02749b35d22F684CC8ec987e1", // Stargate-bridged USDC.e (6 decimals, verified on-chain 2026-04-26)
-    defaultRouter: null, // No UniV2-strict DEX on Abstract (Reservoir/Moonshot/Kuru = orderbook or specialized). Skip LP/Swap/TaxClaim like Berachain.
-    router: null,
+    // Canonical Uniswap V2 deployment confirmed on Abstract mainnet
+    // 2026-06-07 (Sprint V1.0+ LP unlock). Factory 0x566d…985E, Router02
+    // address below, WETH9 0x3439…2809. Init code hash is non-standard
+    // (0x0100065f…) so LPModule must use factory.getPair() rather than
+    // CREATE2 prediction — Magneta's LPModule already does the right
+    // thing (uses router.factory().getPair). See docs.abs.xyz/tooling/
+    // deployed-contracts for the source.
+    defaultRouter: "0xad1eCa41E6F772bE3cb5A48A6141f9bcc1AF9F7c", // Uniswap V2 Router02 official on Abstract
+    router: "uniV2",
   },
   999: { // Hyperliquid EVM
     lzEndpoint: LZ_ENDPOINT_HYPERLIQUID,
