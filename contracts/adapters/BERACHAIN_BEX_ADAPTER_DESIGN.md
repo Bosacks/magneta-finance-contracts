@@ -138,17 +138,52 @@ BATCH=scripts/safe/berachain-lp-wire-batch.json \
 # Then update CHAIN_CONFIG[80094] + GATEWAY_CHAINS[80094].lpModule
 ```
 
-### On-chain addresses to verify before coding
+### On-chain addresses (verified 2026-06-07)
 
-Run `cast code` on each before relying on them:
+**Mainnet** (per docs.berachain.com/build/bex/deployed-contracts):
 
-- BEX Vault (likely `0xBA12222222228d8Ba445958a75a0704d566BF2C8` if BEX preserved
-  Balancer's canonical address; **verify**)
-- BEX WeightedPoolFactory (varies — check Berachain docs)
-- WBERA wrapped native (likely `0x6969696969696969696969696969696969696969`
-  per Berachain convention; **verify**)
-- USDC.e Stargate-bridged (already in `CHAIN_CONFIG[80094]` —
-  `0x549943e04f40284185054145c6E4e9568C1D3241`)
+| Contract | Address |
+|---|---|
+| BEX Vault | `0x4Be03f781C497A489E3cB0287833452cA9B9E80B` |
+| WeightedPoolFactory | `0xa966fA8F2d5B087FFFA499C0C1240589371Af409` |
+| BalancerQueries | `0x3C612e132624f4Bd500eE1495F54565F0bcc9b59` |
+| BalancerHelpers | `0x5083737EC75a728c265BE578C9d0d5333a2c5951` |
+| PoolCreationHelper | `0x55dccE8165C88aAd4403a15A9cE3A8E244657dD2` |
+| WBERA | `0x6969696969696969696969696969696969696969` ✓ verified via `cast call symbol()` |
+| USDC.e | `0x549943e04f40284185054145c6E4e9568C1D3241` (from `CHAIN_CONFIG[80094]`) |
+
+Note: BEX did NOT preserve Balancer's canonical Vault address `0xBA12…2C8`
+— that address has code on Berachain but is something else. Use the
+`0x4Be0…E80B` address from the BEX docs.
+
+**Bepolia testnet** (for E2E before mainnet):
+
+| Contract | Address |
+|---|---|
+| BEX Vault | `0x708cA656b68A6b7384a488A36aD33505a77241FE` |
+| WeightedPoolFactory | `0xf1d23276C7b271B2aC595C78977b2312E9954D57` |
+
+### ⚠ Balancer V2 vulnerability — practical exposure for Magneta
+
+Per Berachain docs (disclosure 2026-01-21): "BEX incorporates contract
+logic from Balancer V2 and shares the same vulnerability. … The issue
+only potentially affects tokens that are not live on-chain today."
+
+For Magneta's flow specifically:
+- LPModule's `CREATE_LP` always pairs an already-deployed token (the
+  user's token, which was minted by the factory in a prior tx). The
+  token IS live on-chain when the LP pool is created.
+- LPModule's `CREATE_LP_AND_BUY` does a buy-swap then addLiquidity —
+  both sides of the pool are already-deployed tokens.
+- Therefore the vulnerability doesn't apply to Magneta's user flow.
+
+Document this in the adapter NatSpec + deploy script so future
+refactors don't silently regress the assumption (e.g. if someone adds
+a "create-pool-for-future-token" UX, the assumption breaks).
+
+Berachain is migrating BEX to Balancer V3 codebase to fix the
+vulnerability. When that ships, redeploy the adapter against the V3
+Vault and bump the LPModule.
 
 ### What this DOESN'T solve
 
