@@ -36,6 +36,38 @@ import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.s
  *         A bug in V2 messenger blocks burns; a fix is "deploy new adapter +
  *         Gateway.setCctp(newAdapter, domain)" via the Safe — the original
  *         Gateway never changes.
+ *
+ *         ---
+ *         **SECURITY — residual risks (Sentinelleai audit 2026-06-08).**
+ *
+ *         1. Open destination caller (MEDIUM, CVSS 4.3). Burns are submitted
+ *            with `destinationCaller = bytes32(0)`, which means *any* address
+ *            on the destination chain can call `receiveMessage(...)` to settle
+ *            the attestation. This matches CCTP V1 semantics (the V1 ABI has
+ *            no caller-gating parameter at all), so there is no behavioural
+ *            regression. The funds still arrive at `mintRecipient` regardless
+ *            of who pays the destination gas — settlement is not a custody
+ *            transfer. Compare to CrossCurve (Feb 2026, $3M): they routed
+ *            mint output through an intermediate caller-trusted contract;
+ *            we do not.
+ *            → If a future flow needs caller-gating (e.g. routing mint into
+ *              a permissioned receiver), deploy a second adapter with
+ *              `destinationCaller != 0` and use it via `Gateway.setCctp(...)`
+ *              for that domain. The Safe-only setter makes this swap
+ *              non-custodial.
+ *
+ *         2. Always-zero nonce return (LOW, CVSS 2.1). CCTP V2 dropped the
+ *            per-burn nonce return that V1 provided. We return `0` to satisfy
+ *            the V1 ABI shape. **Off-chain integrators must NOT use this
+ *            return value to track burns — track the `V2BurnForwarded` event
+ *            (or the CCTP V2 `DepositForBurn` event) instead.**
+ *
+ *         3. No `destinationDomain` allowlist (INFO). Unknown domain ids
+ *            revert at the V2 messenger with a less-friendly error. This is
+ *            intentional: keeping the adapter stateless and letting Circle's
+ *            registry be the authority avoids drift between our allowlist
+ *            and Circle's actual deployment status. Treat domain validation
+ *            as the Gateway's responsibility (it knows the active mesh).
  */
 
 interface ITokenMessengerV2 {
@@ -82,9 +114,12 @@ contract CctpV2Adapter {
     /// @param destinationDomain  Circle domain id of the destination chain
     /// @param mintRecipient      Destination recipient (bytes32-padded)
     /// @param burnToken          USDC contract on this chain
-    /// @return nonce             Always 0 in V2 (V2 dropped the per-burn
-    ///                           nonce return; kept the return type for V1
-    ///                           ABI parity)
+    /// @return nonce             ⚠ ALWAYS 0 — V2 dropped the per-burn nonce
+    ///                           return. The return type is kept only for
+    ///                           V1 ABI parity. Off-chain integrators MUST
+    ///                           track the `V2BurnForwarded` event (or
+    ///                           Circle's V2 `DepositForBurn` event) instead
+    ///                           of relying on this value.
     function depositForBurn(
         uint256 amount,
         uint32 destinationDomain,
