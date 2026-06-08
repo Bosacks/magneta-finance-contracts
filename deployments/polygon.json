@@ -16,17 +16,17 @@
     "wnative": "0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270"
   },
   "contracts": {
-    "MagnetaProxy": "0x0e09fd3f18B66F2750A0Aa0B8bB6365fcE5f6B60",
+    "MagnetaProxy": "0x65deCBA4FCdc361c8E720b592a71D32d2437656d",
     "MagnetaPool": "0xDc6BFf741D5a94c26002268b0228212C71F9C726",
     "MagnetaSwap": "0xDa43c95Fb2ccf6bDE904Ece558eDeA6B506641B9",
     "MagnetaLending": "0x2203FE0F92781d7ECdF626b6aD08A9D2e281EFD0",
     "MagnetaFactory": "0xBeb7bB26Efe2c9c8571c83590625d5249755ad27",
     "MagnetaBundler": "0x916a9135c4eED07372D2F621C99FF3420cB3b4D3",
-    "MagnetaGateway": "0x3c21016E57e7A29333f38d200EC8945bfc6BA537",
+    "MagnetaGateway": "0x7b1A44FA3928d61E04e8C04E6798DEe1c3d5f66C",
     "MagnetaBridgeOApp": "0xB4f06F01641eFFb376Cc5dcA90F81fed1C6FA76e",
-    "LPModule": "0xe3162944b9D759c23B7D1d99A25075a4313db19c",
+    "LPModule": "0x864Eed1d5DF4b8457bfb42aBee1468127D315539",
     "SwapModule": "0xDe1752E266C3978240014DFc616dd34EbF9cDF31",
-    "TokenOpsModule": "0xB38e7427D81f755c65AC6bfc865Bfe9918BA7a9b",
+    "TokenOpsModule": "0xfB95B039c6Cd2Dfbf94D3e849D16Fc333B27c0C6",
     "TaxClaimModule": "0x9F9A3DC819e5229b63b504d7A0FDE93FA436919E",
     "MagnetaOFTStandardFactory": "0x714d0Ae0Ba1420D046CD2818697E41EF69448Ff0",
     "MagnetaOFTAutoLiquidityFactory": "0x9FF21887b355d06fB0A426E34857567b9D8bbD2a",
@@ -40,7 +40,13 @@
     "MagnetaV2Factory": "0xdbEfA1fE8A0d3b25B7D3e15e01FD617AE77B4fc8",
     "MagnetaV2Router02": "0x7402EbE42E374120991aBDaac27F2BC0EfEC4289",
     "MagnetaCurveFactoryV1": "0x3564406Da6475E02c359eD1d55f747299c477837",
-    "MagnetaMasterChef": "0xB95032B64A6B8D2217DE2076351CbFA10F2B058E"
+    "MagnetaMasterChef": "0xB95032B64A6B8D2217DE2076351CbFA10F2B058E",
+    "MagnetaGateway_old": "0x3c21016E57e7A29333f38d200EC8945bfc6BA537",
+    "LPModule_old": "0xe3162944b9D759c23B7D1d99A25075a4313db19c",
+    "TokenOpsModule_old": "0xB38e7427D81f755c65AC6bfc865Bfe9918BA7a9b"
   },
-  "tokenCreationDeployedAt": "2026-04-30T10:17:43.214Z"
+  "tokenCreationDeployedAt": "2026-04-30T10:17:43.214Z",
+  "notes": [
+    "2026-06-08 — Reconciled Layer 1 addresses to match frontend production (post EOA→Safe ownership migration). Older orphaned deployment archived under <field>_old keys."
+  ]
 }
