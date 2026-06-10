@@ -111,6 +111,10 @@ contract MockBexVault {
     /// @notice Per-pool token balances tracked by the mock (for exitPool).
     mapping(address => mapping(address => uint256)) public poolBalance;
 
+    /// @notice Per-pool token list (set on first joinPool). Mirrors what
+    ///         Balancer V2 Vault tracks; needed for `getPoolTokens` reads.
+    mapping(bytes32 => address[]) private _poolTokens;
+
     struct LastJoin {
         bytes32 poolId; address sender; address recipient;
         address[] assets; uint256[] amountsIn;
@@ -148,6 +152,14 @@ contract MockBexVault {
     ) external payable {
         address pool = poolByPoolId[poolId];
         require(pool != address(0), "MockVault: unknown pool");
+
+        // On first join, record the pool's token list (mirrors real Balancer
+        // V2 Vault behaviour — assets registered with pool on init).
+        if (_poolTokens[poolId].length == 0) {
+            for (uint256 i = 0; i < request.assets.length; i++) {
+                _poolTokens[poolId].push(request.assets[i]);
+            }
+        }
 
         // Pull each token from sender for the recorded amount, track per-pool
         for (uint256 i = 0; i < request.assets.length; i++) {
@@ -244,5 +256,21 @@ contract MockBexVault {
     /// @notice Seed the mock vault with a token balance so swap() has output.
     function seed(address token, uint256 amount) external {
         IERC20(token).transferFrom(msg.sender, address(this), amount);
+    }
+
+    /// @notice Balancer V2-compatible pool read. Returns sorted token list
+    ///         + current pool balances. Used by adapters to pre-compute
+    ///         proportional exit amounts without relying on balanceOf().
+    function getPoolTokens(bytes32 poolId)
+        external view returns (address[] memory tokens, uint256[] memory balances, uint256 lastChangeBlock)
+    {
+        address pool = poolByPoolId[poolId];
+        require(pool != address(0), "MockVault: unknown pool");
+        tokens = _poolTokens[poolId];
+        balances = new uint256[](tokens.length);
+        for (uint256 i = 0; i < tokens.length; i++) {
+            balances[i] = poolBalance[pool][tokens[i]];
+        }
+        lastChangeBlock = block.number;
     }
 }

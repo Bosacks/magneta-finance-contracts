@@ -4,7 +4,7 @@ pragma solidity ^0.8.20;
 import { IERC20 }            from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { SafeERC20 }         from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { ReentrancyGuard }   from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
-import { Ownable }           from "@openzeppelin/contracts/access/Ownable.sol";
+import { Ownable2Step, Ownable } from "@openzeppelin/contracts/access/Ownable2Step.sol";
 
 /// @title  BexBerachainAdapter
 /// @notice Uniswap V2 router facade over BEX (Berachain's Balancer V2 fork).
@@ -114,7 +114,7 @@ interface IWETH {
 
 // ─── Adapter contract ────────────────────────────────────────────────────
 
-contract BexBerachainAdapter is ReentrancyGuard, Ownable {
+contract BexBerachainAdapter is ReentrancyGuard, Ownable2Step {
     using SafeERC20 for IERC20;
 
     // BEX endpoints (immutable on mainnet, settable in constructor for
@@ -302,6 +302,16 @@ contract BexBerachainAdapter is ReentrancyGuard, Ownable {
     }
 
     /// @notice V2 → BEX exitPool. Burns BPT for proportional token+native.
+    ///
+    /// @dev Sentinelleai re-scan 2026-06-10 (HIGH SC02 + HIGH SC08) fixed:
+    ///        - SC02: amounts are now pre-computed from pool state via
+    ///          `_previewExit` (proportional bptIn/totalSupply per
+    ///          Balancer V2 WeightedPool EXACT_BPT_IN_FOR_TOKENS_OUT
+    ///          math). balanceOf(this) is no longer in the amount path,
+    ///          eliminating the Venus-Protocol-2026-03 manipulation pattern.
+    ///        - SC08: CEI compliance — emit + state finalization happen
+    ///          BEFORE any external interactions (token transfers,
+    ///          WBERA.withdraw, native call to `to`).
     function removeLiquidity(
         address tokenA, address tokenB,
         uint256 liquidity,
@@ -317,45 +327,59 @@ contract BexBerachainAdapter is ReentrancyGuard, Ownable {
         if (pool == address(0)) revert PoolMissing(tokenA, tokenB);
         bytes32 poolId = IBexPool(pool).getPoolId();
 
-        // Pull BPT from msg.sender
+        // ── Pre-compute proportional amounts from pool state (SC02 fix) ──
+        (uint256 expectedToken, uint256 expectedWeth) =
+            _previewExit(pool, poolId, tokenA, liquidity);
+
+        if (expectedToken < amountAMin) revert InsufficientOutput();
+        if (expectedWeth < amountBMin) revert InsufficientOutput();
+
+        // ── Effects (SC08 fix — finalise state + emit BEFORE externals) ──
+        amountA = expectedToken;
+        amountB = expectedWeth;
+        emit LPRemoved(tokenA, pool, amountA, amountB, liquidity);
+
+        // ── Interactions (CEI: external calls last) ──
         IERC20(pool).safeTransferFrom(msg.sender, address(this), liquidity);
 
-        // Build sorted ExitPoolRequest. minAmountsOut sorted to match.
         (address[] memory assets, uint256[] memory minAmounts) =
             _sortedAssets(tokenA, tokenB, amountAMin, amountBMin);
-
         IBexVault.ExitPoolRequest memory request = IBexVault.ExitPoolRequest({
             assets: assets,
             minAmountsOut: minAmounts,
             userData: abi.encode(EXIT_KIND_EXACT_BPT_IN_FOR_TOKENS_OUT, liquidity),
             toInternalBalance: false
         });
-
-        // Track balances to discover what came back, in case the vault
-        // returns unexpected token amounts.
-        uint256 tokenBefore = IERC20(tokenA).balanceOf(address(this));
-        uint256 wethBefore  = IERC20(WETH).balanceOf(address(this));
-
         vault.exitPool(poolId, address(this), payable(address(this)), request);
 
-        uint256 tokenReceived = IERC20(tokenA).balanceOf(address(this)) - tokenBefore;
-        uint256 wethReceived  = IERC20(WETH).balanceOf(address(this)) - wethBefore;
-
-        if (tokenReceived < amountAMin) revert InsufficientOutput();
-        if (wethReceived < amountBMin) revert InsufficientOutput();
-
-        // Forward token to `to`
-        IERC20(tokenA).safeTransfer(to, tokenReceived);
-
-        // Unwrap WBERA → native → forward
-        IWETH(WETH).withdraw(wethReceived);
-        (bool success, ) = payable(to).call{value: wethReceived}("");
+        IERC20(tokenA).safeTransfer(to, expectedToken);
+        IWETH(WETH).withdraw(expectedWeth);
+        (bool success, ) = payable(to).call{value: expectedWeth}("");
         if (!success) revert RefundFailed();
+    }
 
-        amountA = tokenReceived;
-        amountB = wethReceived;
+    /// @dev Pre-computes proportional withdrawal amounts for a Balancer V2
+    ///      WeightedPool exit via EXACT_BPT_IN_FOR_TOKENS_OUT. Matches the
+    ///      pool's actual exit math (`amountOut[i] = balances[i] * bptIn /
+    ///      totalSupply`). Used to avoid balanceOf-delta accounting (Sentinelleai
+    ///      SC02 mitigation 2026-06-10).
+    function _previewExit(
+        address pool, bytes32 poolId, address tokenA, uint256 liquidity
+    ) private view returns (uint256 expectedToken, uint256 expectedWeth) {
+        (address[] memory tokens, uint256[] memory balances,) = vault.getPoolTokens(poolId);
+        require(tokens.length == 2, "BexAdapter: pool not 2-asset");
+        uint256 totalBpt = IBexPool(pool).totalSupply();
+        require(totalBpt > 0, "BexAdapter: empty pool");
+        require(liquidity <= totalBpt, "BexAdapter: liquidity > supply");
 
-        emit LPRemoved(tokenA, pool, amountA, amountB, liquidity);
+        uint256 e0 = (balances[0] * liquidity) / totalBpt;
+        uint256 e1 = (balances[1] * liquidity) / totalBpt;
+        // Map by sort order — Balancer V2 returns tokens sorted ASC.
+        if (tokens[0] == tokenA) {
+            (expectedToken, expectedWeth) = (e0, e1);
+        } else {
+            (expectedToken, expectedWeth) = (e1, e0);
+        }
     }
 
     /// @notice V2 → BEX swap (GIVEN_IN, single-pool path).
