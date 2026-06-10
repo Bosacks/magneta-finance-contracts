@@ -159,7 +159,6 @@ contract BexBerachainAdapter is ReentrancyGuard, Ownable2Step {
     error TokenNotDeployed();
     error InsufficientOutput();
     error RefundFailed();
-    error StaleBalance();
 
     constructor(address _vault, address _poolFactory, address _weth) {
         if (_vault == address(0) || _poolFactory == address(0) || _weth == address(0)) revert ZeroAddress();
@@ -246,6 +245,22 @@ contract BexBerachainAdapter is ReentrancyGuard, Ownable2Step {
     ///        ACTUAL deposited amount (not the desired), making them
     ///        meaningful slippage floors that protect against pool price
     ///        manipulation including flash-loan-pumped reserves.
+    ///
+    /// @dev RESIDUAL MEV RISK (Sentinelleai v6 MEDIUM 4.8):
+    ///        The optimal ratio is computed from SPOT pool reserves, which
+    ///        an MEV bot can manipulate via sandwich attack: pump reserves
+    ///        before the user's tx, deposit at skewed ratio, restore the
+    ///        price after. Value extracted is BOUNDED by the user's
+    ///        amountTokenMin / amountETHMin slippage parameters.
+    ///        This is an inherent V2-router pattern risk that cannot be
+    ///        eliminated at the contract level (would require TWAP pricing
+    ///        or commit-reveal). Mitigations for integrators:
+    ///          - Enforce TIGHT amountTokenMin / amountETHMin (e.g., 1%
+    ///            slippage tolerance, not 50%)
+    ///          - Route through MEV-protected RPC endpoints (Flashbots
+    ///            Protect, MEV-Share, or Berachain's equivalent)
+    ///          - Surface the slippage risk in the LP-create UX so users
+    ///            can opt into private-mempool submission
     function addLiquidityETH(
         address token,
         uint256 amountTokenDesired,
@@ -412,34 +427,38 @@ contract BexBerachainAdapter is ReentrancyGuard, Ownable2Step {
         // preview needed.
         IERC20(pool).safeTransferFrom(msg.sender, address(this), liquidity);
 
-        // SC02 mitigation v5 (Sentinelleai 2026-06-10):
+        // SC02 mitigation v6 (Sentinelleai 2026-06-10):
         // Authoritative `amountA` / `amountB` come from the Balancer Vault's
         // own balance tracking via `getPoolTokens` deltas — NOT from
         // `IERC20(token).balanceOf(address(this))`. The Vault's internal
         // accounting is the source of truth for "how much did the pool
         // send to us", and is atomic within this transaction (nonReentrant
-        // precludes interleaving). This eliminates the Venus-Protocol-2026-03
-        // donation-attack pattern at the architectural level.
+        // precludes interleaving). Any dust ERC20-transferred to the adapter
+        // directly is excluded from the delta and stays as residue —
+        // donor self-griefs, user gets exactly what the Vault sent. Owner
+        // can sweep accumulated dust via `sweep()`.
         //
-        // Defense-in-depth: also assert zero pre-call balance of (tokenA,
-        // WBERA) so any future bug that leaves dust here is caught early.
-        // Owner can recover dust via `sweep()`.
-        if (IERC20(tokenA).balanceOf(address(this)) != 0) revert StaleBalance();
-        if (IERC20(WETH).balanceOf(address(this)) != 0) revert StaleBalance();
+        // NOTE: A previous version (v4-v5) added a `StaleBalance` pre-check
+        // requiring zero token balance. Removed in v6 per Sentinelleai DoS
+        // griefing finding: the check was redundant (vault delta is already
+        // donation-resistant) AND harmful (1-wei dust would block all
+        // users until owner sweep). Recovering via `sweep()` is now the
+        // ONLY admin path — and it's purely housekeeping, not load-bearing.
+        {
+            (, uint256[] memory balancesBefore,) = vault.getPoolTokens(poolId);
 
-        (, uint256[] memory poolBalancesBefore,) = vault.getPoolTokens(poolId);
+            vault.exitPool(poolId, address(this), payable(address(this)), request);
 
-        vault.exitPool(poolId, address(this), payable(address(this)), request);
+            (, uint256[] memory balancesAfter,) = vault.getPoolTokens(poolId);
 
-        (, uint256[] memory poolBalancesAfter,) = vault.getPoolTokens(poolId);
-
-        // Pool balance DECREASED by exactly what the Vault forwarded to us.
-        uint256 vaultDelta0 = poolBalancesBefore[0] - poolBalancesAfter[0];
-        uint256 vaultDelta1 = poolBalancesBefore[1] - poolBalancesAfter[1];
-        if (assets[0] == tokenA) {
-            (amountA, amountB) = (vaultDelta0, vaultDelta1);
-        } else {
-            (amountA, amountB) = (vaultDelta1, vaultDelta0);
+            // Pool balance DECREASED by exactly what the Vault forwarded to us.
+            if (assets[0] == tokenA) {
+                amountA = balancesBefore[0] - balancesAfter[0];
+                amountB = balancesBefore[1] - balancesAfter[1];
+            } else {
+                amountA = balancesBefore[1] - balancesAfter[1];
+                amountB = balancesBefore[0] - balancesAfter[0];
+            }
         }
 
         // Effects: emit + state finalization BEFORE the user-facing

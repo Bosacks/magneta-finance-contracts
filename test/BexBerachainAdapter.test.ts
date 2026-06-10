@@ -333,41 +333,28 @@ describe("BexBerachainAdapter — Balancer V2 fork facade", function () {
       ).to.be.revertedWithCustomError(adapter, "PoolMissing");
     });
 
-    // Sentinelle v4 fix (HIGH SC02): donation-attack guard
-    it("reverts on pre-call dust balance (stale-balance guard)", async function () {
+    // Sentinelle v6 confirmation: vault delta is donation-resistant
+    // (dust donations stay as residue, don't affect user output)
+    it("withstands pre-call dust donation (vault delta excludes donations)", async function () {
       const Pool = await ethers.getContractAt("MockBexPool", pool);
       const bptBalance = await Pool.balanceOf(user.address);
       await Pool.connect(user).approve(await adapter.getAddress(), bptBalance);
 
-      // Attacker donates dust to the adapter pre-call
+      // Attacker donates 1 wei
       await token.transfer(await adapter.getAddress(), 1n);
 
-      await expect(
-        adapter.connect(user).removeLiquidity(
-          await token.getAddress(), await weth.getAddress(),
-          bptBalance, 0n, 0n, user.address, DEADLINE_FUTURE,
-        ),
-      ).to.be.revertedWithCustomError(adapter, "StaleBalance");
-    });
+      // removeLiquidity still works (no DoS), user gets exact vault output
+      const tokenBefore = await token.balanceOf(user.address);
+      const tx = await adapter.connect(user).removeLiquidity(
+        await token.getAddress(), await weth.getAddress(),
+        bptBalance, 0n, 0n, user.address, DEADLINE_FUTURE,
+      );
+      await expect(tx).to.emit(adapter, "LPRemoved");
+      const tokenAfter = await token.balanceOf(user.address);
+      expect(tokenAfter - tokenBefore).to.be.gt(0n);
 
-    // Sentinelle v4 fix (HIGH SC02): owner can clean up dust after attack
-    it("owner can sweep dust to recover from a donation DoS", async function () {
-      await token.transfer(await adapter.getAddress(), ethers.parseEther("5"));
-      const beforeBal = await token.balanceOf(other.address);
-      await adapter.sweep(await token.getAddress(), other.address);
-      const afterBal = await token.balanceOf(other.address);
-      expect(afterBal - beforeBal).to.equal(ethers.parseEther("5"));
-
-      // Now removeLiquidity works again
-      const Pool = await ethers.getContractAt("MockBexPool", pool);
-      const bptBalance = await Pool.balanceOf(user.address);
-      await Pool.connect(user).approve(await adapter.getAddress(), bptBalance);
-      await expect(
-        adapter.connect(user).removeLiquidity(
-          await token.getAddress(), await weth.getAddress(),
-          bptBalance, 0n, 0n, user.address, DEADLINE_FUTURE,
-        ),
-      ).to.emit(adapter, "LPRemoved");
+      // Donated 1 wei stays as residue on adapter (donor self-griefs)
+      expect(await token.balanceOf(await adapter.getAddress())).to.equal(1n);
     });
 
     it("sweep reverts on non-owner", async function () {
