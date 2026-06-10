@@ -573,6 +573,16 @@ describe("BexBerachainAdapter — Balancer V2 fork facade", function () {
       expect(await adapter.getPair(await weth.getAddress(), await token.getAddress())).to.equal(fakePool);
     });
 
+    // Sentinelle v7 MEDIUM SC01 admin transparency: setPair MUST emit
+    // PairRegistered so off-chain monitors (magneta-listener) can alert.
+    it("emits PairRegistered with the registrar address", async function () {
+      const fakePool = other.address;
+      const tx = adapter.setPair(await token.getAddress(), await weth.getAddress(), fakePool);
+      await expect(tx)
+        .to.emit(adapter, "PairRegistered")
+        .withArgs(await token.getAddress(), await weth.getAddress(), fakePool, deployer.address);
+    });
+
     // Sentinelle v3 fix (LOW SC01): mappings are write-once
     it("reverts when overwriting an existing pair", async function () {
       const pool1 = other.address;

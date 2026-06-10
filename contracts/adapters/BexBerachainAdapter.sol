@@ -147,6 +147,7 @@ contract BexBerachainAdapter is ReentrancyGuard, Ownable2Step {
     // ─── Events ───────────────────────────────────────────────────────────
 
     event PairCreated(address indexed tokenA, address indexed tokenB, address indexed pool, bytes32 poolId);
+    event PairRegistered(address indexed tokenA, address indexed tokenB, address indexed pool, address registrar);
     event LPAdded(address indexed token, address indexed lp, uint256 tokenAmount, uint256 ethAmount, uint256 bptMinted);
     event LPRemoved(address indexed token, address indexed lp, uint256 tokenAmount, uint256 ethAmount, uint256 bptBurned);
 
@@ -429,21 +430,20 @@ contract BexBerachainAdapter is ReentrancyGuard, Ownable2Step {
 
         // SC02 mitigation v6 (Sentinelleai 2026-06-10):
         // Authoritative `amountA` / `amountB` come from the Balancer Vault's
-        // own balance tracking via `getPoolTokens` deltas — NOT from
-        // `IERC20(token).balanceOf(address(this))`. The Vault's internal
-        // accounting is the source of truth for "how much did the pool
-        // send to us", and is atomic within this transaction (nonReentrant
-        // precludes interleaving). Any dust ERC20-transferred to the adapter
-        // directly is excluded from the delta and stays as residue —
-        // donor self-griefs, user gets exactly what the Vault sent. Owner
-        // can sweep accumulated dust via `sweep()`.
+        // own pool-balance tracking via the `getPoolTokens` deltas below.
+        // The Vault's internal accounting is the source of truth for "how
+        // much did the pool send to us", and is atomic within this
+        // transaction (nonReentrant precludes interleaving). Any token
+        // dust ERC20-transferred directly to the adapter is EXCLUDED from
+        // the delta and stays as residue — donor self-griefs, user gets
+        // exactly what the Vault sent. Owner can sweep accumulated dust
+        // via `sweep()` (housekeeping, not load-bearing).
         //
-        // NOTE: A previous version (v4-v5) added a `StaleBalance` pre-check
-        // requiring zero token balance. Removed in v6 per Sentinelleai DoS
-        // griefing finding: the check was redundant (vault delta is already
-        // donation-resistant) AND harmful (1-wei dust would block all
-        // users until owner sweep). Recovering via `sweep()` is now the
-        // ONLY admin path — and it's purely housekeeping, not load-bearing.
+        // WARNING (Sentinelleai v7 LOW SC02): Do NOT regress this function
+        // to read per-token holdings of address(this) via any IERC20 view
+        // function for amount accounting. That pattern is the Venus
+        // Protocol 2026-03 vulnerability ($2M+). The vault delta below is
+        // the ONLY correct accounting source for this code path.
         {
             (, uint256[] memory balancesBefore,) = vault.getPoolTokens(poolId);
 
@@ -570,12 +570,21 @@ contract BexBerachainAdapter is ReentrancyGuard, Ownable2Step {
     ///      be created by removing the contract or deploying a fresh
     ///      adapter; we explicitly accept the operational cost of this
     ///      immutability as a security trade-off.
+    /// @dev Sentinelleai 2026-06-10 v7 MEDIUM SC01: this function is
+    ///      gated by Ownable2Step. Operational mitigation (per Sentinelle
+    ///      recommendation): owner SHOULD be migrated to a 3-of-5 multisig
+    ///      with a 48-hour timelock before mainnet ops day. The
+    ///      `PairRegistered` event is emitted on every registration so
+    ///      off-chain monitors (magneta-listener) can alert on suspicious
+    ///      admin activity even if the multisig+timelock migration is not
+    ///      yet in place.
     function setPair(address tokenA, address tokenB, address pool) external onlyOwner {
         if (tokenA == address(0) || tokenB == address(0) || pool == address(0)) revert ZeroAddress();
         require(pairOf[tokenA][tokenB] == address(0), "BexAdapter: pair exists");
         require(pairOf[tokenB][tokenA] == address(0), "BexAdapter: pair exists");
         pairOf[tokenA][tokenB] = pool;
         pairOf[tokenB][tokenA] = pool;
+        emit PairRegistered(tokenA, tokenB, pool, msg.sender);
     }
 
     /// @notice Owner-only emergency cleanup of stray ERC20 dust.
