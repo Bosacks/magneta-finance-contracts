@@ -333,6 +333,55 @@ describe("BexBerachainAdapter — Balancer V2 fork facade", function () {
       ).to.be.revertedWithCustomError(adapter, "PoolMissing");
     });
 
+    // Sentinelle v4 fix (HIGH SC02): donation-attack guard
+    it("reverts on pre-call dust balance (stale-balance guard)", async function () {
+      const Pool = await ethers.getContractAt("MockBexPool", pool);
+      const bptBalance = await Pool.balanceOf(user.address);
+      await Pool.connect(user).approve(await adapter.getAddress(), bptBalance);
+
+      // Attacker donates dust to the adapter pre-call
+      await token.transfer(await adapter.getAddress(), 1n);
+
+      await expect(
+        adapter.connect(user).removeLiquidity(
+          await token.getAddress(), await weth.getAddress(),
+          bptBalance, 0n, 0n, user.address, DEADLINE_FUTURE,
+        ),
+      ).to.be.revertedWithCustomError(adapter, "StaleBalance");
+    });
+
+    // Sentinelle v4 fix (HIGH SC02): owner can clean up dust after attack
+    it("owner can sweep dust to recover from a donation DoS", async function () {
+      await token.transfer(await adapter.getAddress(), ethers.parseEther("5"));
+      const beforeBal = await token.balanceOf(other.address);
+      await adapter.sweep(await token.getAddress(), other.address);
+      const afterBal = await token.balanceOf(other.address);
+      expect(afterBal - beforeBal).to.equal(ethers.parseEther("5"));
+
+      // Now removeLiquidity works again
+      const Pool = await ethers.getContractAt("MockBexPool", pool);
+      const bptBalance = await Pool.balanceOf(user.address);
+      await Pool.connect(user).approve(await adapter.getAddress(), bptBalance);
+      await expect(
+        adapter.connect(user).removeLiquidity(
+          await token.getAddress(), await weth.getAddress(),
+          bptBalance, 0n, 0n, user.address, DEADLINE_FUTURE,
+        ),
+      ).to.emit(adapter, "LPRemoved");
+    });
+
+    it("sweep reverts on non-owner", async function () {
+      await expect(
+        adapter.connect(user).sweep(await token.getAddress(), user.address),
+      ).to.be.revertedWith("Ownable: caller is not the owner");
+    });
+
+    it("sweep reverts on zero balance", async function () {
+      await expect(
+        adapter.sweep(await token.getAddress(), other.address),
+      ).to.be.revertedWithCustomError(adapter, "ZeroAmount");
+    });
+
     it("burns BPT, returns token + native, emits LPRemoved", async function () {
       const Pool = await ethers.getContractAt("MockBexPool", pool);
       const bptBalance = await Pool.balanceOf(user.address);

@@ -159,6 +159,7 @@ contract BexBerachainAdapter is ReentrancyGuard, Ownable2Step {
     error TokenNotDeployed();
     error InsufficientOutput();
     error RefundFailed();
+    error StaleBalance();
 
     constructor(address _vault, address _poolFactory, address _weth) {
         if (_vault == address(0) || _poolFactory == address(0) || _weth == address(0)) revert ZeroAddress();
@@ -411,13 +412,20 @@ contract BexBerachainAdapter is ReentrancyGuard, Ownable2Step {
         // slippage via minAmountsOut[] — no preview needed.
         IERC20(pool).safeTransferFrom(msg.sender, address(this), liquidity);
 
-        uint256 tokenBefore = IERC20(tokenA).balanceOf(address(this));
-        uint256 wethBefore  = IERC20(WETH).balanceOf(address(this));
+        // SC02 mitigation v4 (Sentinelleai 2026-06-10): donation-attack guard.
+        // The adapter MUST hold zero balance of (tokenA, WBERA) before
+        // exitPool, otherwise the post-call delta could be inflated by a
+        // pre-call ERC20 donation (Venus Protocol 2026-03 pattern). Any
+        // dust accumulated unexpectedly can be swept by the owner via
+        // `sweep()`. The check makes the post-call delta provably equal
+        // to "what the Vault sent us", with no balanceOf-based heuristic.
+        if (IERC20(tokenA).balanceOf(address(this)) != 0) revert StaleBalance();
+        if (IERC20(WETH).balanceOf(address(this)) != 0) revert StaleBalance();
 
         vault.exitPool(poolId, address(this), payable(address(this)), request);
 
-        amountA = IERC20(tokenA).balanceOf(address(this)) - tokenBefore;
-        amountB = IERC20(WETH).balanceOf(address(this)) - wethBefore;
+        amountA = IERC20(tokenA).balanceOf(address(this));
+        amountB = IERC20(WETH).balanceOf(address(this));
 
         // Effects: emit + state finalization BEFORE the user-facing
         // transfers and the native forward (CEI-aware).
@@ -534,6 +542,22 @@ contract BexBerachainAdapter is ReentrancyGuard, Ownable2Step {
         require(pairOf[tokenB][tokenA] == address(0), "BexAdapter: pair exists");
         pairOf[tokenA][tokenB] = pool;
         pairOf[tokenB][tokenA] = pool;
+    }
+
+    /// @notice Owner-only emergency cleanup of stray ERC20 dust.
+    ///         The StaleBalance guard in `removeLiquidity` reverts when
+    ///         the adapter holds any (tokenA, WBERA) balance pre-call —
+    ///         this function lets the owner sweep accidental or malicious
+    ///         dust transfers so legitimate user flows can resume.
+    /// @dev Sentinelleai 2026-06-10 SC02 mitigation companion. Doesn't
+    ///      grant the owner authority over funds that are LEGITIMATELY
+    ///      mid-flow — those are zero between calls thanks to the
+    ///      no-residual design of all mutation functions.
+    function sweep(address token, address to) external onlyOwner {
+        if (token == address(0) || to == address(0)) revert ZeroAddress();
+        uint256 bal = IERC20(token).balanceOf(address(this));
+        if (bal == 0) revert ZeroAmount();
+        IERC20(token).safeTransfer(to, bal);
     }
 
     /// @notice Accept native unwraps from WBERA so removeLiquidity →
