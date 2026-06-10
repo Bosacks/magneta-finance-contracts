@@ -408,24 +408,39 @@ contract BexBerachainAdapter is ReentrancyGuard, Ownable2Step {
             toInternalBalance: false
         });
 
-        // Pull BPT, snapshot before-balances, exit pool. The vault enforces
-        // slippage via minAmountsOut[] — no preview needed.
+        // Pull BPT. The vault enforces slippage via minAmountsOut[] — no
+        // preview needed.
         IERC20(pool).safeTransferFrom(msg.sender, address(this), liquidity);
 
-        // SC02 mitigation v4 (Sentinelleai 2026-06-10): donation-attack guard.
-        // The adapter MUST hold zero balance of (tokenA, WBERA) before
-        // exitPool, otherwise the post-call delta could be inflated by a
-        // pre-call ERC20 donation (Venus Protocol 2026-03 pattern). Any
-        // dust accumulated unexpectedly can be swept by the owner via
-        // `sweep()`. The check makes the post-call delta provably equal
-        // to "what the Vault sent us", with no balanceOf-based heuristic.
+        // SC02 mitigation v5 (Sentinelleai 2026-06-10):
+        // Authoritative `amountA` / `amountB` come from the Balancer Vault's
+        // own balance tracking via `getPoolTokens` deltas — NOT from
+        // `IERC20(token).balanceOf(address(this))`. The Vault's internal
+        // accounting is the source of truth for "how much did the pool
+        // send to us", and is atomic within this transaction (nonReentrant
+        // precludes interleaving). This eliminates the Venus-Protocol-2026-03
+        // donation-attack pattern at the architectural level.
+        //
+        // Defense-in-depth: also assert zero pre-call balance of (tokenA,
+        // WBERA) so any future bug that leaves dust here is caught early.
+        // Owner can recover dust via `sweep()`.
         if (IERC20(tokenA).balanceOf(address(this)) != 0) revert StaleBalance();
         if (IERC20(WETH).balanceOf(address(this)) != 0) revert StaleBalance();
 
+        (, uint256[] memory poolBalancesBefore,) = vault.getPoolTokens(poolId);
+
         vault.exitPool(poolId, address(this), payable(address(this)), request);
 
-        amountA = IERC20(tokenA).balanceOf(address(this));
-        amountB = IERC20(WETH).balanceOf(address(this));
+        (, uint256[] memory poolBalancesAfter,) = vault.getPoolTokens(poolId);
+
+        // Pool balance DECREASED by exactly what the Vault forwarded to us.
+        uint256 vaultDelta0 = poolBalancesBefore[0] - poolBalancesAfter[0];
+        uint256 vaultDelta1 = poolBalancesBefore[1] - poolBalancesAfter[1];
+        if (assets[0] == tokenA) {
+            (amountA, amountB) = (vaultDelta0, vaultDelta1);
+        } else {
+            (amountA, amountB) = (vaultDelta1, vaultDelta0);
+        }
 
         // Effects: emit + state finalization BEFORE the user-facing
         // transfers and the native forward (CEI-aware).
