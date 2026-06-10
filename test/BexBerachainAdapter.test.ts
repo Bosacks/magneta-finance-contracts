@@ -220,6 +220,57 @@ describe("BexBerachainAdapter — Balancer V2 fork facade", function () {
       const pool2 = await adapter.getPair(await token.getAddress(), await weth.getAddress());
       expect(pool1).to.equal(pool2);
     });
+
+    // Sentinelle v3 fix (MEDIUM SC06): partial-fill refunds excess native
+    it("partial-fill: refunds excess ETH when reserve ratio differs", async function () {
+      // First add at 1:1 token-to-ETH ratio (pool seeded 1000 tok : 10 ETH ratio: 100)
+      const seedTok = ethers.parseEther("1000");
+      const seedEth = ethers.parseEther("10");
+      await token.connect(user).approve(await adapter.getAddress(), seedTok);
+      await adapter.connect(user).addLiquidityETH(
+        await token.getAddress(), seedTok, 0, 0, user.address, DEADLINE_FUTURE,
+        { value: seedEth },
+      );
+
+      // Second add with surplus ETH (offered 100 ETH for 1000 tokens; optimal ratio = 10 ETH).
+      // Excess 90 ETH must be refunded to user.
+      const desiredTok = ethers.parseEther("1000");
+      const surplusEth = ethers.parseEther("100");
+      await token.connect(user).approve(await adapter.getAddress(), desiredTok);
+      const balBefore = await ethers.provider.getBalance(user.address);
+      const tx = await adapter.connect(user).addLiquidityETH(
+        await token.getAddress(), desiredTok, 0, 0, user.address, DEADLINE_FUTURE,
+        { value: surplusEth },
+      );
+      const r = await tx.wait();
+      const gasSpent = r!.gasUsed * r!.gasPrice;
+      const balAfter = await ethers.provider.getBalance(user.address);
+      // User sent 100 ETH, optimal was 10 ETH, so 90 ETH refunded.
+      // Net cost = 10 ETH (deposited) + gas.
+      const ethDeposited = balBefore - balAfter - gasSpent;
+      expect(ethDeposited).to.be.closeTo(ethers.parseEther("10"), ethers.parseEther("0.0001"));
+    });
+
+    // Sentinelle v3 fix (MEDIUM SC06): slippage check on optimal amount
+    it("partial-fill: reverts when computed optimal < amountETHMin", async function () {
+      // Seed pool at 1000 tok : 10 ETH
+      await token.connect(user).approve(await adapter.getAddress(), TOKEN_AMOUNT);
+      await adapter.connect(user).addLiquidityETH(
+        await token.getAddress(), TOKEN_AMOUNT, 0, 0, user.address, DEADLINE_FUTURE,
+        { value: ETH_AMOUNT },
+      );
+
+      // Try to add 1000 tok + 100 ETH but require min 50 ETH actually deposited.
+      // Optimal is 10 ETH < 50 ETH min → should revert.
+      await token.connect(user).approve(await adapter.getAddress(), TOKEN_AMOUNT);
+      await expect(
+        adapter.connect(user).addLiquidityETH(
+          await token.getAddress(), TOKEN_AMOUNT, 0, ethers.parseEther("50"),
+          user.address, DEADLINE_FUTURE,
+          { value: ethers.parseEther("100") },
+        ),
+      ).to.be.revertedWithCustomError(adapter, "InsufficientOutput");
+    });
   });
 
   // ─── removeLiquidity ──────────────────────────────────────────────────
@@ -484,6 +535,19 @@ describe("BexBerachainAdapter — Balancer V2 fork facade", function () {
       await adapter.setPair(await token.getAddress(), await weth.getAddress(), fakePool);
       expect(await adapter.getPair(await token.getAddress(), await weth.getAddress())).to.equal(fakePool);
       expect(await adapter.getPair(await weth.getAddress(), await token.getAddress())).to.equal(fakePool);
+    });
+
+    // Sentinelle v3 fix (LOW SC01): mappings are write-once
+    it("reverts when overwriting an existing pair", async function () {
+      const pool1 = other.address;
+      const pool2 = deployer.address; // any non-zero
+      await adapter.setPair(await token.getAddress(), await weth.getAddress(), pool1);
+      await expect(
+        adapter.setPair(await token.getAddress(), await weth.getAddress(), pool2),
+      ).to.be.revertedWith("BexAdapter: pair exists");
+      await expect(
+        adapter.setPair(await weth.getAddress(), await token.getAddress(), pool2),
+      ).to.be.revertedWith("BexAdapter: pair exists");
     });
   });
 

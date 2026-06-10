@@ -204,6 +204,8 @@ contract MockBexVault {
             uint256 vaultBal = poolBalance[pool][request.assets[i]];
             uint256 totalBPT = ERC20(pool).totalSupply() + bptAmountIn;
             uint256 out = vaultBal * bptAmountIn / totalBPT;
+            // Enforce minAmountsOut[i] — matches Balancer V2 Vault invariant.
+            require(out >= request.minAmountsOut[i], "MockVault: below minAmountsOut");
             if (out > 0) {
                 IERC20(request.assets[i]).transfer(recipient, out);
                 poolBalance[pool][request.assets[i]] -= out;
