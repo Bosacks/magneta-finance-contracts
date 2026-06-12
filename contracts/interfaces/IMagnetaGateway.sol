@@ -32,7 +32,13 @@ interface IMagnetaGateway {
         // Token creation (multi-chain via Gateway.sendFanOut). Sub-op
         // (Standard | AutoLiquidity) selected by the first byte of the
         // params payload — see TokenCreationModule.TemplateKind.
-        CREATE_TOKEN
+        CREATE_TOKEN,
+        // Atomic LP ops (V1.1). One module — LPAtomicModule — handles both,
+        // delegating to MagnetaLpAtomicHelper on the destination chain.
+        // POOL_FEE_COMPOUND: same-router remove + re-add at current ratio.
+        // MIGRATE_LP:        cross-router remove (src) + add (dst), single chain.
+        POOL_FEE_COMPOUND,
+        MIGRATE_LP
     }
 
     /// @notice Emitted when a module processes an operation.
