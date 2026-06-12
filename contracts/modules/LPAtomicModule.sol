@@ -8,6 +8,23 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "../interfaces/IModule.sol";
 import "../interfaces/IMagnetaGateway.sol";
 
+/// Subset of MagnetaRouterRegistry the module reads at runtime to enforce
+/// the router allowlist (chantier #2 — Sentinelle 2026-06-12 SC04 HIGH).
+interface IMagnetaRouterRegistry {
+    function isRouterAllowed(address router) external view returns (bool);
+}
+
+/// Minimal UniV2 pair view used to verify a pair was created by an
+/// allowlisted router's factory (transitive trust for pairs).
+interface IUniV2PairFactoryView {
+    function factory() external view returns (address);
+}
+
+/// Minimal UniV2 router view used to fetch the factory.
+interface IUniV2RouterFactoryView {
+    function factory() external view returns (address);
+}
+
 /// Subset of MagnetaLpAtomicHelper that this module needs. The full helper
 /// lives in the Tokens repo (contracts/solidity/contracts/MagnetaLpAtomicHelper.sol)
 /// and is deployed once per chain. This module is the gateway-side facade.
@@ -128,18 +145,22 @@ interface IMagnetaLpAtomicHelper {
  *   Cannot enforce on-chain until IMagnetaGateway exposes a view; the
  *   deployment script invariant is the V1 control.
  *
- *   SC04 HIGH (no router/pair allowlist): Deferred to V2 with a multisig-
- *   governed registry. V1 trusts the frontend's curated KNOWN_V2_ROUTERS
- *   surface; an attacker bypassing the UI to call with a malicious router
- *   is bounded to losing the LP they themselves supplied (the module never
- *   approves anything except for the user-supplied router and only for the
- *   user-supplied amount).
+ *   SC04 HIGH (no router/pair allowlist): RESOLVED in chantier #2 — the
+ *   module now consumes a MagnetaRouterRegistry (Safe-governed, ideally
+ *   behind a Timelock) at every execute(). Compound and migrate ops both
+ *   require the router to be on the allowlist; pairs are trusted
+ *   transitively via `pair.factory() == router.factory()`. An attacker who
+ *   supplies an arbitrary router reverts on `RouterNotAllowed` before any
+ *   token movement.
  */
 contract LPAtomicModule is IModule, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     address public immutable gateway;
     address public immutable helper;
+    /// @notice Router allowlist consulted at execution time. Chantier #2 —
+    ///         eliminates the SC04 HIGH "arbitrary router accepted" risk.
+    address public immutable registry;
 
     /// @notice Per-execution payload hash → consumed (SC02 replay protection).
     mapping(bytes32 => bool) public executedPayloads;
@@ -155,6 +176,8 @@ contract LPAtomicModule is IModule, ReentrancyGuard {
     error AlreadyExecuted();
     error LpResidual(uint256 amount);
     error DVNQuorumTooLow(uint8 attested);
+    error RouterNotAllowed(address router);
+    error PairFactoryMismatch(address pair, address router);
 
     /// @notice Minimum attested DVN quorum the gateway must surface for this
     ///         module to wire up. 2-of-N is the Kelp-DAO-class single-
@@ -193,21 +216,23 @@ contract LPAtomicModule is IModule, ReentrancyGuard {
     /**
      * @param _gateway  MagnetaGateway on the chain this module serves.
      * @param _helper   MagnetaLpAtomicHelper on the same chain.
+     * @param _registry MagnetaRouterRegistry on the same chain. Mandatory.
      *
-     * Reverts with `DVNQuorumTooLow` if the gateway's attested DVN floor is
-     * below MIN_DVN_QUORUM (= 2). The attestation is a Safe-managed value on
-     * the gateway (see MagnetaGateway.setRequiredDVNCount); operators MUST
-     * call setRequiredDVNCount(>= 2) on the gateway BEFORE deploying this
-     * module. This is the on-chain anchor for the Kelp-DAO-class single-
-     * validator-risk mitigation — replaces the prior off-chain deployment-
-     * checklist invariant (Sentinelle 2026-06-12 SC01:2026 chantier #3).
+     * Reverts:
+     *  - `DVNQuorumTooLow` if the gateway's attested DVN floor < MIN_DVN_QUORUM
+     *    (chantier #3).
+     *  - `ZeroAddress` if any constructor arg is zero (no fallback to "no
+     *    allowlist" — that would defeat chantier #2).
      */
-    constructor(address _gateway, address _helper) {
-        if (_gateway == address(0) || _helper == address(0)) revert ZeroAddress();
+    constructor(address _gateway, address _helper, address _registry) {
+        if (_gateway == address(0) || _helper == address(0) || _registry == address(0)) {
+            revert ZeroAddress();
+        }
         uint8 attested = IMagnetaGateway(_gateway).requiredDVNCount();
         if (attested < MIN_DVN_QUORUM) revert DVNQuorumTooLow(attested);
-        gateway = _gateway;
-        helper  = _helper;
+        gateway  = _gateway;
+        helper   = _helper;
+        registry = _registry;
     }
 
     // ─── Param structs ──────────────────────────────────────────────────
@@ -275,6 +300,8 @@ contract LPAtomicModule is IModule, ReentrancyGuard {
         if (p.lpAmount == 0) revert LpAmountZero();
         if (p.amountAMin == 0 || p.amountBMin == 0) revert MinAmountZero();
         if (block.timestamp > p.deadline) revert DeadlineExpired();
+        // Chantier #2: enforce router allowlist + pair-factory binding.
+        _checkRouterAndPair(p.router, p.pair);
 
         // 0. Snapshot pre-transfer balance so the SC06 residual refund only
         //    returns what THIS call's helper failed to consume — not any LP
@@ -315,6 +342,14 @@ contract LPAtomicModule is IModule, ReentrancyGuard {
         if (p.lpAmount == 0) revert LpAmountZero();
         if (p.amountAMin == 0 || p.amountBMin == 0) revert MinAmountZero();
         if (block.timestamp > p.deadline) revert DeadlineExpired();
+        // Chantier #2: enforce allowlist on BOTH ends of the migration.
+        // src pair must come from src router's factory; dst pair will be
+        // auto-created by dst router so dst router needs allowlist + factory
+        // is implicit.
+        _checkRouterAndPair(p.srcRouter, p.srcPair);
+        if (!IMagnetaRouterRegistry(registry).isRouterAllowed(p.dstRouter)) {
+            revert RouterNotAllowed(p.dstRouter);
+        }
 
         uint256 balanceBefore = IERC20(p.srcPair).balanceOf(address(this));
         IERC20(p.srcPair).safeTransferFrom(ctx.caller, address(this), p.lpAmount);
@@ -334,6 +369,21 @@ contract LPAtomicModule is IModule, ReentrancyGuard {
 
         emit LPMigrated(ctx.caller, p.srcPair, p.srcRouter, p.dstRouter, p.lpAmount);
         return abi.encode(ctx.caller, p.srcPair, p.dstRouter, p.lpAmount);
+    }
+
+    /// @dev Chantier #2 — router/pair allowlist enforcement.
+    ///      `router` must be on the registry allowlist; `pair` must be from
+    ///      that router's factory (transitive trust). Reverts with a
+    ///      specific custom error so off-chain decoders can distinguish.
+    function _checkRouterAndPair(address router, address pair) private view {
+        if (!IMagnetaRouterRegistry(registry).isRouterAllowed(router)) {
+            revert RouterNotAllowed(router);
+        }
+        address pairFactory   = IUniV2PairFactoryView(pair).factory();
+        address routerFactory = IUniV2RouterFactoryView(router).factory();
+        if (pairFactory != routerFactory) {
+            revert PairFactoryMismatch(pair, router);
+        }
     }
 
     /// @dev SC06 helper. Auto-refund any LP this call's helper failed to
