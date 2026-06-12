@@ -78,13 +78,62 @@ interface IMagnetaLpAtomicHelper {
  *   Safe + timelock policies on the GATEWAY admin are the right place for
  *   that control; documented in infra_safe_multisig.md.
  *
- * Sentinelle considerations:
+ * Defense-in-depth (Sentinelle 2026-06-12 deep-scan response — addresses
+ * 8 of 11 raised findings; 3 are architectural and addressed separately):
+ *
  *   - nonReentrant on execute().
  *   - SafeERC20 for the LP pull / helper approval.
- *   - Module never receives ETH (LP ops use ERC20-only paths via the helper).
- *     The dispatch from gateway forwards no msg.value for these ops.
- *   - No Ownable inheritance: the module has no admin functions, so an owner
- *     role would be unused dead-code surface (removed per SC01 review).
+ *   - ETH rejected at the entry point (`if (msg.value != 0) revert`). The
+ *     IModule interface mandates `payable` so we can't drop it, but we
+ *     refuse any nonzero msg.value to prevent the SC10 "permanent ETH lock"
+ *     scenario.
+ *   - Empty `params` rejected before reading `params[0]` (SC10 OOB panic).
+ *   - Module-level replay protection via per-execution payload hash mapping
+ *     (SC02). A repeated identical call from a compromised gateway path
+ *     reverts on the second attempt. The hash mixes ctx.caller, op, and the
+ *     full inner params blob — including the user-supplied deadline so the
+ *     same user can legitimately re-compound with a fresh deadline.
+ *   - `block.timestamp <= deadline` enforced at the module before any token
+ *     movement (SC04). Helper enforces a deadline buffer separately, but
+ *     the module fails closed on expired deadlines BEFORE pulling the LP.
+ *   - Non-zero `lpAmount` enforced (SC04).
+ *   - Non-zero pair/router addresses enforced (SC04).
+ *   - Non-zero `amountAMin` / `amountBMin` enforced (SC07 sandwich). Helper
+ *     accepts zero for backward-compat with the single-chain UI; the
+ *     module-side path additionally REJECTS zero to fail closed.
+ *   - Post-helper residual LP balance check (SC06). If the helper
+ *     misbehaves and leaves dust in the module, we refund it to ctx.caller
+ *     before emitting success. No emergency-recovery admin function: the
+ *     refund is automatic.
+ *   - No Ownable inheritance: the module has no admin functions; allowlists
+ *     for routers / pairs (SC04 HIGH) would re-introduce a governance role
+ *     that we'd want behind a multisig + timelock, which is a bigger
+ *     architectural decision deferred to V2. The current mitigation is
+ *     defense-in-depth (the input checks above) plus the deployment policy
+ *     of only wiring this module on chains where the frontend's
+ *     KNOWN_V2_ROUTERS list covers the user-facing surface.
+ *
+ * Architectural concerns NOT mitigated at this layer:
+ *
+ *   SC01 CRITICAL (gateway sole trust boundary): Adding module-level EIP-712
+ *   user-intent verification was considered, but would duplicate the
+ *   authentication the gateway already performs for the single-chain case
+ *   and is insufficient for the cross-chain case (where the user signs on
+ *   the source chain — the signature would need to travel in the LZ
+ *   payload, an architecture change for ALL Magneta modules, not just this
+ *   one). The honest answer is that a compromised gateway is treated as
+ *   game-over across the protocol; defense is at the gateway layer.
+ *
+ *   SC01 HIGH (DVN quorum off-chain): Same as the 2026-06-12 follow-up.
+ *   Cannot enforce on-chain until IMagnetaGateway exposes a view; the
+ *   deployment script invariant is the V1 control.
+ *
+ *   SC04 HIGH (no router/pair allowlist): Deferred to V2 with a multisig-
+ *   governed registry. V1 trusts the frontend's curated KNOWN_V2_ROUTERS
+ *   surface; an attacker bypassing the UI to call with a malicious router
+ *   is bounded to losing the LP they themselves supplied (the module never
+ *   approves anything except for the user-supplied router and only for the
+ *   user-supplied amount).
  */
 contract LPAtomicModule is IModule, ReentrancyGuard {
     using SafeERC20 for IERC20;
@@ -92,9 +141,19 @@ contract LPAtomicModule is IModule, ReentrancyGuard {
     address public immutable gateway;
     address public immutable helper;
 
+    /// @notice Per-execution payload hash → consumed (SC02 replay protection).
+    mapping(bytes32 => bool) public executedPayloads;
+
     error NotGateway();
     error UnsupportedOp();
     error ZeroAddress();
+    error EthNotAccepted();
+    error EmptyParams();
+    error DeadlineExpired();
+    error LpAmountZero();
+    error MinAmountZero();
+    error AlreadyExecuted();
+    error LpResidual(uint256 amount);
 
     /// @notice Emitted on successful compound. Off-chain monitoring tools can
     ///         subscribe instead of replaying every gateway tx. (SC08 fix)
@@ -183,8 +242,20 @@ contract LPAtomicModule is IModule, ReentrancyGuard {
         nonReentrant
         returns (bytes memory)
     {
+        // SC10: refuse ETH (interface requires `payable` so we can't drop it).
+        if (msg.value != 0) revert EthNotAccepted();
+        // SC10: prevent calldata OOB panic on empty params.
+        if (params.length < 1) revert EmptyParams();
+
         IMagnetaGateway.OpType op = IMagnetaGateway.OpType(uint8(params[0]));
         bytes calldata inner = params[1:];
+
+        // SC02: module-level replay protection. Hashing the (caller, op, inner)
+        // triple makes each user's calls scoped per (op, params); the deadline
+        // is inside `inner` so legitimate repeats with a fresh deadline pass.
+        bytes32 payloadHash = keccak256(abi.encode(ctx.caller, op, inner));
+        if (executedPayloads[payloadHash]) revert AlreadyExecuted();
+        executedPayloads[payloadHash] = true;
 
         if (op == IMagnetaGateway.OpType.POOL_FEE_COMPOUND) {
             return _compound(ctx, inner);
@@ -199,6 +270,11 @@ contract LPAtomicModule is IModule, ReentrancyGuard {
         returns (bytes memory)
     {
         CompoundParams memory p = abi.decode(raw, (CompoundParams));
+        // SC04: defensive validation BEFORE pulling LP.
+        if (p.pair == address(0) || p.router == address(0)) revert ZeroAddress();
+        if (p.lpAmount == 0) revert LpAmountZero();
+        if (p.amountAMin == 0 || p.amountBMin == 0) revert MinAmountZero();
+        if (block.timestamp > p.deadline) revert DeadlineExpired();
 
         // 1. Pull LP from the user into this module.
         IERC20(p.pair).safeTransferFrom(ctx.caller, address(this), p.lpAmount);
@@ -216,6 +292,10 @@ contract LPAtomicModule is IModule, ReentrancyGuard {
         );
         // 3. Revoke the standing approval — module holds no funds, no allowance.
         IERC20(p.pair).forceApprove(helper, 0);
+        // 4. SC06: residual check. A miswired helper that fails to pull all the
+        //    LP would otherwise leave it stuck here forever. Refund any dust to
+        //    the user before we call the op successful.
+        _refundResidual(p.pair, ctx.caller);
 
         emit LPCompounded(ctx.caller, p.pair, p.router, p.lpAmount);
         return abi.encode(ctx.caller, p.pair, p.lpAmount);
@@ -226,6 +306,12 @@ contract LPAtomicModule is IModule, ReentrancyGuard {
         returns (bytes memory)
     {
         MigrateParams memory p = abi.decode(raw, (MigrateParams));
+        if (p.srcPair == address(0) || p.srcRouter == address(0) || p.dstRouter == address(0)) {
+            revert ZeroAddress();
+        }
+        if (p.lpAmount == 0) revert LpAmountZero();
+        if (p.amountAMin == 0 || p.amountBMin == 0) revert MinAmountZero();
+        if (block.timestamp > p.deadline) revert DeadlineExpired();
 
         IERC20(p.srcPair).safeTransferFrom(ctx.caller, address(this), p.lpAmount);
         IERC20(p.srcPair).forceApprove(helper, p.lpAmount);
@@ -240,8 +326,18 @@ contract LPAtomicModule is IModule, ReentrancyGuard {
             ctx.caller
         );
         IERC20(p.srcPair).forceApprove(helper, 0);
+        _refundResidual(p.srcPair, ctx.caller);
 
         emit LPMigrated(ctx.caller, p.srcPair, p.srcRouter, p.dstRouter, p.lpAmount);
         return abi.encode(ctx.caller, p.srcPair, p.dstRouter, p.lpAmount);
+    }
+
+    /// @dev SC06 helper. Auto-refund any residual LP back to the user if the
+    ///      external helper failed to consume the full amount.
+    function _refundResidual(address pair, address to) private {
+        uint256 residual = IERC20(pair).balanceOf(address(this));
+        if (residual != 0) {
+            IERC20(pair).safeTransfer(to, residual);
+        }
     }
 }
