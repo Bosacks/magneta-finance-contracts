@@ -276,6 +276,10 @@ contract LPAtomicModule is IModule, ReentrancyGuard {
         if (p.amountAMin == 0 || p.amountBMin == 0) revert MinAmountZero();
         if (block.timestamp > p.deadline) revert DeadlineExpired();
 
+        // 0. Snapshot pre-transfer balance so the SC06 residual refund only
+        //    returns what THIS call's helper failed to consume — not any LP
+        //    an attacker pre-donated to grief the next caller.
+        uint256 balanceBefore = IERC20(p.pair).balanceOf(address(this));
         // 1. Pull LP from the user into this module.
         IERC20(p.pair).safeTransferFrom(ctx.caller, address(this), p.lpAmount);
         // 2. Approve helper to pull LP from us, then call helper. Helper sends
@@ -292,10 +296,9 @@ contract LPAtomicModule is IModule, ReentrancyGuard {
         );
         // 3. Revoke the standing approval — module holds no funds, no allowance.
         IERC20(p.pair).forceApprove(helper, 0);
-        // 4. SC06: residual check. A miswired helper that fails to pull all the
-        //    LP would otherwise leave it stuck here forever. Refund any dust to
-        //    the user before we call the op successful.
-        _refundResidual(p.pair, ctx.caller);
+        // 4. SC06: refund only the delta vs balanceBefore. Closes the donation
+        //    grief vector flagged in the 2026-06-12 re-scan (LOW 3.1 SC06).
+        _refundDelta(p.pair, balanceBefore, ctx.caller);
 
         emit LPCompounded(ctx.caller, p.pair, p.router, p.lpAmount);
         return abi.encode(ctx.caller, p.pair, p.lpAmount);
@@ -313,6 +316,7 @@ contract LPAtomicModule is IModule, ReentrancyGuard {
         if (p.amountAMin == 0 || p.amountBMin == 0) revert MinAmountZero();
         if (block.timestamp > p.deadline) revert DeadlineExpired();
 
+        uint256 balanceBefore = IERC20(p.srcPair).balanceOf(address(this));
         IERC20(p.srcPair).safeTransferFrom(ctx.caller, address(this), p.lpAmount);
         IERC20(p.srcPair).forceApprove(helper, p.lpAmount);
         IMagnetaLpAtomicHelper(helper).migratePositionFor(
@@ -326,18 +330,27 @@ contract LPAtomicModule is IModule, ReentrancyGuard {
             ctx.caller
         );
         IERC20(p.srcPair).forceApprove(helper, 0);
-        _refundResidual(p.srcPair, ctx.caller);
+        _refundDelta(p.srcPair, balanceBefore, ctx.caller);
 
         emit LPMigrated(ctx.caller, p.srcPair, p.srcRouter, p.dstRouter, p.lpAmount);
         return abi.encode(ctx.caller, p.srcPair, p.dstRouter, p.lpAmount);
     }
 
-    /// @dev SC06 helper. Auto-refund any residual LP back to the user if the
-    ///      external helper failed to consume the full amount.
-    function _refundResidual(address pair, address to) private {
-        uint256 residual = IERC20(pair).balanceOf(address(this));
-        if (residual != 0) {
-            IERC20(pair).safeTransfer(to, residual);
+    /// @dev SC06 helper. Auto-refund any LP this call's helper failed to
+    ///      consume back to the user. Subtracts `balanceBefore` so any LP
+    ///      pre-donated to the module by a griefer is intentionally NOT
+    ///      swept into the current caller's refund.
+    ///
+    /// @dev The `balanceOf(address(this))` read here is NOT a pricing /
+    ///      share-rate input — it's a post-op dust accounting read used
+    ///      only to compute a refund delta. The Venus 2026-03 zkSync
+    ///      donation-attack pattern (where `balanceOf` was the divisor in
+    ///      an exchange-rate calc) does not apply. Inline note added to
+    ///      suppress future Sentinelle static-sentinel ACC-1 noise.
+    function _refundDelta(address pair, uint256 balanceBefore, address to) private {
+        uint256 balanceAfter = IERC20(pair).balanceOf(address(this));
+        if (balanceAfter > balanceBefore) {
+            IERC20(pair).safeTransfer(to, balanceAfter - balanceBefore);
         }
     }
 }
