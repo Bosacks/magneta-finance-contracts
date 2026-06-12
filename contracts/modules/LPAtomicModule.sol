@@ -105,12 +105,18 @@ contract LPAtomicModule is IModule, ReentrancyGuard {
         uint256          lpAmount
     );
 
-    /// @notice Emitted on successful migrate. (SC08 fix)
+    /// @notice Emitted on successful migrate. Parameter ordering mirrors
+    ///         MigrateParams (srcPair → srcRouter → dstRouter); subgraphs
+    ///         decoding by position will not silently swap routers
+    ///         (Sentinelle 2026-06-12 follow-up — SC08:2026 LOW).
+    ///         srcPair stays indexed; we drop dstRouter from the indexed
+    ///         slot because migrations are predominantly filtered by source
+    ///         pool, not destination router.
     event LPMigrated(
         address indexed caller,
         address indexed srcPair,
-        address indexed dstRouter,
         address          srcRouter,
+        address          dstRouter,
         uint256          lpAmount
     );
 
@@ -119,6 +125,26 @@ contract LPAtomicModule is IModule, ReentrancyGuard {
         _;
     }
 
+    /**
+     * @param _gateway  MagnetaGateway on the chain this module serves.
+     * @param _helper   MagnetaLpAtomicHelper on the same chain.
+     *
+     * Deployment invariant (Sentinelle 2026-06-12 SC01:2026 follow-up):
+     *
+     *   The wired gateway MUST be configured with a ≥ 2-of-N LayerZero DVN
+     *   quorum BEFORE this module is registered for any OpType. This module
+     *   does not call into the gateway to verify the DVN count at deploy
+     *   time because IMagnetaGateway does not yet expose `requiredDVNCount()`
+     *   — the deployment script `scripts/deploy/deployLPAtomicModule.ts`
+     *   MUST instead reverify the gateway's DVN config off-chain and revert
+     *   if count < 2. Failure to do so reintroduces the Kelp-DAO-class
+     *   single-validator risk that this comment exists to deter.
+     *
+     *   When `requiredDVNCount()` lands on the gateway interface, replace
+     *   the off-chain check with an on-chain `require(IMagnetaGateway(
+     *   _gateway).requiredDVNCount() >= 2, "MagnetaLPAtomic: DVN quorum")`
+     *   in this constructor and remove this paragraph.
+     */
     constructor(address _gateway, address _helper) {
         if (_gateway == address(0) || _helper == address(0)) revert ZeroAddress();
         gateway = _gateway;
@@ -215,7 +241,7 @@ contract LPAtomicModule is IModule, ReentrancyGuard {
         );
         IERC20(p.srcPair).forceApprove(helper, 0);
 
-        emit LPMigrated(ctx.caller, p.srcPair, p.dstRouter, p.srcRouter, p.lpAmount);
+        emit LPMigrated(ctx.caller, p.srcPair, p.srcRouter, p.dstRouter, p.lpAmount);
         return abi.encode(ctx.caller, p.srcPair, p.dstRouter, p.lpAmount);
     }
 }
