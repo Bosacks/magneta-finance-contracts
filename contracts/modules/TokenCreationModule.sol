@@ -75,12 +75,21 @@ contract TokenCreationModule is IModule, ReentrancyGuard, Ownable2Step {
     error FactoryNotSet();
     error InvalidPayload();
 
+    /// @notice Minimum attested DVN quorum the gateway must surface for this
+    ///         module to wire up. Mitigates Kelp-DAO-class single-validator
+    ///         risk (chantier #3 — Sentinelle 2026-06-12 SC01:2026).
+    uint8 public constant MIN_DVN_QUORUM = 2;
+
     constructor(
         address _gateway,
         address _standardFactory,
         address _autoLiquidityFactory
     ) {
         require(_gateway != address(0), "TokenCreationModule: gateway 0");
+        require(
+            IMagnetaGateway(_gateway).requiredDVNCount() >= MIN_DVN_QUORUM,
+            "TokenCreationModule: DVN quorum"
+        );
         // Factories CAN be zero at deploy time — owner sets them post-wiring
         // to break the circular dependency: factory needs the module address
         // (via setCrossChainCreator) and the module needs the factory address.

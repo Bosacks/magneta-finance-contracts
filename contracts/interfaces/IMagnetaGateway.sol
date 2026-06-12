@@ -61,6 +61,13 @@ interface IMagnetaGateway {
     /// @notice Emitted when the Magneta fee vault is updated.
     event FeeVaultSet(address indexed previous, address indexed current);
 
+    /// @notice Emitted when the attested DVN quorum is updated by the owner.
+    /// @dev    The attested value is the *floor* the protocol Safe certifies
+    ///         the gateway's actual LZ DVN configuration to be at; modules
+    ///         require it to be ≥ 2 in their constructors (Kelp-DAO-class
+    ///         single-validator-risk mitigation).
+    event RequiredDVNCountSet(uint8 indexed previous, uint8 indexed current);
+
     /// @notice Execute an operation on this chain.
     /// @dev Callable by any user. The fee is paid in msg.value (native) or pulled
     ///      in USDC by the relevant module, per that module's contract.
@@ -84,6 +91,23 @@ interface IMagnetaGateway {
 
     /// @notice Address of the USDC vault that accumulates Magneta fees on this chain.
     function feeVault() external view returns (address);
+
+    /// @notice Attested floor for the LZ DVN quorum of this gateway's receive
+    ///         library. Set by the protocol Safe after verifying the actual
+    ///         LayerZero ULN configuration off-chain. Modules consuming this
+    ///         gateway MUST require this to be ≥ 2 in their constructors —
+    ///         the value is the on-chain anchor for the Kelp-DAO-class
+    ///         single-validator-risk mitigation.
+    function requiredDVNCount() external view returns (uint8);
+
+    /// @notice Set the attested DVN quorum floor. Owner-only.
+    /// @dev    Re-setting this DOES NOT touch the actual LayerZero config —
+    ///         it only updates the on-chain attestation that downstream
+    ///         modules check. Operators must re-verify the LZ ULN config
+    ///         off-chain and update this whenever the real config changes.
+    ///         A planned downgrade also requires re-deploying any module
+    ///         whose constructor would now fail the ≥ 2 check.
+    function setRequiredDVNCount(uint8 newCount) external;
 
     // ───────────────────── cross-chain ─────────────────────
 

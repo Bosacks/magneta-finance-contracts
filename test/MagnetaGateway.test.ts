@@ -50,6 +50,8 @@ describe("MagnetaGateway", function () {
             owner.address,
             feeVault.address
         );
+        // Chantier #3 — modules require the gateway's attested DVN floor ≥ 2.
+        await gateway.setRequiredDVNCount(2);
 
         const MockSwap = await ethers.getContractFactory("MockSwapRouter");
         const mockSwap = await MockSwap.deploy();

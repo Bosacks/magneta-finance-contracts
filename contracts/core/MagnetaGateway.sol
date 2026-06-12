@@ -29,6 +29,21 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
     /// @notice USDC vault that collects the Magneta markup on this chain.
     address private _feeVault;
 
+    /// @notice Attested floor for this gateway's LayerZero receive-DVN quorum.
+    ///         The protocol Safe sets this after verifying the actual LZ ULN
+    ///         configuration off-chain (≥ 2 DVNs required and `confirmations`
+    ///         meets policy). Downstream modules consume this in their
+    ///         constructors to refuse wiring into a gateway whose attested
+    ///         quorum is too low — the on-chain anchor for the Kelp-DAO-class
+    ///         single-validator-risk mitigation.
+    ///
+    ///         IMPORTANT: setting this does NOT change the actual LZ config.
+    ///         It is a Safe attestation. Operators must update it after any
+    ///         LZ config change AND re-verify that no module's constructor
+    ///         invariant is now violated. A planned downgrade ALSO requires
+    ///         re-deploying any module that asserts ≥ 2.
+    uint8 private _requiredDVNCount;
+
     /// @notice Guards against replayed LZ messages at the gateway level
     ///         (OApp already deduplicates, but we track processed GUIDs so a
     ///         module callback never re-enters the dispatcher for a given msg).
@@ -510,6 +525,18 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
         address previous = _feeVault;
         _feeVault = vault;
         emit FeeVaultSet(previous, vault);
+    }
+
+    /// @inheritdoc IMagnetaGateway
+    function requiredDVNCount() external view override returns (uint8) {
+        return _requiredDVNCount;
+    }
+
+    /// @inheritdoc IMagnetaGateway
+    function setRequiredDVNCount(uint8 newCount) external override onlyOwner {
+        uint8 previous = _requiredDVNCount;
+        _requiredDVNCount = newCount;
+        emit RequiredDVNCountSet(previous, newCount);
     }
 
     function pause() external onlyOwnerOrGuardian {

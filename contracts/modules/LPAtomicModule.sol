@@ -154,6 +154,12 @@ contract LPAtomicModule is IModule, ReentrancyGuard {
     error MinAmountZero();
     error AlreadyExecuted();
     error LpResidual(uint256 amount);
+    error DVNQuorumTooLow(uint8 attested);
+
+    /// @notice Minimum attested DVN quorum the gateway must surface for this
+    ///         module to wire up. 2-of-N is the Kelp-DAO-class single-
+    ///         validator-risk mitigation floor.
+    uint8 public constant MIN_DVN_QUORUM = 2;
 
     /// @notice Emitted on successful compound. Off-chain monitoring tools can
     ///         subscribe instead of replaying every gateway tx. (SC08 fix)
@@ -188,24 +194,18 @@ contract LPAtomicModule is IModule, ReentrancyGuard {
      * @param _gateway  MagnetaGateway on the chain this module serves.
      * @param _helper   MagnetaLpAtomicHelper on the same chain.
      *
-     * Deployment invariant (Sentinelle 2026-06-12 SC01:2026 follow-up):
-     *
-     *   The wired gateway MUST be configured with a ≥ 2-of-N LayerZero DVN
-     *   quorum BEFORE this module is registered for any OpType. This module
-     *   does not call into the gateway to verify the DVN count at deploy
-     *   time because IMagnetaGateway does not yet expose `requiredDVNCount()`
-     *   — the deployment script `scripts/deploy/deployLPAtomicModule.ts`
-     *   MUST instead reverify the gateway's DVN config off-chain and revert
-     *   if count < 2. Failure to do so reintroduces the Kelp-DAO-class
-     *   single-validator risk that this comment exists to deter.
-     *
-     *   When `requiredDVNCount()` lands on the gateway interface, replace
-     *   the off-chain check with an on-chain `require(IMagnetaGateway(
-     *   _gateway).requiredDVNCount() >= 2, "MagnetaLPAtomic: DVN quorum")`
-     *   in this constructor and remove this paragraph.
+     * Reverts with `DVNQuorumTooLow` if the gateway's attested DVN floor is
+     * below MIN_DVN_QUORUM (= 2). The attestation is a Safe-managed value on
+     * the gateway (see MagnetaGateway.setRequiredDVNCount); operators MUST
+     * call setRequiredDVNCount(>= 2) on the gateway BEFORE deploying this
+     * module. This is the on-chain anchor for the Kelp-DAO-class single-
+     * validator-risk mitigation — replaces the prior off-chain deployment-
+     * checklist invariant (Sentinelle 2026-06-12 SC01:2026 chantier #3).
      */
     constructor(address _gateway, address _helper) {
         if (_gateway == address(0) || _helper == address(0)) revert ZeroAddress();
+        uint8 attested = IMagnetaGateway(_gateway).requiredDVNCount();
+        if (attested < MIN_DVN_QUORUM) revert DVNQuorumTooLow(attested);
         gateway = _gateway;
         helper  = _helper;
     }
