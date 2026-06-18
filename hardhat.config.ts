@@ -21,6 +21,9 @@ const net = (url: string, chainId: number, extra: object = {}) => ({
 // Routescan: API-key-free (pass any non-empty dummy string below).
 const ETHERSCAN_KEY = process.env.BASESCAN_API_KEY || "";
 const ROUTESCAN_KEY = "routescan-no-key-required";
+// Cronos is NOT on Etherscan V2; its explorer (explorer.cronos.org) exposes an
+// Etherscan-compatible API at cronos.org/explorer/api with its own key.
+const CRONOSCAN_KEY = process.env.CRONOSCAN_API_KEY || "";
 
 const ETHERSCAN_V2 = (chainId: number, browserURL: string) => ({
   apiURL: `https://api.etherscan.io/v2/api?chainid=${chainId}`,
@@ -146,7 +149,7 @@ const config: HardhatUserConfig = {
       avalanche: ETHERSCAN_KEY,
       linea: ETHERSCAN_KEY,
       berachain: ETHERSCAN_KEY,
-      cronos: ETHERSCAN_KEY,
+      cronos: CRONOSCAN_KEY,
       baseSepolia: ETHERSCAN_KEY,
       optimismSepolia: ETHERSCAN_KEY,
       arbitrumSepolia: ETHERSCAN_KEY,
@@ -180,7 +183,7 @@ const config: HardhatUserConfig = {
       { network: "avalanche",   chainId: 43114,  urls: ETHERSCAN_V2(43114,  "https://snowtrace.io") },
       { network: "linea",       chainId: 59144,  urls: ETHERSCAN_V2(59144,  "https://lineascan.build") },
       { network: "berachain",   chainId: 80094,  urls: ETHERSCAN_V2(80094,  "https://berascan.com") },
-      { network: "cronos",      chainId: 25,     urls: ETHERSCAN_V2(25,     "https://cronoscan.com") },
+      { network: "cronos",      chainId: 25,     urls: { apiURL: "https://cronos.org/explorer/api", browserURL: "https://explorer.cronos.org" } },
 
       // Etherscan V2 — testnets
       { network: "baseSepolia",      chainId: 84532,    urls: ETHERSCAN_V2(84532,    "https://sepolia.basescan.org") },
