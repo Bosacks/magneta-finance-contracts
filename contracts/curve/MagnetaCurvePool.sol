@@ -52,9 +52,10 @@ interface IUniswapV2Factory {
 }
 
 interface IUniswapV2Pair {
-    /// @notice Reserves of the pair at the latest sync. Used at graduation
-    ///         time to verify that no one front-ran our pool creation with a
-    ///         malicious ratio (Option 3 slippage protection).
+    /// @notice Reserves of the pair at the latest sync. Read at graduation to
+    ///         decide whether the V2 pair is empty (we set the price with 99%
+    ///         mins) or pre-seeded (we deposit at its ratio with mins = 0
+    ///         instead of hard-reverting, which would brick graduation).
     function getReserves() external view returns (uint112 reserve0, uint112 reserve1, uint32 blockTimestampLast);
 }
 
@@ -110,10 +111,16 @@ contract MagnetaCurvePool is ReentrancyGuard {
     /// @notice Tokens sold from the curve allocation. Net of buys − sells.
     uint256 public tokensSold;
 
-    /// @notice True once the pool has migrated liquidity to the V2 DEX.
-    ///         All buy/sell calls revert after this — users must trade
-    ///         the V2 pair directly.
+    /// @notice True once the curve has CLOSED (threshold reached). All
+    ///         buy/sell calls revert after this. Set atomically in buy()/
+    ///         graduate() so trading always closes cleanly.
     bool public graduated;
+
+    /// @notice True once liquidity has been migrated to the V2 DEX and the LP
+    ///         burned. Separated from `graduated` (Sentinelle F-1): the LP
+    ///         migration is a retryable permissionless step so a pre-seeded /
+    ///         dust-griefed V2 pair can never brick trading or graduation.
+    bool public graduationFinalized;
 
     // ─── Events ──────────────────────────────────────────────────────────
 
@@ -134,10 +141,9 @@ contract MagnetaCurvePool is ReentrancyGuard {
         uint256 lpBurned
     );
 
-    /// @notice Emitted when residual native (un-accounted donations + any
-    ///         router refund) is swept to the FeeVault after graduation.
-    ///         Zero amount = nothing to sweep, event not emitted.
-    event ResidualSwept(address indexed to, uint256 amount);
+    /// @notice Emitted when the curve closes and is ready for LP migration.
+    ///         A keeper (or anyone) then calls finalizeGraduation().
+    event GraduationReady(uint256 nativeRaised, uint256 tokensSold);
 
     // ─── Errors ──────────────────────────────────────────────────────────
 
@@ -146,6 +152,8 @@ contract MagnetaCurvePool is ReentrancyGuard {
     error InvalidAmount();
     error SlippageBuy(uint256 expected, uint256 received);
     error SlippageSell(uint256 expected, uint256 received);
+    error NotReadyToGraduate();
+    error AlreadyFinalized();
 
     constructor(
         address token_,
@@ -249,9 +257,12 @@ contract MagnetaCurvePool is ReentrancyGuard {
 
         emit Trade(msg.sender, true, msg.value, tokensOut, feeNative, nativeReserve(), tokenReserve());
 
-        // Auto-graduate if threshold crossed
-        if (nativeRaised >= graduationThreshold) {
-            _graduate();
+        // Close the curve when the threshold is crossed. The LP migration is a
+        // separate retryable step (finalizeGraduation) so a pre-seeded V2 pair
+        // can never make this buy revert.
+        if (nativeRaised >= graduationThreshold && !graduated) {
+            graduated = true;
+            emit GraduationReady(nativeRaised, tokensSold);
         }
     }
 
@@ -288,57 +299,57 @@ contract MagnetaCurvePool is ReentrancyGuard {
 
     // ─── Graduation ──────────────────────────────────────────────────────
 
-    /// @notice Manually trigger graduation if `nativeRaised` is already at
-    ///         or above the threshold. Permissionless — anyone can pay
-    ///         the gas to push it through.
+    /// @notice Manually close the curve once `nativeRaised` is at or above the
+    ///         threshold. Permissionless. Does NOT migrate liquidity itself —
+    ///         that is the separate, retryable finalizeGraduation() step.
     function graduate() external nonReentrant {
         if (graduated) revert AlreadyGraduated();
         require(nativeRaised >= graduationThreshold, "below threshold");
-        _graduate();
+        graduated = true;
+        emit GraduationReady(nativeRaised, tokensSold);
     }
 
-    function _graduate() internal {
-        graduated = true;
+    /// @notice Migrate the curve's liquidity to the V2 DEX and burn the LP.
+    ///         Permissionless and retryable: callable once the curve has closed
+    ///         (`graduated`). Tolerant of a pre-seeded / dust-griefed V2 pair —
+    ///         it never hard-reverts on existing reserves (that was the
+    ///         graduation-DoS vector). For an empty pair it sets the price with
+    ///         99% mins; for a pre-seeded pair it deposits at the pair's current
+    ///         ratio (mins = 0) and cleans up the leftover so nothing is left
+    ///         ambiguously stranded.
+    function finalizeGraduation() external nonReentrant {
+        if (!graduated) revert NotReadyToGraduate();
+        if (graduationFinalized) revert AlreadyFinalized();
+        graduationFinalized = true;
 
-        // Native to migrate = curve's own accounting. Reading
-        // address(this).balance here would let an attacker donate native
-        // (via plain transfer or selfdestruct) just before graduation to
-        // inflate the V2 LP's native side, distorting the post-graduation
-        // price. By committing to `nativeRaised`, donations are excluded
-        // from the LP and swept to the FeeVault at the end (see below).
-        uint256 nativeForLp = nativeRaised;
-
-        // Token allocation reserved for graduation = total supply - curveAlloc
+        // Native to migrate = everything we hold (already net of fees).
+        uint256 nativeForLp = address(this).balance;
+        // Token allocation reserved for graduation = total supply - curveAlloc.
         uint256 tokenForLp = totalSupplyToken - curveAllocation;
-        // Plus any unsold curve tokens (the 80% allocation might not be 100% sold)
+
+        // Burn any unsold curve tokens so they don't dilute LP value.
         uint256 unsoldCurve = tokenReserve();
-        // Burn the unsold portion at `DEAD` so it doesn't dilute LP value
         if (unsoldCurve > 0) {
             token.safeTransfer(DEAD, unsoldCurve);
         }
 
-        // ─── Slippage protection (Option 3 + Option 1) ─────────────────────
-        // Option 3: if a pair already exists for this token/wnative, refuse to
-        // graduate if it has non-zero reserves. Without this check, a frontrunner
-        // could pre-create the pair with an absurd ratio and force our deposit
-        // to mint very few LP tokens. Empty pair is harmless — we just use it.
+        // Detect a pre-existing pair WITH reserves. We no longer hard-revert on
+        // it (a frontrunner could pre-create a dust pair and brick graduation
+        // forever). Instead: empty pair → we set the price (99% mins); seeded
+        // pair → deposit at its ratio (mins = 0) and burn/forward the leftover.
         address existingPair = IUniswapV2Factory(router.factory()).getPair(address(token), wnative);
-        if (existingPair != address(0)) {
+        bool emptyPair = existingPair == address(0);
+        if (!emptyPair) {
             (uint112 r0, uint112 r1, ) = IUniswapV2Pair(existingPair).getReserves();
-            require(r0 == 0 && r1 == 0, "graduation: pair has reserves (manipulated)");
+            emptyPair = (r0 == 0 && r1 == 0);
         }
 
-        // Approve router to pull tokenForLp
         token.forceApprove(address(router), tokenForLp);
 
-        // Option 1: pass min amounts at 99% of intent. If reserves were
-        // somehow manipulated between our check and the addLiquidity call,
-        // the router would scale down our amounts → reverts on these mins.
-        uint256 amountTokenMin = (tokenForLp * 99) / 100;
-        uint256 amountETHMin   = (nativeForLp * 99) / 100;
+        uint256 amountTokenMin = emptyPair ? (tokenForLp * 99) / 100 : 0;
+        uint256 amountETHMin   = emptyPair ? (nativeForLp * 99) / 100 : 0;
 
-        // Add liquidity ETH-style (wnative side paid from this contract's balance)
-        (, , uint256 lp) = router.addLiquidityETH{value: nativeForLp}(
+        (uint256 usedToken, uint256 usedNative, uint256 lp) = router.addLiquidityETH{value: nativeForLp}(
             address(token),
             tokenForLp,
             amountTokenMin,
@@ -347,24 +358,23 @@ contract MagnetaCurvePool is ReentrancyGuard {
             block.timestamp
         );
 
-        // Read the actual pair address to find LP tokens, then burn at DEAD
+        // Burn the LP so liquidity is permanently locked — no rug.
         address pair = IUniswapV2Factory(router.factory()).getPair(address(token), wnative);
         IERC20(pair).safeTransfer(DEAD, lp);
 
-        emit Graduated(pair, nativeForLp, tokenForLp, lp);
-
-        // Sweep any residual native to the FeeVault. Sources:
-        //   - donations sent directly to this contract before graduation
-        //     (would otherwise be locked, since trading stops here)
-        //   - any unused native refunded by the router during addLiquidityETH
-        // Donations are thereby redirected to the protocol instead of
-        // distorting the V2 pair's initial price.
-        uint256 residual = address(this).balance;
-        if (residual > 0) {
-            (bool okSweep, ) = payable(feeVault).call{value: residual}("");
-            require(okSweep, "residual sweep failed");
-            emit ResidualSwept(feeVault, residual);
+        // Clean up any deposit leftover from a pre-seeded pair's ratio: burn
+        // leftover tokens, forward leftover native to the FeeVault.
+        uint256 leftoverToken = tokenForLp - usedToken;
+        if (leftoverToken > 0) {
+            token.safeTransfer(DEAD, leftoverToken);
         }
+        uint256 leftoverNative = nativeForLp - usedNative;
+        if (leftoverNative > 0) {
+            (bool ok, ) = payable(feeVault).call{value: leftoverNative}("");
+            require(ok, "leftover native transfer failed");
+        }
+
+        emit Graduated(pair, usedNative, usedToken, lp);
     }
 
     // ─── Receive — accept native top-ups (used by router callbacks etc.) ──
