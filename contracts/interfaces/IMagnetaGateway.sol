@@ -38,7 +38,15 @@ interface IMagnetaGateway {
         // POOL_FEE_COMPOUND: same-router remove + re-add at current ratio.
         // MIGRATE_LP:        cross-router remove (src) + add (dst), single chain.
         POOL_FEE_COMPOUND,
-        MIGRATE_LP
+        MIGRATE_LP,
+        // Auto-freeze rule configuration (multi-chain via Gateway.sendFanOut).
+        // Distinct from AUTO_FREEZE (which is the instant blacklist effect):
+        // this op sets the on-chain RULE (active flag + threshold) that the
+        // permissionless `autoFreeze()` trigger and the Magneta listener read.
+        // Handled by TokenOpsModule._setAutoFreezeRule. Appended last to keep
+        // every existing ordinal stable (cross-chain payload encoding depends
+        // on it).
+        AUTO_FREEZE_RULE_SET
     }
 
     /// @notice Emitted when a module processes an operation.
