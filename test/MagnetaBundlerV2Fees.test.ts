@@ -198,10 +198,11 @@ describe("MagnetaBundler V2 — fee forwarding on sell paths", function () {
       });
     });
 
-    describe("MB-4: pause guardian", function () {
+    describe("MB-4: multi-pauser role", function () {
       it("guardian can pause (fast-path)", async function () {
         await bundler.setPauseGuardian(user.address);
         expect(await bundler.pauseGuardian()).to.equal(user.address);
+        expect(await bundler.isPauser(user.address)).to.equal(true);
 
         await bundler.connect(user).pause();
         expect(await bundler.paused()).to.equal(true);
@@ -223,10 +224,48 @@ describe("MagnetaBundler V2 — fee forwarding on sell paths", function () {
           .withArgs(ethers.ZeroAddress, user.address);
       });
 
-      it("non-guardian non-owner cannot pause", async function () {
+      it("non-pauser non-owner cannot pause", async function () {
         await expect(
           bundler.connect(user).pause(),
-        ).to.be.revertedWith("MagnetaBundler: not owner or guardian");
+        ).to.be.revertedWith("MagnetaBundler: not owner or pauser");
+      });
+
+      it("addPauser grants pause to a second independent pauser; only owner can add", async function () {
+        // user = human guardian, feeRecipient = Defender Relayer.
+        await bundler.setPauseGuardian(user.address);
+        await expect(bundler.addPauser(feeRecipient.address))
+          .to.emit(bundler, "PauserAdded")
+          .withArgs(feeRecipient.address);
+
+        // Non-owner cannot add a pauser.
+        await expect(
+          bundler.connect(user).addPauser(user.address),
+        ).to.be.revertedWith("Ownable: caller is not the owner");
+        await expect(
+          bundler.addPauser(ethers.ZeroAddress),
+        ).to.be.revertedWith("MagnetaBundler: zero pauser");
+
+        // Relayer (feeRecipient) can pause independently of the human guardian.
+        await bundler.connect(feeRecipient).pause();
+        expect(await bundler.paused()).to.equal(true);
+        await bundler.unpause();
+      });
+
+      it("removePauser revokes the right; owner retains pause/unpause on empty set", async function () {
+        await bundler.addPauser(user.address);
+        await expect(bundler.removePauser(user.address))
+          .to.emit(bundler, "PauserRemoved")
+          .withArgs(user.address);
+        expect(await bundler.isPauser(user.address)).to.equal(false);
+        await expect(
+          bundler.connect(user).pause(),
+        ).to.be.revertedWith("MagnetaBundler: not owner or pauser");
+
+        // Owner still pauses+unpauses with no pausers configured.
+        await bundler.pause();
+        expect(await bundler.paused()).to.equal(true);
+        await bundler.unpause();
+        expect(await bundler.paused()).to.equal(false);
       });
     });
 

@@ -118,13 +118,23 @@ contract MagnetaPool is ERC721, ERC721Enumerable, Ownable2Step, Pausable, Reentr
     event PoolCreationEnabled(bool enabled);
     event LiquidityAdditionEnabled(bool enabled);
     event PauseGuardianUpdated(address indexed oldGuardian, address indexed newGuardian);
+    event PauserAdded(address indexed account);
+    event PauserRemoved(address indexed account);
 
+    /// @notice Canonical human guardian (back-compat view). Kept in sync with
+    ///         {isPauser} by {setPauseGuardian}. New deployments should prefer
+    ///         {addPauser}/{removePauser} to manage the full pauser set
+    ///         (human EOA + Defender Relayer + future on-chain keeper).
     address public pauseGuardian;
 
-    modifier onlyOwnerOrGuardian() {
+    /// @notice Multi-pauser set. Any address with isPauser[addr] == true may
+    ///         call {pause}. UNPAUSE remains owner-only — pausers cannot resume.
+    mapping(address => bool) public isPauser;
+
+    modifier onlyOwnerOrPauser() {
         require(
-            msg.sender == owner() || msg.sender == pauseGuardian,
-            "MagnetaPool: not owner or guardian"
+            msg.sender == owner() || isPauser[msg.sender],
+            "MagnetaPool: not owner or pauser"
         );
         _;
     }
@@ -566,7 +576,7 @@ contract MagnetaPool is ERC721, ERC721Enumerable, Ownable2Step, Pausable, Reentr
     }
 
     // Emergency controls
-    function pause() external onlyOwnerOrGuardian {
+    function pause() external onlyOwnerOrPauser {
         _pause();
     }
 
@@ -574,10 +584,36 @@ contract MagnetaPool is ERC721, ERC721Enumerable, Ownable2Step, Pausable, Reentr
         _unpause();
     }
 
+    /// @notice Grant an address the pauser role (human guardian, Defender
+    ///         Relayer, or on-chain keeper). Owner-only.
+    function addPauser(address account) public onlyOwner {
+        require(account != address(0), "MagnetaPool: zero pauser");
+        isPauser[account] = true;
+        emit PauserAdded(account);
+    }
+
+    /// @notice Revoke an address's pauser role. Owner-only. The owner always
+    ///         retains pause+unpause regardless of the pauser set.
+    function removePauser(address account) external onlyOwner {
+        require(account != address(0), "MagnetaPool: zero pauser");
+        isPauser[account] = false;
+        emit PauserRemoved(account);
+    }
+
+    /// @notice Deprecated single-guardian setter, retained for deploy-script /
+    ///         Safe-batch back-compat. Rotates the canonical {pauseGuardian},
+    ///         revoking the old one and granting the new one in {isPauser}.
+    ///         Prefer {addPauser}/{removePauser} directly.
     function setPauseGuardian(address _guardian) external onlyOwner {
         require(_guardian != address(0), "MagnetaPool: zero guardian");
         address old = pauseGuardian;
+        if (old != address(0)) {
+            isPauser[old] = false;
+            emit PauserRemoved(old);
+        }
         pauseGuardian = _guardian;
+        isPauser[_guardian] = true;
+        emit PauserAdded(_guardian);
         emit PauseGuardianUpdated(old, _guardian);
     }
 

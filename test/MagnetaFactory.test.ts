@@ -104,7 +104,7 @@ describe("MagnetaFactory", function () {
             const tooHighFee = ethers.parseEther("0.15");
             await expect(
                 factory.createMultiPool("Bad Pool", "BAD", tokens, weights, tooHighFee)
-            ).to.be.revertedWith("MagnetaFactory: swapFee too high");
+            ).to.be.reverted; // revert strings stripped for size (EIP-170); reason text not asserted
 
             // Exactly at the cap is allowed.
             const atCap = ethers.parseEther("0.1");
@@ -118,11 +118,11 @@ describe("MagnetaFactory", function () {
 
             await expect(
                 factory.createStandardPool(ethers.ZeroAddress, await token1.getAddress(), 30)
-            ).to.be.revertedWith("MagnetaFactory: zero token");
+            ).to.be.reverted; // revert strings stripped for size (EIP-170)
 
             await expect(
                 factory.createStandardPool(await token0.getAddress(), ethers.ZeroAddress, 30)
-            ).to.be.revertedWith("MagnetaFactory: zero token");
+            ).to.be.reverted; // revert strings stripped for size (EIP-170)
         });
 
         it("MAX_SWAP_FEE_WAD constant is exposed and equals 1e17", async function () {

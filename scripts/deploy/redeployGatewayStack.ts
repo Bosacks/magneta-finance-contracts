@@ -134,9 +134,9 @@ async function main() {
   await txUsdc.wait();
   console.log(`   ✓ setUsdc(${cfg.usdc})`);
 
-  const txGuardian = await gateway.setPauseGuardian(PAUSE_GUARDIAN);
+  const txGuardian = await gateway.addPauser(PAUSE_GUARDIAN);
   await txGuardian.wait();
-  console.log(`   ✓ setPauseGuardian(${PAUSE_GUARDIAN})`);
+  console.log(`   ✓ addPauser(${PAUSE_GUARDIAN})`);
 
   // ─── 4. Persist new addresses (keep OLD as `*_old` for reference) ─────
   console.log("\n── 4. Save addresses ──");

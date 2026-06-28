@@ -68,7 +68,13 @@ contract MagnetaBundler is ReentrancyGuard, Pausable, Ownable2Step {
     /// @notice Optional fast-pause role. When set, can pause the contract
     ///         without going through the owner Safe (consistent with the
     ///         pause-guardian pattern elsewhere in Magneta).
+    /// @notice Canonical human guardian (back-compat view). Kept in sync with
+    ///         {isPauser} by {setPauseGuardian}. Prefer {addPauser}/{removePauser}.
     address public pauseGuardian;
+
+    /// @notice Multi-pauser set. Any address with isPauser[addr] == true may
+    ///         call {pause}. UNPAUSE remains owner-only.
+    mapping(address => bool) public isPauser;
 
     // ── Router timelock (SC01) ───────────────────────────────────────────────
     /// @notice Minimum delay between proposing and applying a router change.
@@ -91,6 +97,8 @@ contract MagnetaBundler is ReentrancyGuard, Pausable, Ownable2Step {
     event FeeForwarded(address indexed to, uint256 amount);
     event MaxFeePerTxUpdated(uint256 oldCap, uint256 newCap);
     event PauseGuardianUpdated(address indexed oldGuardian, address indexed newGuardian);
+    event PauserAdded(address indexed account);
+    event PauserRemoved(address indexed account);
     event RouterChangeProposed(address indexed newRouter, uint256 eta);
     event RouterChanged(address indexed oldRouter, address indexed newRouter);
     event RouterChangeCancelled(address indexed cancelledRouter);
@@ -98,10 +106,10 @@ contract MagnetaBundler is ReentrancyGuard, Pausable, Ownable2Step {
     event WithdrawalPending(address indexed account, uint256 amount);
     event Withdrawn(address indexed account, uint256 amount);
 
-    modifier onlyOwnerOrGuardian() {
+    modifier onlyOwnerOrPauser() {
         require(
-            msg.sender == owner() || msg.sender == pauseGuardian,
-            "MagnetaBundler: not owner or guardian"
+            msg.sender == owner() || isPauser[msg.sender],
+            "MagnetaBundler: not owner or pauser"
         );
         _;
     }
@@ -508,13 +516,40 @@ contract MagnetaBundler is ReentrancyGuard, Pausable, Ownable2Step {
         maxFeePerTx = newCap;
     }
 
-    /// @notice Set the fast-pause guardian. Set to address(0) to disable.
-    function setPauseGuardian(address _guardian) external onlyOwner {
-        emit PauseGuardianUpdated(pauseGuardian, _guardian);
-        pauseGuardian = _guardian;
+    /// @notice Grant an address the pauser role (human guardian, Defender
+    ///         Relayer, or on-chain keeper). Owner-only.
+    function addPauser(address account) public onlyOwner {
+        require(account != address(0), "MagnetaBundler: zero pauser");
+        isPauser[account] = true;
+        emit PauserAdded(account);
     }
 
-    function pause() external onlyOwnerOrGuardian {
+    /// @notice Revoke an address's pauser role. Owner-only.
+    function removePauser(address account) external onlyOwner {
+        require(account != address(0), "MagnetaBundler: zero pauser");
+        isPauser[account] = false;
+        emit PauserRemoved(account);
+    }
+
+    /// @notice Deprecated single-guardian setter, retained for back-compat.
+    ///         Rotates the canonical {pauseGuardian} within {isPauser}.
+    ///         Set to address(0) to disable the canonical guardian (only the
+    ///         previous guardian is revoked; other pausers are untouched).
+    function setPauseGuardian(address _guardian) external onlyOwner {
+        address old = pauseGuardian;
+        if (old != address(0)) {
+            isPauser[old] = false;
+            emit PauserRemoved(old);
+        }
+        pauseGuardian = _guardian;
+        if (_guardian != address(0)) {
+            isPauser[_guardian] = true;
+            emit PauserAdded(_guardian);
+        }
+        emit PauseGuardianUpdated(old, _guardian);
+    }
+
+    function pause() external onlyOwnerOrPauser {
         _pause();
     }
 

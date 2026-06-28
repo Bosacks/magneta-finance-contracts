@@ -67,7 +67,14 @@ contract MagnetaBridgeOApp is OApp, ReentrancyGuard {
 
     // Guardian role: can pause but not unpause. Lets ops/SOC kill the bridge
     // in seconds during an incident without holding owner keys.
+    // Canonical human guardian (back-compat view); kept in sync with {isPauser}
+    // by {setPauseGuardian}. Prefer {addPauser}/{removePauser}.
     address public pauseGuardian;
+
+    // Multi-pauser set: human EOA + Defender Relayer + future on-chain keeper.
+    // Any address with isPauser[addr] == true may call {pause}. UNPAUSE stays
+    // owner-only.
+    mapping(address => bool) public isPauser;
 
     // Per-tx amount cap: maxAmountPerTx[token]. 0 = no cap.
     mapping(address => uint256) public maxAmountPerTx;
@@ -124,6 +131,8 @@ contract MagnetaBridgeOApp is OApp, ReentrancyGuard {
     event EthereumFeeBpsUpdated(uint16 oldBps, uint16 newBps);
     event DstFeeBpsOverrideUpdated(uint32 indexed dstEid, uint16 oldBps, uint16 newBps);
     event PauseGuardianUpdated(address indexed oldGuardian, address indexed newGuardian);
+    event PauserAdded(address indexed account);
+    event PauserRemoved(address indexed account);
     event MaxAmountPerTxUpdated(address indexed token, uint256 oldCap, uint256 newCap);
     event DailyLimitUpdated(address indexed token, uint256 oldLimit, uint256 newLimit);
     event DailyWindowReset(address indexed token, uint256 newWindowStart);
@@ -135,10 +144,10 @@ contract MagnetaBridgeOApp is OApp, ReentrancyGuard {
         _;
     }
 
-    modifier onlyOwnerOrGuardian() {
+    modifier onlyOwnerOrPauser() {
         require(
-            msg.sender == owner() || msg.sender == pauseGuardian,
-            "MagnetaBridgeOApp: not owner or guardian"
+            msg.sender == owner() || isPauser[msg.sender],
+            "MagnetaBridgeOApp: not owner or pauser"
         );
         _;
     }
@@ -403,13 +412,13 @@ contract MagnetaBridgeOApp is OApp, ReentrancyGuard {
      * @dev Pause the contract. Owner OR guardian — guardian exists so ops/SOC
      *      can react in seconds during an incident without holding owner keys.
      */
-    function pause() external onlyOwnerOrGuardian {
+    function pause() external onlyOwnerOrPauser {
         paused = true;
         emit Paused(msg.sender);
     }
 
     /**
-     * @dev Unpause the contract. Owner only — guardian can stop the bleeding,
+     * @dev Unpause the contract. Owner only — a pauser can stop the bleeding,
      *      but resuming the bridge requires a deliberate owner action.
      */
     function unpause() external onlyOwner {
@@ -418,15 +427,42 @@ contract MagnetaBridgeOApp is OApp, ReentrancyGuard {
     }
 
     /**
-     * @dev Set the pause guardian. To rotate to a different guardian, pass
-     *      the new address. To disable the secondary pause path entirely,
-     *      rotate to the owner Safe — using address(0) is rejected to
-     *      prevent accidental bricking of the emergency response flow.
+     * @dev Grant an address the pauser role (human guardian, Defender Relayer,
+     *      or on-chain keeper). Owner-only.
+     */
+    function addPauser(address account) public onlyOwner {
+        require(account != address(0), "MagnetaBridgeOApp: zero pauser");
+        isPauser[account] = true;
+        emit PauserAdded(account);
+    }
+
+    /**
+     * @dev Revoke an address's pauser role. Owner-only. The owner always
+     *      retains pause+unpause regardless of the pauser set.
+     */
+    function removePauser(address account) external onlyOwner {
+        require(account != address(0), "MagnetaBridgeOApp: zero pauser");
+        isPauser[account] = false;
+        emit PauserRemoved(account);
+    }
+
+    /**
+     * @dev Deprecated single-guardian setter, retained for deploy-script /
+     *      Safe-batch back-compat. Rotates the canonical {pauseGuardian},
+     *      revoking the old one and granting the new one in {isPauser}.
+     *      address(0) is rejected to prevent accidental bricking of the
+     *      emergency response flow. Prefer {addPauser}/{removePauser}.
      */
     function setPauseGuardian(address _guardian) external onlyOwner {
         require(_guardian != address(0), "MagnetaBridgeOApp: zero guardian");
         address old = pauseGuardian;
+        if (old != address(0)) {
+            isPauser[old] = false;
+            emit PauserRemoved(old);
+        }
         pauseGuardian = _guardian;
+        isPauser[_guardian] = true;
+        emit PauserAdded(_guardian);
         emit PauseGuardianUpdated(old, _guardian);
     }
 

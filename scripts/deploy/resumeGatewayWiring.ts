@@ -5,7 +5,7 @@
  * accepts those addresses via env vars and continues exactly where the
  * original script left off.
  *
- * setModule, setUsdc, and setPauseGuardian are idempotent: re-sending a
+ * setModule, setUsdc, and addPauser are idempotent: re-sending a
  * call whose value is already on-chain is a no-op cost-wise but won't
  * revert. Safe to re-run on top of a partial wiring.
  *
@@ -87,7 +87,7 @@ async function main() {
     console.log(`   ✓ setModule(${label} = ${op}) → ${addr.slice(0, 10)}…  tx ${tx.hash}`);
   }
 
-  console.log("\n── setUsdc / setPauseGuardian (skip if already set) ──");
+  console.log("\n── setUsdc / addPauser (skip if already set) ──");
   const currentUsdc = await gateway.usdc();
   if (currentUsdc.toLowerCase() !== cfg.usdc.toLowerCase()) {
     const tx = await gateway.setUsdc(cfg.usdc);
@@ -96,13 +96,13 @@ async function main() {
   } else {
     console.log(`   ✓ usdc already = ${cfg.usdc} (skip)`);
   }
-  const currentGuardian = await gateway.pauseGuardian();
-  if (currentGuardian.toLowerCase() !== PAUSE_GUARDIAN.toLowerCase()) {
-    const tx = await gateway.setPauseGuardian(PAUSE_GUARDIAN);
+  const alreadyPauser = await gateway.isPauser(PAUSE_GUARDIAN);
+  if (!alreadyPauser) {
+    const tx = await gateway.addPauser(PAUSE_GUARDIAN);
     await tx.wait();
-    console.log(`   ✓ setPauseGuardian(${PAUSE_GUARDIAN})  tx ${tx.hash}`);
+    console.log(`   ✓ addPauser(${PAUSE_GUARDIAN})  tx ${tx.hash}`);
   } else {
-    console.log(`   ✓ pauseGuardian already = ${PAUSE_GUARDIAN} (skip)`);
+    console.log(`   ✓ pauser already set = ${PAUSE_GUARDIAN} (skip)`);
   }
 
   // Persist addresses (same shape as redeployGatewayStack.ts).

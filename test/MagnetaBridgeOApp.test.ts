@@ -605,12 +605,66 @@ describe("MagnetaBridgeOApp", function () {
         it("non-guardian non-owner cannot pause", async function () {
             await bridgeA.setPauseGuardian(bob.address);
             await expect(bridgeA.connect(alice).pause())
-                .to.be.revertedWith("MagnetaBridgeOApp: not owner or guardian");
+                .to.be.revertedWith("MagnetaBridgeOApp: not owner or pauser");
         });
 
         it("only owner can set the guardian", async function () {
             await expect(bridgeA.connect(alice).setPauseGuardian(alice.address))
                 .to.be.revertedWith("Ownable: caller is not the owner");
+        });
+
+        // ─── Multi-pauser role (human EOA + Defender Relayer + future keeper) ──
+        it("multiple independent pausers can each pause; unpause stays owner-only", async function () {
+            // bob = human guardian (via deprecated setter), alice = Relayer (via addPauser)
+            await bridgeA.setPauseGuardian(bob.address);
+            await expect(bridgeA.addPauser(alice.address))
+                .to.emit(bridgeA, "PauserAdded")
+                .withArgs(alice.address);
+            expect(await bridgeA.isPauser(bob.address)).to.equal(true);
+            expect(await bridgeA.isPauser(alice.address)).to.equal(true);
+
+            // Relayer (alice) pauses.
+            await expect(bridgeA.connect(alice).pause())
+                .to.emit(bridgeA, "Paused")
+                .withArgs(alice.address);
+            expect(await bridgeA.paused()).to.equal(true);
+
+            // A pauser cannot unpause.
+            await expect(bridgeA.connect(alice).unpause())
+                .to.be.revertedWith("Ownable: caller is not the owner");
+            await bridgeA.unpause();
+
+            // Human guardian (bob) can also pause independently.
+            await expect(bridgeA.connect(bob).pause())
+                .to.emit(bridgeA, "Paused")
+                .withArgs(bob.address);
+            await bridgeA.unpause();
+        });
+
+        it("only owner can add/remove pausers; removed pauser loses the right", async function () {
+            await expect(bridgeA.connect(alice).addPauser(alice.address))
+                .to.be.revertedWith("Ownable: caller is not the owner");
+            await expect(bridgeA.addPauser(ethers.ZeroAddress))
+                .to.be.revertedWith("MagnetaBridgeOApp: zero pauser");
+
+            await bridgeA.addPauser(alice.address);
+            await expect(bridgeA.removePauser(alice.address))
+                .to.emit(bridgeA, "PauserRemoved")
+                .withArgs(alice.address);
+            expect(await bridgeA.isPauser(alice.address)).to.equal(false);
+            await expect(bridgeA.connect(alice).pause())
+                .to.be.revertedWith("MagnetaBridgeOApp: not owner or pauser");
+        });
+
+        it("owner can pause+unpause with an empty pauser set", async function () {
+            // Fresh bridge — no pausers configured.
+            expect(await bridgeA.isPauser(owner.address)).to.equal(false);
+            await expect(bridgeA.pause())
+                .to.emit(bridgeA, "Paused")
+                .withArgs(owner.address);
+            await expect(bridgeA.unpause())
+                .to.emit(bridgeA, "Unpaused")
+                .withArgs(owner.address);
         });
     });
 

@@ -59,6 +59,19 @@ const config: HardhatUserConfig = {
       },
     ],
     overrides: {
+      // MagnetaFactory sits near the EIP-170 limit; optimize it for deployment
+      // size (low runs) rather than runtime gas so it stays deployable on strict
+      // chains after the multi-pauser additions.
+      "contracts/core/MagnetaFactory.sol": {
+        version: "0.8.20",
+        settings: {
+          optimizer: { enabled: true, runs: 1 },
+          viaIR: true,
+          // Strip revert strings (incl. inherited OZ) to keep the runtime
+          // bytecode under the EIP-170 24576 B limit after the multi-pauser add.
+          debug: { revertStrings: "strip" },
+        },
+      },
       "@uniswap/v2-core/contracts/UniswapV2Factory.sol": {
         version: "0.5.16",
         settings: { optimizer: { enabled: true, runs: 999999 } },

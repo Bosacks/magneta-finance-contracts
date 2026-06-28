@@ -108,6 +108,25 @@ contract MagnetaFarm is Ownable2Step, ReentrancyGuard, Pausable, IERC721Receiver
     }
     event RewardClaimed(address indexed user, uint256 indexed poolId, uint256 amount);
     event EmergencyWithdraw(address indexed user, uint256 indexed poolId, uint256 amount);
+    event PauseGuardianUpdated(address indexed oldGuardian, address indexed newGuardian);
+    event PauserAdded(address indexed account);
+    event PauserRemoved(address indexed account);
+
+    /// @notice Canonical human guardian (back-compat view). Kept in sync with
+    ///         {isPauser} by {setPauseGuardian}. Prefer {addPauser}/{removePauser}.
+    address public pauseGuardian;
+
+    /// @notice Multi-pauser set. Any address with isPauser[addr] == true may
+    ///         call {pause}. UNPAUSE remains owner-only.
+    mapping(address => bool) public isPauser;
+
+    modifier onlyOwnerOrPauser() {
+        require(
+            msg.sender == owner() || isPauser[msg.sender],
+            "MagnetaFarm: not owner or pauser"
+        );
+        _;
+    }
 
     constructor(
         address _owner,
@@ -473,12 +492,41 @@ contract MagnetaFarm is Ownable2Step, ReentrancyGuard, Pausable, IERC721Receiver
     }
 
     // Emergency pause — withdraw/emergencyWithdraw/claimRewards stay unpaused so users can always exit.
-    function pause() external onlyOwner {
+    function pause() external onlyOwnerOrPauser {
         _pause();
     }
 
     function unpause() external onlyOwner {
         _unpause();
+    }
+
+    /// @notice Grant an address the pauser role. Owner-only.
+    function addPauser(address account) public onlyOwner {
+        require(account != address(0), "MagnetaFarm: zero pauser");
+        isPauser[account] = true;
+        emit PauserAdded(account);
+    }
+
+    /// @notice Revoke an address's pauser role. Owner-only.
+    function removePauser(address account) external onlyOwner {
+        require(account != address(0), "MagnetaFarm: zero pauser");
+        isPauser[account] = false;
+        emit PauserRemoved(account);
+    }
+
+    /// @notice Deprecated single-guardian setter, retained for back-compat.
+    ///         Rotates the canonical {pauseGuardian} within {isPauser}.
+    function setPauseGuardian(address _guardian) external onlyOwner {
+        require(_guardian != address(0), "MagnetaFarm: zero guardian");
+        address old = pauseGuardian;
+        if (old != address(0)) {
+            isPauser[old] = false;
+            emit PauserRemoved(old);
+        }
+        pauseGuardian = _guardian;
+        isPauser[_guardian] = true;
+        emit PauserAdded(_guardian);
+        emit PauseGuardianUpdated(old, _guardian);
     }
 }
 
