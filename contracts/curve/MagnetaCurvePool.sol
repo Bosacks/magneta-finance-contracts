@@ -92,6 +92,14 @@ contract MagnetaCurvePool is ReentrancyGuard {
     /// @notice Fee in basis points charged on each buy AND sell.
     uint256 public constant FEE_BPS = 100; // 1%
 
+    /// @notice Tolerance band (in basis points) applied at graduation. Both
+    ///         the addLiquidityETH slippage mins and the pre-seeded-pair ratio
+    ///         check derive from the curve terminal price with this band (F82).
+    ///         200 bps = 2%: tight enough that a manipulated launch price is
+    ///         rejected, loose enough to absorb integer-division rounding on
+    ///         the curve terminal ratio.
+    uint256 public constant GRADUATION_TOLERANCE_BPS = 200; // 2%
+
     /// @notice Permanent burn destination for graduation LP tokens.
     address public constant DEAD = 0x000000000000000000000000000000000000dEaD;
 
@@ -105,8 +113,17 @@ contract MagnetaCurvePool is ReentrancyGuard {
     // ─── Mutable state ───────────────────────────────────────────────────
 
     /// @notice Native (in wei) raised on the curve so far, net of sells +
-    ///         net of fees. Used to detect graduation.
+    ///         net of fees. Drives PRICING only — NOT graduation. Because
+    ///         sell() decrements it, using it for the graduation gate let a
+    ///         whale sell near the threshold to suppress graduation (F84).
     uint256 public nativeRaised;
+
+    /// @notice Monotonic total native (net of fees) ever spent buying on the
+    ///         curve. Incremented in buy(), NEVER decremented by sell(). This
+    ///         is the graduation gate (F84): once the curve has cumulatively
+    ///         absorbed `graduationThreshold` of buy-side native it closes,
+    ///         and no amount of selling can walk it back below the line.
+    uint256 public totalNativeBought;
 
     /// @notice Tokens sold from the curve allocation. Net of buys − sells.
     uint256 public tokensSold;
@@ -154,6 +171,11 @@ contract MagnetaCurvePool is ReentrancyGuard {
     error SlippageSell(uint256 expected, uint256 received);
     error NotReadyToGraduate();
     error AlreadyFinalized();
+    /// @notice The pre-existing V2 pair's spot ratio deviates from the curve
+    ///         terminal price beyond GRADUATION_TOLERANCE_BPS (F82). Migrating
+    ///         into it would seed the V2 launch at a manipulated price, so we
+    ///         refuse rather than deposit blind at mins = 0.
+    error PairRatioOutOfBand(uint256 pairNativePerToken, uint256 curveNativePerToken);
 
     constructor(
         address token_,
@@ -243,8 +265,9 @@ contract MagnetaCurvePool is ReentrancyGuard {
 
         // Update state
         uint256 nativeForCurve = msg.value - feeNative;
-        nativeRaised += nativeForCurve;
-        tokensSold   += tokensOut;
+        nativeRaised      += nativeForCurve;
+        totalNativeBought += nativeForCurve; // monotonic — graduation gate (F84)
+        tokensSold        += tokensOut;
 
         // Transfer fee to FeeVault
         if (feeNative > 0) {
@@ -260,7 +283,7 @@ contract MagnetaCurvePool is ReentrancyGuard {
         // Close the curve when the threshold is crossed. The LP migration is a
         // separate retryable step (finalizeGraduation) so a pre-seeded V2 pair
         // can never make this buy revert.
-        if (nativeRaised >= graduationThreshold && !graduated) {
+        if (totalNativeBought >= graduationThreshold && !graduated) {
             graduated = true;
             emit GraduationReady(nativeRaised, tokensSold);
         }
@@ -304,26 +327,33 @@ contract MagnetaCurvePool is ReentrancyGuard {
     ///         that is the separate, retryable finalizeGraduation() step.
     function graduate() external nonReentrant {
         if (graduated) revert AlreadyGraduated();
-        require(nativeRaised >= graduationThreshold, "below threshold");
+        require(totalNativeBought >= graduationThreshold, "below threshold");
         graduated = true;
         emit GraduationReady(nativeRaised, tokensSold);
     }
 
     /// @notice Migrate the curve's liquidity to the V2 DEX and burn the LP.
     ///         Permissionless and retryable: callable once the curve has closed
-    ///         (`graduated`). Tolerant of a pre-seeded / dust-griefed V2 pair —
-    ///         it never hard-reverts on existing reserves (that was the
-    ///         graduation-DoS vector). For an empty pair it sets the price with
-    ///         99% mins; for a pre-seeded pair it deposits at the pair's current
-    ///         ratio (mins = 0) and cleans up the leftover so nothing is left
-    ///         ambiguously stranded.
+    ///         (`graduated`). It does not hard-revert merely because a V2 pair
+    ///         already exists (a frontrunner could pre-create one and brick
+    ///         graduation forever). For an empty pair it sets the price at the
+    ///         curve terminal ratio with a tight band; for a pre-seeded pair it
+    ///         requires the pair's spot ratio to sit within that same band of
+    ///         the curve terminal price and reverts (PairRatioOutOfBand)
+    ///         otherwise, rather than depositing blind at a manipulated price
+    ///         (F82). Any deposit leftover is cleaned up so nothing is stranded.
     function finalizeGraduation() external nonReentrant {
         if (!graduated) revert NotReadyToGraduate();
         if (graduationFinalized) revert AlreadyFinalized();
         graduationFinalized = true;
 
-        // Native to migrate = everything we hold (already net of fees).
-        uint256 nativeForLp = address(this).balance;
+        // Native to migrate = the ACCOUNTED curve native (already net of fees).
+        // We deliberately do NOT read address(this).balance: receive() rejects
+        // unsolicited ETH, but anchoring on the accounted value rather than the
+        // raw balance keeps any stray native (e.g. a self-destruct push, which
+        // bypasses receive()) from inflating the migrated native and distorting
+        // the V2 launch price (F83).
+        uint256 nativeForLp = nativeRaised;
         // Token allocation reserved for graduation = total supply - curveAlloc.
         uint256 tokenForLp = totalSupplyToken - curveAllocation;
 
@@ -333,21 +363,30 @@ contract MagnetaCurvePool is ReentrancyGuard {
             token.safeTransfer(DEAD, unsoldCurve);
         }
 
-        // Detect a pre-existing pair WITH reserves. We no longer hard-revert on
-        // it (a frontrunner could pre-create a dust pair and brick graduation
-        // forever). Instead: empty pair → we set the price (99% mins); seeded
-        // pair → deposit at its ratio (mins = 0) and burn/forward the leftover.
+        // Detect a pre-existing pair WITH reserves. We don't hard-revert merely
+        // because a pair exists (a frontrunner could pre-create a dust pair),
+        // but we DO refuse to deposit into a pair whose spot ratio deviates from
+        // the curve terminal price beyond the tolerance band (F82): doing so at
+        // mins = 0 would seed the V2 launch at a manipulated price.
         address existingPair = IUniswapV2Factory(router.factory()).getPair(address(token), wnative);
         bool emptyPair = existingPair == address(0);
         if (!emptyPair) {
             (uint112 r0, uint112 r1, ) = IUniswapV2Pair(existingPair).getReserves();
             emptyPair = (r0 == 0 && r1 == 0);
+            if (!emptyPair) {
+                _requirePairWithinBand(uint256(r0), uint256(r1));
+            }
         }
 
         token.forceApprove(address(router), tokenForLp);
 
-        uint256 amountTokenMin = emptyPair ? (tokenForLp * 99) / 100 : 0;
-        uint256 amountETHMin   = emptyPair ? (nativeForLp * 99) / 100 : 0;
+        // Both the empty-pair (we set the price) and the within-band seeded-pair
+        // paths deposit at the curve terminal ratio, so a single band on our own
+        // desired amounts protects the launch price in either case (F82). No
+        // more mins = 0.
+        uint256 band = 10_000 - GRADUATION_TOLERANCE_BPS;
+        uint256 amountTokenMin = (tokenForLp * band) / 10_000;
+        uint256 amountETHMin   = (nativeForLp * band) / 10_000;
 
         (uint256 usedToken, uint256 usedNative, uint256 lp) = router.addLiquidityETH{value: nativeForLp}(
             address(token),
@@ -377,7 +416,64 @@ contract MagnetaCurvePool is ReentrancyGuard {
         emit Graduated(pair, usedNative, usedToken, lp);
     }
 
-    // ─── Receive — accept native top-ups (used by router callbacks etc.) ──
+    /// @dev Revert unless the seeded pair's spot ratio (native per token) is
+    ///      within GRADUATION_TOLERANCE_BPS of the curve terminal price
+    ///      (nativeRaised / tokensSold). Compared via cross-multiplication so
+    ///      there is no division-precision loss (F82). Only called when the
+    ///      pair already holds reserves (non-empty), so reserves are non-zero
+    ///      on at least one side; a single-sided seeded pair can never match a
+    ///      finite curve ratio and is rejected.
+    function _requirePairWithinBand(uint256 r0, uint256 r1) internal view {
+        // Map reserves to (native, token) regardless of pair token ordering.
+        // The pair pairs `token` against `wnative`; token0 is the lower address.
+        (uint256 reserveNative, uint256 reserveToken) =
+            address(token) < wnative ? (r1, r0) : (r0, r1);
 
-    receive() external payable {}
+        // Curve terminal price: native per token. Use the accounted curve
+        // figures (nativeRaised / tokensSold) — the same numbers that price the
+        // last curve trade. tokensSold is non-zero here (we are at graduation).
+        uint256 curveNative = nativeRaised;
+        uint256 curveToken  = tokensSold;
+
+        // A degenerate single-sided seeded pair can never sit at a finite curve
+        // ratio → out of band by construction.
+        if (reserveNative == 0 || reserveToken == 0) {
+            revert PairRatioOutOfBand(
+                reserveToken == 0 ? type(uint256).max : (reserveNative * 1e18) / reserveToken,
+                curveToken == 0 ? type(uint256).max : (curveNative * 1e18) / curveToken
+            );
+        }
+
+        // |pairNative/pairToken − curveNative/curveToken| / (curveNative/curveToken) ≤ tol
+        // ⇔ |reserveNative·curveToken − curveNative·reserveToken|
+        //      ≤ tol · curveNative · reserveToken   (basis points, cross-multiplied)
+        uint256 lhs = reserveNative * curveToken;
+        uint256 rhs = curveNative * reserveToken;
+        uint256 diff = lhs > rhs ? lhs - rhs : rhs - lhs;
+        uint256 bound = (rhs * GRADUATION_TOLERANCE_BPS) / 10_000;
+        if (diff > bound) {
+            revert PairRatioOutOfBand(
+                (reserveNative * 1e18) / reserveToken,
+                (curveNative * 1e18) / curveToken
+            );
+        }
+    }
+
+    // ─── Receive — reject unsolicited native ─────────────────────────────
+    //
+    // The pool's native accounting is driven entirely by buy()/sell() via
+    // msg.value and the curve math; `nativeRaised` is the single source of
+    // truth for the graduation migration (F83). Bare native transfers from
+    // arbitrary senders must NOT be allowed to inflate the pool's native and
+    // distort the V2 launch price, so we reject them. The only expected inbound
+    // native is the graduation refund of the unused ETH side: the V2 router
+    // refunds it directly (TransferHelper.safeTransferETH from the router), and
+    // the WETH/wnative contract may unwrap to us along that path — both are
+    // whitelisted. finalizeGraduation already sweeps any such leftover to the
+    // FeeVault. (Native force-pushed via selfdestruct still bypasses this hook,
+    // which is exactly why finalizeGraduation anchors on the accounted
+    // `nativeRaised` rather than address(this).balance.)
+    receive() external payable {
+        require(msg.sender == address(router) || msg.sender == wnative, "unsolicited native");
+    }
 }

@@ -269,8 +269,25 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
         PendingValueOp memory p = pendingValueOps[_guid];
         require(p.bridgedAmount > 0, "MagnetaGateway: no pending op");
 
+        // F38: PER-OP arrival check (was global `available >= totalEarmarked`).
+        //
+        // The old global check required EVERY pending op's bridged USDC to have
+        // landed before ANY op could be fulfilled, so one stuck/delayed CCTP
+        // transfer (or an attacker queuing a large op that never settles, which
+        // inflates totalEarmarked) blocked every other op whose own funds had
+        // already arrived — a liveness DoS.
+        //
+        // Instead, an op is fulfillable as soon as ITS OWN bridgedAmount is
+        // present in the gateway. Double-spend across concurrent ready ops is
+        // still impossible: fulfilling this op pulls its USDC out of the gateway
+        // in THIS same transaction (forceApprove + module.execute below), and we
+        // decrement totalEarmarked before the external call (CEI). So if two ops
+        // of 100 each share only 100 arrived USDC, the first to fulfill drains
+        // the balance to 0 and the second reverts here until its own funds land.
+        // totalEarmarked is retained purely as the rescue/accounting bound (see
+        // rescueERC20) — it no longer gates fulfillment.
         uint256 available = IERC20(p.bridgedToken).balanceOf(address(this));
-        require(available >= totalEarmarked, "MagnetaGateway: tokens not arrived");
+        require(available >= p.bridgedAmount, "MagnetaGateway: tokens not arrived");
 
         address module = _modules[p.op];
         if (module == address(0)) revert ModuleNotSet(p.op);

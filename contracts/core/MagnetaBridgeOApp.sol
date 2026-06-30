@@ -215,20 +215,28 @@ contract MagnetaBridgeOApp is OApp, ReentrancyGuard {
             dailyVolume[token] += amount;
         }
 
-        // Transfer tokens from user
+        // Transfer tokens from user, measuring the ACTUAL received amount via a
+        // balance delta. Fee-on-transfer / deflationary tokens credit less than
+        // the nominal `amount`; computing fee and the bridged payload from the
+        // nominal value would let the bridge release more than it received and
+        // bleed liquidity. Snapshot balance before/after and use the delta as
+        // the authoritative received amount for everything downstream.
+        uint256 balBefore = IERC20(token).balanceOf(address(this));
         IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
+        uint256 received = IERC20(token).balanceOf(address(this)) - balBefore;
+        require(received > 0, "MagnetaBridgeOApp: nothing received");
 
         // Calculate fee — per-route override takes precedence, otherwise
         // routes touching Ethereum pay the ethereumFeeBps, all others pay
-        // defaultFeeBps.
+        // defaultFeeBps. Fee is taken from the actually-received amount.
         uint16 feeBps = dstFeeBpsOverride[dstEid];
         if (feeBps == 0) {
             feeBps = (dstEid == ETHEREUM_EID || localEid == ETHEREUM_EID)
                 ? ethereumFeeBps
                 : defaultFeeBps;
         }
-        uint256 fee = (amount * feeBps) / 10000;
-        uint256 amountAfterFee = amount - fee;
+        uint256 fee = (received * feeBps) / 10000;
+        uint256 amountAfterFee = received - fee;
 
         // Transfer fee to fee recipient
         if (fee > 0) {
@@ -287,6 +295,13 @@ contract MagnetaBridgeOApp is OApp, ReentrancyGuard {
         address _executor,
         bytes calldata _extraData
     ) internal override {
+        // Inbound kill-switch. bridgeTokens() is guarded by whenNotPaused, but
+        // _lzReceive is an internal LayerZero override and cannot wear the
+        // modifier — so without this inline check a pause could not stop an
+        // inbound drain from a forged/compromised peer. Mirror the same paused
+        // flag here so {pause} freezes BOTH directions of the bridge.
+        require(!paused, "MagnetaBridgeOApp: paused");
+
         // CRITICAL: validate the message comes from one of OUR remote bridge
         // contracts. Without this, any contract on any source chain can call
         // the LayerZero endpoint with a forged payload and drain our liquidity

@@ -129,8 +129,48 @@ describe("MagnetaCurvePool — graduation DoS fix (finalizeGraduation)", functio
     });
   });
 
+  describe("Graduation gate is monotonic (F84)", function () {
+    it("buy() increments totalNativeBought and never decrements it on sell()", async function () {
+      await pool.connect(alice).buy(0, { value: ethers.parseEther("40") });
+      const boughtAfterBuy: bigint = await pool.totalNativeBought();
+      const raisedAfterBuy: bigint = await pool.nativeRaised();
+      expect(boughtAfterBuy).to.equal(raisedAfterBuy);
+      expect(boughtAfterBuy).to.be.gt(0n);
+
+      // Sell part of the position back.
+      const bal: bigint = await token.balanceOf(alice.address);
+      await token.connect(alice).approve(await pool.getAddress(), bal);
+      await pool.connect(alice).sell(bal / 2n, 0);
+
+      // nativeRaised drops, totalNativeBought is unchanged (monotonic).
+      expect(await pool.nativeRaised()).to.be.lt(raisedAfterBuy);
+      expect(await pool.totalNativeBought()).to.equal(boughtAfterBuy);
+    });
+
+    it("a whale selling near the threshold CANNOT suppress graduation", async function () {
+      // Buy past 95 ETH (net ~94), below the 100 ETH threshold → not graduated.
+      await pool.connect(alice).buy(0, { value: ethers.parseEther("95") });
+      expect(await pool.graduated()).to.equal(false);
+
+      // Whale dumps most of the position: net nativeRaised falls well below the
+      // threshold, but totalNativeBought stays put.
+      const bal: bigint = await token.balanceOf(alice.address);
+      await token.connect(alice).approve(await pool.getAddress(), bal);
+      await pool.connect(alice).sell((bal * 80n) / 100n, 0);
+      expect(await pool.nativeRaised()).to.be.lt(GRAD_THRESH);
+      expect(await pool.graduated()).to.equal(false);
+
+      // A further buy pushes cumulative buy-side native past the threshold even
+      // though net nativeRaised is still below it. Under the OLD net-based gate
+      // this buy would NOT graduate; under the monotonic gate it does (F84).
+      await pool.connect(attacker).buy(0, { value: ethers.parseEther("10") });
+      expect(await pool.totalNativeBought()).to.be.gte(GRAD_THRESH);
+      expect(await pool.graduated()).to.equal(true);
+    });
+  });
+
   describe("DoS resistance — the actual CRITICAL fix", function () {
-    it("Pre-seeded (dust-griefed) V2 pair does NOT brick trading or graduation", async function () {
+    it("Pre-seeded (dust-griefed) V2 pair does NOT brick trading; finalize rejects bad ratio (F82)", async function () {
       const wethAddr  = await weth.getAddress();
       const tokenAddr = await token.getAddress();
 
@@ -152,16 +192,19 @@ describe("MagnetaCurvePool — graduation DoS fix (finalizeGraduation)", functio
       expect(r0).to.be.gt(0n);
       expect(r1).to.be.gt(0n);
 
-      // PRE-FIX: buyToGraduation reverted here ("pair has reserves (manipulated)").
-      // POST-FIX: trading closes the curve cleanly...
+      // Trading still closes the curve cleanly — the seeded pair can never
+      // brick buy()/graduate().
       await expect(buyToGraduation(alice)).to.not.be.reverted;
       expect(await pool.graduated()).to.equal(true);
 
-      // ...and finalizeGraduation succeeds against the seeded pair instead of
-      // bricking forever.
-      await expect(pool.connect(attacker).finalizeGraduation()).to.not.be.reverted;
-      expect(await pool.graduationFinalized()).to.equal(true);
-      expect(await pair.balanceOf(DEAD)).to.be.gt(0n);
+      // F82: finalizeGraduation now REFUSES to deposit into a pair whose spot
+      // ratio deviates from the curve terminal price beyond the band, rather
+      // than seeding the V2 launch at the attacker's manipulated price. The
+      // revert rolls back graduationFinalized, so the step stays retryable
+      // (once the pair is arbed back within band it can complete).
+      await expect(pool.connect(attacker).finalizeGraduation())
+        .to.be.revertedWithCustomError(pool, "PairRatioOutOfBand");
+      expect(await pool.graduationFinalized()).to.equal(false);
     });
   });
 });

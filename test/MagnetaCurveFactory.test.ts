@@ -138,20 +138,52 @@ describe("MagnetaCurveFactory — Sentinelle hardening", function () {
       ).to.be.revertedWith("supply too large");
     });
 
+    it("rejects graduationThreshold above maxGraduationThreshold", async function () {
+      const tooLarge = (await curveFactory.maxGraduationThreshold()) + 1n;
+      await expect(
+        curveFactory.connect(alice).createCurveToken(
+          "T", "T", "ipfs://t", TOTAL_SUPPLY, CURVE_ALLOC, VIRTUAL_RES, tooLarge,
+        ),
+      ).to.be.revertedWith("threshold too large");
+    });
+
+    it("rejects graduationThreshold not strictly above virtualNativeReserve", async function () {
+      // graduationThreshold == virtualNativeReserve: a pool that "graduates"
+      // before any real native is deposited beyond the virtual seed.
+      await expect(
+        curveFactory.connect(alice).createCurveToken(
+          "T", "T", "ipfs://t", TOTAL_SUPPLY, CURVE_ALLOC, VIRTUAL_RES, VIRTUAL_RES,
+        ),
+      ).to.be.revertedWith("threshold below virtual");
+    });
+
     it("owner can tune bounds via setParameterBounds", async function () {
       await expect(
         curveFactory.setParameterBounds(
           ethers.parseEther("1"),
           ethers.parseEther("10000000000"),
           ethers.parseEther("10"),
+          ethers.parseEther("5000000"),
         ),
       ).to.emit(curveFactory, "ParameterBoundsUpdated");
       expect(await curveFactory.minVirtualNativeReserve()).to.equal(ethers.parseEther("1"));
+      expect(await curveFactory.maxGraduationThreshold()).to.equal(ethers.parseEther("5000000"));
+    });
+
+    it("setParameterBounds rejects maxGraduationThreshold below minGraduationThreshold", async function () {
+      await expect(
+        curveFactory.setParameterBounds(
+          ethers.parseEther("1"),
+          ethers.parseEther("10000000000"),
+          ethers.parseEther("10"),
+          ethers.parseEther("9"),
+        ),
+      ).to.be.revertedWith("bad threshold bounds");
     });
 
     it("non-owner cannot tune bounds", async function () {
       await expect(
-        curveFactory.connect(alice).setParameterBounds(1n, 1n, 1n),
+        curveFactory.connect(alice).setParameterBounds(1n, 1n, 1n, 1n),
       ).to.be.reverted;
     });
   });

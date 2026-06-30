@@ -474,6 +474,98 @@ describe("MagnetaBridgeOApp", function () {
         });
     });
 
+    // ─── Inbound pause (F93) ───────────────────────────────────────────────────
+
+    describe("Inbound pause kill-switch (F93)", function () {
+        it("blocks _lzReceive while paused, then allows it after unpause", async function () {
+            const bridgeABytes32 = ethers.zeroPadValue(await bridgeA.getAddress(), 32);
+            const amount = ethers.parseEther("25");
+            const guid = ethers.hexlify(ethers.randomBytes(32));
+            const payload = ethers.AbiCoder.defaultAbiCoder().encode(
+                ["address", "address", "uint256"],
+                [await token.getAddress(), bob.address, amount]
+            );
+
+            // Pause the receiving bridge — a forged/compromised peer drain must
+            // be stopped on the inbound path too, not just bridgeTokens().
+            await bridgeB.pause();
+            await expect(
+                endpointB.deliverMessage(
+                    await bridgeB.getAddress(),
+                    { srcEid: EID_A, sender: bridgeABytes32, nonce: 1n },
+                    guid,
+                    payload
+                )
+            ).to.be.reverted; // "MagnetaBridgeOApp: paused" bubbles via the endpoint
+
+            // Recipient received nothing and the guid was NOT consumed.
+            expect(await bridgeB.processedIncomingGuids(guid)).to.equal(false);
+
+            // After unpause the same message delivers normally.
+            await bridgeB.unpause();
+            const before = await token.balanceOf(bob.address);
+            await endpointB.deliverMessage(
+                await bridgeB.getAddress(),
+                { srcEid: EID_A, sender: bridgeABytes32, nonce: 2n },
+                guid,
+                payload
+            );
+            expect(await token.balanceOf(bob.address)).to.equal(before + amount);
+        });
+    });
+
+    // ─── Fee-on-transfer received-delta accounting (F92) ───────────────────────
+
+    describe("Fee-on-transfer accounting (F92)", function () {
+        const TAX_BPS = 100n; // 1% burn on each transfer
+
+        async function deployFotBridge() {
+            // Fee-on-transfer token
+            const Fot = await ethers.getContractFactory("MockFeeOnTransferToken");
+            const fot = await Fot.deploy("FeeTok", "FOT", ethers.parseEther("1000000"), TAX_BPS);
+
+            // Enable on bridgeA (send to B)
+            await bridgeA.setSupportedToken(EID_B, await fot.getAddress(), true);
+            await bridgeA.setBridgeableToken(EID_B, await fot.getAddress(), true);
+
+            // Fund alice
+            await fot.transfer(alice.address, ethers.parseEther("10000"));
+            return fot;
+        }
+
+        it("derives fee + bridged payload from the actually-received delta, not the nominal amount", async function () {
+            const fot = await deployFotBridge();
+            const tokenAddr = await fot.getAddress();
+
+            await fot.connect(alice).approve(await bridgeA.getAddress(), BRIDGE_AMOUNT);
+
+            // Received by the bridge after the token's 1% transfer burn.
+            const received = BRIDGE_AMOUNT - (BRIDGE_AMOUNT * TAX_BPS) / 10000n;
+            const protocolFee = (received * FEE_BPS) / 10000n;
+            const amountAfterFee = received - protocolFee;
+
+            // The TokenBridged event (and thus the cross-chain payload) must
+            // reflect amountAfterFee computed from `received`, never from the
+            // nominal BRIDGE_AMOUNT.
+            await expect(
+                bridgeA.connect(alice).bridgeTokens(
+                    tokenAddr, BRIDGE_AMOUNT, EID_B, bob.address, "0x", false,
+                    { value: LZ_FEE }
+                )
+            )
+                .to.emit(bridgeA, "TokenBridged")
+                .withArgs(tokenAddr, alice.address, bob.address, amountAfterFee, EID_B, anyValue);
+
+            // Route volume tracks the delta-derived amount, not the nominal one.
+            expect(await bridgeA.routeVolume(EID_B, tokenAddr)).to.equal(amountAfterFee);
+
+            // Sanity: had the bug been present, amountAfterFee would have been
+            // BRIDGE_AMOUNT - nominalFee, which is strictly greater.
+            const buggyAfterFee = BRIDGE_AMOUNT - (BRIDGE_AMOUNT * FEE_BPS) / 10000n;
+            expect(amountAfterFee).to.be.lessThan(buggyAfterFee);
+        });
+    });
+
     // ─── End-to-end flow ───────────────────────────────────────────────────────
 
     describe("End-to-end: bridgeTokens → deliverMessage", function () {

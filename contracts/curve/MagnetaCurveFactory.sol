@@ -72,6 +72,9 @@ contract MagnetaCurveFactory is Ownable2Step, ReentrancyGuard {
     uint256 public minVirtualNativeReserve = 0.01 ether;
     uint256 public maxTotalSupply          = type(uint128).max;
     uint256 public minGraduationThreshold  = 0.1 ether;
+    // F80: ceiling so a creator cannot pass a near-infinite graduationThreshold
+    // for a pool that can never graduate yet still registers as a real launch.
+    uint256 public maxGraduationThreshold  = type(uint128).max;
 
     // ─── Metadata caps (Sentinelle MEDIUM SC10) ─────────────────────────────
     uint256 public constant MAX_NAME_BYTES   = 64;
@@ -96,7 +99,8 @@ contract MagnetaCurveFactory is Ownable2Step, ReentrancyGuard {
     event ParameterBoundsUpdated(
         uint256 minVirtualNativeReserve,
         uint256 maxTotalSupply,
-        uint256 minGraduationThreshold
+        uint256 minGraduationThreshold,
+        uint256 maxGraduationThreshold
     );
 
     constructor(address router_, address feeVault_, address initialOwner) {
@@ -152,15 +156,18 @@ contract MagnetaCurveFactory is Ownable2Step, ReentrancyGuard {
     function setParameterBounds(
         uint256 _minVirtualNativeReserve,
         uint256 _maxTotalSupply,
-        uint256 _minGraduationThreshold
+        uint256 _minGraduationThreshold,
+        uint256 _maxGraduationThreshold
     ) external onlyOwner {
         require(_minVirtualNativeReserve > 0, "zero virtual min");
         require(_maxTotalSupply > 0, "zero supply max");
         require(_minGraduationThreshold > 0, "zero threshold min");
+        require(_maxGraduationThreshold >= _minGraduationThreshold, "bad threshold bounds");
         minVirtualNativeReserve = _minVirtualNativeReserve;
         maxTotalSupply          = _maxTotalSupply;
         minGraduationThreshold  = _minGraduationThreshold;
-        emit ParameterBoundsUpdated(_minVirtualNativeReserve, _maxTotalSupply, _minGraduationThreshold);
+        maxGraduationThreshold  = _maxGraduationThreshold;
+        emit ParameterBoundsUpdated(_minVirtualNativeReserve, _maxTotalSupply, _minGraduationThreshold, _maxGraduationThreshold);
     }
 
     /**
@@ -199,6 +206,10 @@ contract MagnetaCurveFactory is Ownable2Step, ReentrancyGuard {
         require(curveAllocation > 0 && curveAllocation < totalSupply,         "bad alloc");
         require(virtualNativeReserve >= minVirtualNativeReserve,              "virtual too small");
         require(graduationThreshold  >= minGraduationThreshold,               "threshold too small");
+        // F80: cap the graduation threshold and keep it above the virtual reserve,
+        // so a creator can't register a pool that can never graduate.
+        require(graduationThreshold  <= maxGraduationThreshold,               "threshold too large");
+        require(graduationThreshold  >  virtualNativeReserve,                 "threshold below virtual");
 
         // 1. Deploy the token, mint full supply to the factory
         MagnetaCurveToken tokenContract = new MagnetaCurveToken(

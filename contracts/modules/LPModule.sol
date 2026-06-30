@@ -81,6 +81,7 @@ contract LPModule is IModule, ReentrancyGuard, Ownable2Step {
     using SafeERC20 for IERC20;
 
     uint16 public constant FEE_BPS = 15;                   // 0.15%
+    uint256 public constant MIN_LOCAL_FEE_USDC = 100_000;  // $0.10 (6dp) flat floor — fail-closed when no on-chain price
     uint256 public constant BURN_ADDRESS_SALT = 0;
     address public constant DEAD = 0x000000000000000000000000000000000000dEaD;
 
@@ -164,10 +165,17 @@ contract LPModule is IModule, ReentrancyGuard, Ownable2Step {
         CreateLPParams memory p = abi.decode(raw, (CreateLPParams));
         require(msg.value == p.ethAmount, "eth mismatch");
 
+        // F53: for LOCAL ops the fee is collected here, so a caller-supplied
+        // usdcFee=0 must not slip the 0.15% markup. Derive the minimum on-chain
+        // from the op's USD value and floor the supplied fee against it. Cross
+        // -chain ops were already charged source-side (see _collectFee).
+        _requireLocalFee(ctx, p.ethAmount, p.usdcFee);
         _collectFee(ctx, p.usdcFee);
 
         _pullToken(ctx, p.token, p.tokenAmount);
         IERC20(p.token).forceApprove(router, p.tokenAmount);
+
+        uint256 nativeBefore = address(this).balance - msg.value;
 
         (uint256 amountToken, uint256 amountETH, uint256 liquidity) = IUniswapV2Router02(router).addLiquidityETH{value: p.ethAmount}(
             p.token,
@@ -177,6 +185,16 @@ contract LPModule is IModule, ReentrancyGuard, Ownable2Step {
             ctx.caller,
             p.deadline
         );
+
+        // F52: reset the router allowance so a compromised router cannot re-pull
+        // any unconsumed token approval in a future call (mirrors the cross-chain
+        // reset in _createLPFromBridgedUsdc).
+        IERC20(p.token).forceApprove(router, 0);
+
+        // F7: refund leftovers. addLiquidityETH consumes amountToken<=desired and
+        // amountETH<=sent; the unused token/native would otherwise be stranded in
+        // this module. Mirror the cross-chain dust-refund pattern.
+        _refundDust(ctx.caller, p.token, p.tokenAmount - amountToken, nativeBefore);
 
         emit LPCreated(ctx.caller, p.token, amountToken, amountETH, liquidity);
         return abi.encode(amountToken, amountETH, liquidity);
@@ -200,6 +218,7 @@ contract LPModule is IModule, ReentrancyGuard, Ownable2Step {
         require(pair != address(0), "no pair");
 
         _pullToken(ctx, pair, p.liquidity);
+        uint256 nativeBefore = address(this).balance - msg.value;
         IERC20(pair).forceApprove(router, p.liquidity);
 
         (uint256 amountToken, uint256 amountETH) = IUniswapV2Router02(router).removeLiquidity(
@@ -211,6 +230,17 @@ contract LPModule is IModule, ReentrancyGuard, Ownable2Step {
             ctx.caller,
             p.deadline
         );
+
+        // F52: reset the pair allowance on the router after the burn (mirrors the
+        // cross-chain reset). removeLiquidity consumes the full liquidity so the
+        // remaining approval should be 0, but a non-conforming router could leave
+        // a residual; zero it defensively.
+        IERC20(pair).forceApprove(router, 0);
+
+        // F7: sweep any pair-token / native leftover back to the caller. The
+        // router sends the unwound token+native directly to ctx.caller, so dust
+        // here is only a defensive measure against a non-conforming router.
+        _refundDust(ctx.caller, pair, IERC20(pair).balanceOf(address(this)), nativeBefore);
 
         emit LPRemoved(ctx.caller, p.token, p.liquidity, amountToken, amountETH);
         return abi.encode(amountToken, amountETH);
@@ -244,10 +274,16 @@ contract LPModule is IModule, ReentrancyGuard, Ownable2Step {
         CreateLPAndBuyParams memory p = abi.decode(raw, (CreateLPAndBuyParams));
         require(msg.value == p.lp.ethAmount + p.buyEth, "eth mismatch");
 
+        // F53: enforce the on-chain-derived fee floor for LOCAL ops. The value
+        // priced for the markup is the LP native side (p.lp.ethAmount); the
+        // first-buy ETH is the caller's own swap, not Magneta-marked-up value.
+        _requireLocalFee(ctx, p.lp.ethAmount, p.lp.usdcFee);
         _collectFee(ctx, p.lp.usdcFee);
 
         _pullToken(ctx, p.lp.token, p.lp.tokenAmount);
         IERC20(p.lp.token).forceApprove(router, p.lp.tokenAmount);
+
+        uint256 nativeBefore = address(this).balance - msg.value;
 
         (uint256 amountToken, uint256 amountETH, uint256 liquidity) = IUniswapV2Router02(router).addLiquidityETH{value: p.lp.ethAmount}(
             p.lp.token,
@@ -267,6 +303,13 @@ contract LPModule is IModule, ReentrancyGuard, Ownable2Step {
             p.buyRecipient,
             p.lp.deadline
         );
+
+        // F52: reset the router allowance left by the LP add (mirrors the
+        // cross-chain reset). F7: refund any unconsumed token / native back to
+        // the caller. nativeBefore captures the module's pre-op native balance,
+        // so the residual after both the LP add and the first-buy swap is dust.
+        IERC20(p.lp.token).forceApprove(router, 0);
+        _refundDust(ctx.caller, p.lp.token, p.lp.tokenAmount - amountToken, nativeBefore);
 
         emit LPCreated(ctx.caller, p.lp.token, amountToken, amountETH, liquidity);
         return abi.encode(amountToken, amountETH, liquidity, amounts[amounts.length - 1]);
@@ -381,6 +424,44 @@ contract LPModule is IModule, ReentrancyGuard, Ownable2Step {
         if (amount == 0) return;
         if (ctx.originChainId != block.chainid) return;
         IERC20(usdc).safeTransferFrom(ctx.caller, ctx.feeVault, amount);
+    }
+
+    /// @dev F53: enforce the 0.15% Magneta markup floor for LOCAL value ops.
+    ///      Without this, a local caller (originChainId == block.chainid) could
+    ///      pass usdcFee = 0 and _collectFee would early-return, evading the fee
+    ///      entirely. We derive the op's USD value on-chain instead of trusting
+    ///      the caller-supplied fee: the native side (`ethAmount`) is priced into
+    ///      USDC via MagnetaSwap, and a balanced two-sided LP add deposits ~equal
+    ///      value on each side, so total value ≈ 2× the native value. The floor
+    ///      is then value × FEE_BPS / 10_000, matching MagnetaGateway's
+    ///      _collectCrossChainFee convention. Cross-chain ops are untouched (the
+    ///      markup was already collected source-side).
+    function _requireLocalFee(Context calldata ctx, uint256 ethAmount, uint256 suppliedFee) internal view {
+        if (ctx.originChainId != block.chainid) return;
+        if (ethAmount == 0) return;
+        address weth = IUniswapV2Router02(router).WETH();
+        // MagnetaSwap.getAmountOut returns 0 (no revert) when WETH/USDC is not
+        // whitelisted or has no pool — which is the case on most chains. Applying
+        // only the quoted fee would then floor at 0 and re-open the evasion, so we
+        // ALWAYS enforce a flat minimum: the guard fails CLOSED on those chains.
+        uint256 nativeUsd = IMagnetaSwap(magnetaSwap).getAmountOut(weth, usdc, ethAmount);
+        uint256 valueUsd = nativeUsd * 2; // balanced LP: token side ≈ native side
+        uint256 expectedFee = (valueUsd * FEE_BPS) / 10_000;
+        if (expectedFee < MIN_LOCAL_FEE_USDC) expectedFee = MIN_LOCAL_FEE_USDC;
+        require(suppliedFee >= expectedFee, "LPModule: fee below minimum");
+    }
+
+    /// @dev F7: refund unconsumed token / native back to `to`, mirroring the
+    ///      cross-chain dust-refund block in _createLPFromBridgedUsdc.
+    ///      `tokenDust` is the precomputed token leftover; the native leftover is
+    ///      derived from the module's pre-op native balance (`nativeBefore`).
+    function _refundDust(address to, address token, uint256 tokenDust, uint256 nativeBefore) internal {
+        if (tokenDust > 0) IERC20(token).safeTransfer(to, tokenDust);
+        uint256 nativeDust = address(this).balance - nativeBefore;
+        if (nativeDust > 0) {
+            (bool ok, ) = to.call{value: nativeDust}("");
+            require(ok, "native refund failed");
+        }
     }
 
     /// @dev Pull tokens from tokenSource (cross-chain) or caller (local).

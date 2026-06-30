@@ -92,15 +92,20 @@ contract MagnetaSwap is IMagnetaSwap, Ownable2Step, ReentrancyGuard {
         require(to != address(0), "MagnetaSwap: invalid recipient");
         require(whitelistedTokens[tokenIn] && whitelistedTokens[tokenOut], "MagnetaSwap: token not whitelisted");
 
-        // Transfer tokens from user
+        // Transfer tokens from user, measuring the actual received amount so that
+        // fee-on-transfer tokens cannot make the router approve/forward more than
+        // it truly holds. All downstream math uses `received`, not the nominal amountIn.
+        uint256 balanceBefore = IERC20(tokenIn).balanceOf(address(this));
         IERC20(tokenIn).safeTransferFrom(msg.sender, address(this), amountIn);
+        uint256 received = IERC20(tokenIn).balanceOf(address(this)) - balanceBefore;
+        require(received > 0, "MagnetaSwap: no tokens received");
 
         // Take contract-level fee (skip for exempt addresses like LPModule)
-        uint256 fee = feeExempt[msg.sender] ? 0 : (amountIn * FEE_BPS) / 10000;
+        uint256 fee = feeExempt[msg.sender] ? 0 : (received * FEE_BPS) / 10000;
         if (fee > 0) {
             IERC20(tokenIn).safeTransfer(feeRecipient, fee);
         }
-        uint256 amountToSwap = amountIn - fee;
+        uint256 amountToSwap = received - fee;
 
         // Find pool (defaulting to 0.3% fee tier)
         uint256 poolId = poolContract.getPool(tokenIn, tokenOut, 30);
