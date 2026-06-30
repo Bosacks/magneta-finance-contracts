@@ -20,7 +20,7 @@
 import { ethers, network } from "hardhat";
 import fs from "node:fs";
 import path from "node:path";
-import { CHAIN_CONFIG, ChainConfig, FEE_VAULT, PAUSE_GUARDIAN } from "./chainConfig";
+import { CHAIN_CONFIG, ChainConfig, FEE_VAULT, PAUSE_GUARDIAN, RELAYER_PAUSER } from "./chainConfig";
 
 interface DeployResult {
   network: string;
@@ -222,6 +222,11 @@ async function main() {
       [10, contracts.TaxClaimModule],
       [11, contracts.SwapModule],
       [12, contracts.SwapModule],
+      // 16 = AUTO_FREEZE_RULE_SET (A2/A3) → TokenOpsModule. Ops 13 (CREATE_TOKEN →
+      // TokenCreationModule) and 14/15 (POOL_FEE_COMPOUND/MIGRATE_LP → LPAtomicModule)
+      // are wired by their own deploy scripts (deployTokenCreation.ts / the atomic
+      // module deploy), since deployAll does not deploy those modules.
+      [16, contracts.TokenOpsModule],
     ];
 
     let registered = 0;
@@ -231,7 +236,7 @@ async function main() {
       await tx.wait();
       registered++;
     }
-    console.log(`  ✓ ${registered}/13 modules registered on Gateway`);
+    console.log(`  ✓ ${registered} modules registered on Gateway`);
 
     if (cfg.usdc) {
       const setUsdcTx = await gateway.setUsdc(cfg.usdc);
@@ -244,6 +249,10 @@ async function main() {
     const setGuardianGw = await gateway.addPauser(PAUSE_GUARDIAN);
     await setGuardianGw.wait();
     console.log(`  ✓ Gateway pauser added: ${PAUSE_GUARDIAN}`);
+    if (RELAYER_PAUSER) {
+      await (await gateway.addPauser(RELAYER_PAUSER)).wait();
+      console.log(`  ✓ Gateway pauser added (Defender Relayer): ${RELAYER_PAUSER}`);
+    }
 
     if (contracts.LPModule) {
       const setExemptTx = await swap.setFeeExempt(contracts.LPModule, true);
@@ -255,6 +264,10 @@ async function main() {
   const setGuardianSwap = await swap.addPauser(PAUSE_GUARDIAN);
   await setGuardianSwap.wait();
   console.log(`  ✓ MagnetaSwap pauser added: ${PAUSE_GUARDIAN}`);
+  if (RELAYER_PAUSER) {
+    await (await swap.addPauser(RELAYER_PAUSER)).wait();
+    console.log(`  ✓ MagnetaSwap pauser added (Defender Relayer): ${RELAYER_PAUSER}`);
+  }
 
   if (cfg.usdc) {
     const whitelistTx = await swap.setWhitelistedToken(cfg.usdc, true);

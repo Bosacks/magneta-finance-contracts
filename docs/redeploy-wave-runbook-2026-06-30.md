@@ -79,10 +79,12 @@ wiring step keys off them.
 Generate batches from the recorded addresses, then execute via the Safe (or the in-house
 Safe script on no-UI chains).
 
-1. **Multipauser** — on EVERY pausable contract (Gateway, BridgeOApp, Swap, Factory, Pool,
-   Bundler, Proxy, modules, CurveFactory, CurvePool): `addPauser(guardian 0x92F4…4260)`
-   AND `addPauser(<Defender Relayer>)`. `deployAll.ts` does the guardian for the core it
-   deploys; add the Defender Relayer + cover modules/curve. Verify `unpause()` stays Safe-only.
+1. **Multipauser** — on EVERY pausable contract: `addPauser(guardian 0x92F4…4260)` AND
+   `addPauser(<Defender Relayer>)`. `deployAll.ts` adds both (guardian always, relayer if
+   `DEFENDER_RELAYER_PAUSER` env set) **inline** on gateway+swap. For the rest + the
+   post-Safe relayer, use the generator (tokens repo):
+   `contracts/solidity/scripts/safe/generate-pauser-batches.ts` (fill
+   `pauser-addresses.template.json`). `unpause()` stays Safe-only. Verify `unpause()` stays Safe-only.
 2. **Factory gating (H-2/L-2)** — `dispatcher.setStandardFactory(<new OFT factory>)` per chain.
    Generator + address template live in the **tokens repo**:
    `magneta-finance-tokens/contracts/solidity/scripts/safe/generate-phase1-batches.ts`
@@ -93,10 +95,17 @@ Safe script on no-UI chains).
    Core/bridge peers: `magneta-finance-contracts/scripts/deploy/generatePeerWiringBatches.ts`.
    Dispatcher peers (tokens repo): `contracts/solidity/scripts/safe/generate-phase2-peer-batches.ts`
    (fill `phase2-addresses.template.json`; V2 mesh = 19 chains / 342 wires; V3 = arb/base/polygon).
-5. **Bridge canonical tokens (F22 — NEW)** — for each supported bridge route + token:
-   `setRemoteToken(eid, localToken, remoteAddress)` **in BOTH directions** (source→dst and
-   dst→source), plus the existing `setSupportedToken` / `setBridgeableToken`. **The bridge
-   will revert every transfer until these mappings exist** — required before opening liquidity.
+5. **Bridge canonical tokens (F22 — NEW)** — `setRemoteToken(eid, localToken, remote)` **in
+   BOTH directions** (source→dst and dst→source) for each route+token, plus the existing
+   `setSupportedToken` / `setBridgeableToken`. Generator (tokens repo):
+   `contracts/solidity/scripts/safe/generate-remotetoken-batches.ts` (fill
+   `remotetoken-routes.template.json`). **The bridge reverts every transfer until these
+   mappings exist** — required before opening liquidity.
+
+> **Wiring tooling status:** `setStandardFactory`/`registerToken` (Phase-1) and `setPeer`
+> (Phase-2) generators already existed. `setModule(16)` is now in `deployAll.ts`; the
+> multipauser **pauser** batches and the **setRemoteToken** batches got new generators
+> (above). Ops 14/15 (LPAtomicModule, A1) are wired by the atomic-module deploy script.
 6. **Token registration** — confirm the factory auto-`registerToken` works (the gap fix); for
    any token created via the workaround, `registerByTokenOwner` / Safe `registerToken`.
 7. **MAGCronos** — see §4.
