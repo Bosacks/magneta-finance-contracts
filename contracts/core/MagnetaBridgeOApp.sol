@@ -62,6 +62,11 @@ contract MagnetaBridgeOApp is OApp, ReentrancyGuard {
     // Mapping: endpointId => token => available balance for bridging
     mapping(uint32 => mapping(address => uint256)) public bridgeLiquidity;
 
+    // F22: canonical cross-chain token mapping. remoteToken[eid][localToken] =
+    // that token's address on chain `eid`. Set per route (both directions) by the
+    // owner; gates both the outgoing translation and the incoming acceptance.
+    mapping(uint32 => mapping(address => address)) public remoteToken;
+
     // Paused state
     bool public paused;
 
@@ -127,6 +132,7 @@ contract MagnetaBridgeOApp is OApp, ReentrancyGuard {
     event BridgeLiquidityAdded(uint32 endpointId, address indexed token, uint256 amount);
     event BridgeLiquidityRemoved(uint32 endpointId, address indexed token, uint256 amount);
     event BridgeableTokenSet(uint32 endpointId, address indexed token, bool bridgeable);
+    event RemoteTokenSet(uint32 indexed endpointId, address indexed localToken, address remote);
     event DefaultFeeBpsUpdated(uint16 oldBps, uint16 newBps);
     event EthereumFeeBpsUpdated(uint16 oldBps, uint16 newBps);
     event DstFeeBpsOverrideUpdated(uint32 indexed dstEid, uint16 oldBps, uint16 newBps);
@@ -243,8 +249,16 @@ contract MagnetaBridgeOApp is OApp, ReentrancyGuard {
             IERC20(token).safeTransfer(feeRecipient, fee);
         }
 
-        // Prepare message payload
-        bytes memory payload = abi.encode(token, to, amountAfterFee);
+        // F22: translate the local token to its CANONICAL address on the
+        // destination chain. Encoding the source address verbatim would make the
+        // destination release the wrong asset (or lock funds) because the same
+        // token has a different address per chain. Require an owner-configured
+        // route mapping so an unmapped token can never be bridged.
+        address dstToken = remoteToken[dstEid][token];
+        require(dstToken != address(0), "MagnetaBridgeOApp: no canonical token for route");
+
+        // Prepare message payload (carries the DESTINATION-chain token address)
+        bytes memory payload = abi.encode(dstToken, to, amountAfterFee);
 
         // Estimate fee and send message via LayerZero
         MessagingFee memory fee_ = _quote(dstEid, payload, options, payInLzToken);
@@ -326,7 +340,11 @@ contract MagnetaBridgeOApp is OApp, ReentrancyGuard {
         (address token, address to, uint256 amount) = abi.decode(_payload, (address, address, uint256));
 
         require(!bridgeTransactions[_guid].completed, "MagnetaBridgeOApp: guid already processed");
-        require(supportedTokens[_origin.srcEid][token], "MagnetaBridgeOApp: token not supported from source");
+        // F22: `token` is this chain's LOCAL token address (translated on send).
+        // Only accept it if the owner configured a canonical mapping back to the
+        // source — rejects a forged/divergent token instead of releasing a wrong
+        // asset. The bridgeLiquidity check below is the second gate.
+        require(remoteToken[_origin.srcEid][token] != address(0), "MagnetaBridgeOApp: unmapped token from source");
         require(amount > 0, "MagnetaBridgeOApp: invalid amount");
         require(to != address(0), "MagnetaBridgeOApp: zero recipient");
 
@@ -374,6 +392,23 @@ contract MagnetaBridgeOApp is OApp, ReentrancyGuard {
         require(token != address(0), "MagnetaBridgeOApp: invalid token");
         bridgeableTokens[endpointId][token] = bridgeable;
         emit BridgeableTokenSet(endpointId, token, bridgeable);
+    }
+
+    /**
+     * @dev F22: set the canonical address of `localToken` on chain `endpointId`.
+     *      Configure BOTH directions per route: on the source set
+     *      remoteToken[dstEid][srcToken]=dstToken (outgoing translation), and on
+     *      the destination set remoteToken[srcEid][dstToken]=srcToken (incoming
+     *      acceptance). Pass remote=address(0) to unmap a route.
+     */
+    function setRemoteToken(
+        uint32 endpointId,
+        address localToken,
+        address remote
+    ) external onlyOwner {
+        require(localToken != address(0), "MagnetaBridgeOApp: invalid token");
+        remoteToken[endpointId][localToken] = remote;
+        emit RemoteTokenSet(endpointId, localToken, remote);
     }
 
 

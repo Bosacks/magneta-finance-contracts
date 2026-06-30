@@ -81,6 +81,10 @@ describe("MagnetaBridgeOApp", function () {
         await bridgeB.setBridgeableToken(EID_A, await token.getAddress(), true);
         await bridgeB.setSupportedToken(EID_B, await token.getAddress(), true);
 
+        // F22: canonical token mapping per route (same address on both mock chains).
+        await bridgeA.setRemoteToken(EID_B, await token.getAddress(), await token.getAddress());
+        await bridgeB.setRemoteToken(EID_A, await token.getAddress(), await token.getAddress());
+
         // ── Seed liquidity on bridgeB for receiving ────────────────────────────
         await token.approve(await bridgeB.getAddress(), LIQUIDITY);
         await bridgeB.addBridgeLiquidity(EID_B, await token.getAddress(), LIQUIDITY);
@@ -387,9 +391,9 @@ describe("MagnetaBridgeOApp", function () {
             await expect(deliverToBridgeB(bob.address, tooMuch)).to.be.reverted;
         });
 
-        it("reverts when token not supported from source chain", async function () {
-            // Remove support from chain A on bridgeB
-            await bridgeB.setSupportedToken(EID_A, await token.getAddress(), false);
+        it("reverts when the incoming token is unmapped (F22)", async function () {
+            // Remove the canonical route mapping on bridgeB → incoming token rejected
+            await bridgeB.setRemoteToken(EID_A, await token.getAddress(), ethers.ZeroAddress);
             await expect(deliverToBridgeB(bob.address, ethers.parseEther("10"))).to.be.reverted;
         });
 
@@ -527,6 +531,7 @@ describe("MagnetaBridgeOApp", function () {
             // Enable on bridgeA (send to B)
             await bridgeA.setSupportedToken(EID_B, await fot.getAddress(), true);
             await bridgeA.setBridgeableToken(EID_B, await fot.getAddress(), true);
+            await bridgeA.setRemoteToken(EID_B, await fot.getAddress(), await fot.getAddress()); // F22 route
 
             // Fund alice
             await fot.transfer(alice.address, ethers.parseEther("10000"));
