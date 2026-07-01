@@ -35,6 +35,11 @@ interface DeployResult {
 
 async function main() {
   const [deployer] = await ethers.getSigners();
+  // Local nonce management: on fast chains (polygon/base) with a delegated
+  // (EIP-7702) deployer, hardhat-ethers' RPC-derived nonce lags between rapid
+  // sequential deploys → "nonce too low". NonceManager increments locally so
+  // every factory + its deployed contract's setters use a correct sequence.
+  const mgr = new ethers.NonceManager(deployer);
   const balance = await ethers.provider.getBalance(deployer.address);
   const net = await ethers.provider.getNetwork();
   const chainId = Number(net.chainId);
@@ -76,25 +81,25 @@ async function main() {
   // ═══════════════════════════ CORE DEFI ═══════════════════════════════
   console.log("── Core DeFi ──");
 
-  const Pool = await ethers.getContractFactory("MagnetaPool");
+  const Pool = await ethers.getContractFactory("MagnetaPool", mgr);
   const pool = await Pool.deploy(deployer.address);
   await pool.waitForDeployment();
   contracts.MagnetaPool = await pool.getAddress();
   log("MagnetaPool", contracts.MagnetaPool);
 
-  const Swap = await ethers.getContractFactory("MagnetaSwap");
+  const Swap = await ethers.getContractFactory("MagnetaSwap", mgr);
   const swap = await Swap.deploy(FEE_VAULT, contracts.MagnetaPool);
   await swap.waitForDeployment();
   contracts.MagnetaSwap = await swap.getAddress();
   log("MagnetaSwap", contracts.MagnetaSwap);
 
-  const Lending = await ethers.getContractFactory("MagnetaLending");
+  const Lending = await ethers.getContractFactory("MagnetaLending", mgr);
   const lending = await Lending.deploy();
   await lending.waitForDeployment();
   contracts.MagnetaLending = await lending.getAddress();
   log("MagnetaLending", contracts.MagnetaLending);
 
-  const Factory = await ethers.getContractFactory("MagnetaFactory");
+  const Factory = await ethers.getContractFactory("MagnetaFactory", mgr);
   const factory = await Factory.deploy(contracts.MagnetaPool, deployer.address);
   await factory.waitForDeployment();
   contracts.MagnetaFactory = await factory.getAddress();
@@ -105,7 +110,7 @@ async function main() {
   // (which is IMagnetaSwap, a different interface). feeRecipient = FeeVault.
   // Skip on router-less minimal chains (e.g. Berachain) — Bundler needs a V2 router.
   if (cfg.defaultRouter) {
-    const Bundler = await ethers.getContractFactory("MagnetaBundler");
+    const Bundler = await ethers.getContractFactory("MagnetaBundler", mgr);
     const bundler = await Bundler.deploy(cfg.defaultRouter, FEE_VAULT);
     await bundler.waitForDeployment();
     contracts.MagnetaBundler = await bundler.getAddress();
@@ -123,7 +128,7 @@ async function main() {
 
     let lzEndpoint: string;
     if (chainId === 31337) {
-      const MockEndpoint = await ethers.getContractFactory("MockLayerZeroEndpoint");
+      const MockEndpoint = await ethers.getContractFactory("MockLayerZeroEndpoint", mgr);
       const mockEp = await MockEndpoint.deploy(cfg.lzEid!);
       await mockEp.waitForDeployment();
       lzEndpoint = await mockEp.getAddress();
@@ -133,13 +138,13 @@ async function main() {
       console.log(`  LZ endpoint (from CHAIN_CONFIG): ${lzEndpoint}`);
     }
 
-    const Gateway = await ethers.getContractFactory("MagnetaGateway");
+    const Gateway = await ethers.getContractFactory("MagnetaGateway", mgr);
     gateway = await Gateway.deploy(lzEndpoint, deployer.address, FEE_VAULT);
     await gateway.waitForDeployment();
     contracts.MagnetaGateway = await gateway.getAddress();
     log("MagnetaGateway", contracts.MagnetaGateway);
 
-    const BridgeOApp = await ethers.getContractFactory("MagnetaBridgeOApp");
+    const BridgeOApp = await ethers.getContractFactory("MagnetaBridgeOApp", mgr);
     const bridge = await BridgeOApp.deploy(lzEndpoint, deployer.address, FEE_VAULT, cfg.lzEid!);
     await bridge.waitForDeployment();
     contracts.MagnetaBridgeOApp = await bridge.getAddress();
@@ -161,7 +166,7 @@ async function main() {
     console.log(`  ✓ Gateway requiredDVNCount = 2`);
 
     if (deployRouterModules) {
-      const LPMod = await ethers.getContractFactory("LPModule");
+      const LPMod = await ethers.getContractFactory("LPModule", mgr);
       const lpModule = await LPMod.deploy(
         contracts.MagnetaGateway, cfg.defaultRouter!, cfg.usdc!, contracts.MagnetaSwap
       );
@@ -169,13 +174,13 @@ async function main() {
       contracts.LPModule = await lpModule.getAddress();
       log("LPModule", contracts.LPModule);
 
-      const SwapMod = await ethers.getContractFactory("SwapModule");
+      const SwapMod = await ethers.getContractFactory("SwapModule", mgr);
       const swapModule = await SwapMod.deploy(contracts.MagnetaGateway, cfg.defaultRouter!, cfg.usdc!);
       await swapModule.waitForDeployment();
       contracts.SwapModule = await swapModule.getAddress();
       log("SwapModule", contracts.SwapModule);
 
-      const TaxClaimMod = await ethers.getContractFactory("TaxClaimModule");
+      const TaxClaimMod = await ethers.getContractFactory("TaxClaimModule", mgr);
       const taxClaimModule = await TaxClaimMod.deploy(contracts.MagnetaGateway, cfg.defaultRouter!, cfg.usdc!);
       await taxClaimModule.waitForDeployment();
       contracts.TaxClaimModule = await taxClaimModule.getAddress();
@@ -185,7 +190,7 @@ async function main() {
     }
 
     if (deployTokenOps) {
-      const TokenOpsMod = await ethers.getContractFactory("TokenOpsModule");
+      const TokenOpsMod = await ethers.getContractFactory("TokenOpsModule", mgr);
       const tokenOpsModule = await TokenOpsMod.deploy(contracts.MagnetaGateway, cfg.usdc!);
       await tokenOpsModule.waitForDeployment();
       contracts.TokenOpsModule = await tokenOpsModule.getAddress();
