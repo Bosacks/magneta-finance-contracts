@@ -103,11 +103,16 @@ async function main() {
   // Bundler batches swaps through a UniV2 router (IUniswapV2Router02.WETH() /
   // swapExact*), so its router MUST be the chain's V2 router, NOT MagnetaSwap
   // (which is IMagnetaSwap, a different interface). feeRecipient = FeeVault.
-  const Bundler = await ethers.getContractFactory("MagnetaBundler");
-  const bundler = await Bundler.deploy(cfg.defaultRouter, FEE_VAULT);
-  await bundler.waitForDeployment();
-  contracts.MagnetaBundler = await bundler.getAddress();
-  log("MagnetaBundler", contracts.MagnetaBundler);
+  // Skip on router-less minimal chains (e.g. Berachain) — Bundler needs a V2 router.
+  if (cfg.defaultRouter) {
+    const Bundler = await ethers.getContractFactory("MagnetaBundler");
+    const bundler = await Bundler.deploy(cfg.defaultRouter, FEE_VAULT);
+    await bundler.waitForDeployment();
+    contracts.MagnetaBundler = await bundler.getAddress();
+    log("MagnetaBundler", contracts.MagnetaBundler);
+  } else {
+    console.log("  MagnetaBundler: SKIPPED (no V2 router on this chain)");
+  }
 
   // ═══════════════════════ CROSS-CHAIN INFRA ══════════════════════════
 
