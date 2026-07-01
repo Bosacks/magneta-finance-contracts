@@ -100,8 +100,11 @@ async function main() {
   contracts.MagnetaFactory = await factory.getAddress();
   log("MagnetaFactory", contracts.MagnetaFactory);
 
+  // Bundler batches swaps through a UniV2 router (IUniswapV2Router02.WETH() /
+  // swapExact*), so its router MUST be the chain's V2 router, NOT MagnetaSwap
+  // (which is IMagnetaSwap, a different interface). feeRecipient = FeeVault.
   const Bundler = await ethers.getContractFactory("MagnetaBundler");
-  const bundler = await Bundler.deploy(contracts.MagnetaSwap);
+  const bundler = await Bundler.deploy(cfg.defaultRouter, FEE_VAULT);
   await bundler.waitForDeployment();
   contracts.MagnetaBundler = await bundler.getAddress();
   log("MagnetaBundler", contracts.MagnetaBundler);
@@ -144,6 +147,13 @@ async function main() {
 
   if (gateway !== null) {
     console.log("\n── Gateway modules ──");
+
+    // LPModule's constructor requires gateway.requiredDVNCount() >= MIN_DVN_QUORUM(2)
+    // (anti single-DVN policy). Set the policy on the fresh Gateway BEFORE deploying
+    // the modules, while the deployer is still owner.
+    const setDvnTx = await gateway.setRequiredDVNCount(2);
+    await setDvnTx.wait();
+    console.log(`  ✓ Gateway requiredDVNCount = 2`);
 
     if (deployRouterModules) {
       const LPMod = await ethers.getContractFactory("LPModule");

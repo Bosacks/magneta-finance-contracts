@@ -95,7 +95,10 @@ const config: HardhatUserConfig = {
     },
   },
   networks: {
-    hardhat: { chainId: 31337 },
+    // FORK_BASE=1 → in-process fork of Base (chainId 8453) for deploy dry-runs.
+    hardhat: process.env.FORK_BASE
+      ? { chainId: 8453, forking: { url: process.env.BASE_FORK_RPC || "https://mainnet.base.org" } }
+      : { chainId: 31337 },
 
     // ─── Testnets ──────────────────────────────────────────────────
     baseSepolia: net(process.env.BASE_TESTNET_RPC_URL || "https://sepolia.base.org", 84532, {
