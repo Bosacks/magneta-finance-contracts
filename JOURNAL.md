@@ -8,7 +8,9 @@
 - 45 tests staking créés (0 avant) : 42+3 fichiers, pause/rôles/2-step ; suite complète 410 verts, zéro régression
 - Re-scan custody repo entier : aucun autre trou pause/custody ; reste = 4 adapters sans tests (smoke), MagnetaProxy sans kill-switch (defense-in-depth), vérifier décommission XChainLpReceiver gnosis
 - Note ops : pools créés par StakingFactory naissent sans pauser protocole (owner=créateur, addPauser opt-in)
-- Non committé (branche security/pause-hardening, working tree)
+- Non committé (branche security/pause-hardening, working tree) → committé/poussé en fin de session (`2aeb16c`)
+- 4 points résiduels traités : smoke tests 4 adapters (80 tests + 2 mocks, zéro bug trouvé), pause defense-in-depth MagnetaProxy (executeSwap*, rescue non gaté, 8 tests), doc ops `docs/staking-pauser-ops.md`, deps Dependabot (11 overrides pnpm =X.Y.Z, vitest 1→3 chain-service) ; suite 498 verts
+- ⚠️ Gnosis XChainLpReceiver PAS décommissionné : 0.218 xDAI toujours dedans, batch rescueNative à exécuter côté Safe
 
 ## 2026-06-30 — F112 MagnetaSwap fee-on-transfer fix
 
