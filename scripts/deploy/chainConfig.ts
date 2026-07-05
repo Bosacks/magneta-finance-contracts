@@ -14,7 +14,12 @@
 
 // ─── Magneta wallet addresses ─────────────────────────────────────────
 export const FEE_VAULT      = "0x68109132Ecf7540A0A983e1Aaa7DebC469d9d68b";
-export const PAUSE_GUARDIAN = "0x479ED5228DCcef6CD05C98A5fe81aCF08F2f5998";
+// CURRENT pause guardian (rotated 2026-05-09). The old 0x479ED5228… is retired.
+export const PAUSE_GUARDIAN = "0x92F440Bc1f1FaBD6D3e6256491631E07857F4260";
+// Second pauser: the OpenZeppelin Defender Relayer (auto-pause). Set via env once
+// the Relayer exists; empty => the relayer addPauser is skipped at deploy and is
+// added later via the Safe batch (scripts/safe/generate-pauser-batches.ts).
+export const RELAYER_PAUSER = (process.env.DEFENDER_RELAYER_PAUSER || "").trim();
 
 // ─── LayerZero V2 endpoints (clustered by CREATE2 salt) ──────────────
 // Source: https://metadata.layerzero-api.com/v1/metadata/deployments

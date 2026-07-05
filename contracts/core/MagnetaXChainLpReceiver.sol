@@ -30,6 +30,13 @@ interface IUniswapV2Router02 {
 
 /**
  * @title MagnetaXChainLpReceiver
+ * @custom:deprecated DO NOT REDEPLOY. Superseded by the non-custodial CCTP+LI.FI
+ *   flow (Lot F): the frontend now bridges to the user's OWN wallet and adds LP
+ *   there, so no receiver/keeper/intent is used. The keeper (`lifiLpKeeper`) is
+ *   NOT run on the VPS. Only one dormant instance exists (gnosis). It is EXCLUDED
+ *   from the redeploy wave. Sentinelle F9 (pooled-native over-claim in
+ *   fulfillSigned) is therefore not remediated in code — the path is abandoned;
+ *   ops should confirm the gnosis instance holds no funds and decommission it.
  * @notice Destination-chain receiver that turns bridged NATIVE into a token/native
  *         V2 LP position, sending the LP tokens (plus dust) to the user. Two entry
  *         paths, sharing the same build logic:

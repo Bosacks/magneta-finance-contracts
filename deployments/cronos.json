@@ -2,10 +2,9 @@
   "network": "cronos",
   "chainId": "25",
   "deployer": "0x620684F822da9adF36F41e3554791D889947e25E",
-  "gnosisSafe": "0x40ea2908Ea490d58E62D1Fd3364464D8A857b297",
   "feeVault": "0x68109132Ecf7540A0A983e1Aaa7DebC469d9d68b",
-  "pauseGuardian": "0x479ED5228DCcef6CD05C98A5fe81aCF08F2f5998",
-  "timestamp": "2026-05-05T22:16:34.295Z",
+  "pauseGuardian": "0x92F440Bc1f1FaBD6D3e6256491631E07857F4260",
+  "timestamp": "2026-07-01T23:20:43.013Z",
   "chainConfig": {
     "lzEndpoint": "0x3A73033C0b1407574C76BdBAc67f126f6b4a9AA9",
     "lzEid": 30359,
@@ -15,18 +14,17 @@
     "router": "uniV2"
   },
   "contracts": {
-    "MagnetaPool": "0xF4A2890fA65Add269829Bd6E4517BC84E473315c",
-    "MagnetaSwap": "0xDc6BFf741D5a94c26002268b0228212C71F9C726",
-    "MagnetaLending": "0xDa43c95Fb2ccf6bDE904Ece558eDeA6B506641B9",
-    "MagnetaFactory": "0x2203FE0F92781d7ECdF626b6aD08A9D2e281EFD0",
-    "MagnetaBundler": "0xBeb7bB26Efe2c9c8571c83590625d5249755ad27",
-    "MagnetaGateway": "0x4D4AD5B890D3B8882436CB7E5268F1cB95736f92",
-    "MagnetaBridgeOApp": "0x252B47F1818f9f6229Ba939120d113EC81185182",
-    "LPModule": "0xDe2424261258AC1b93104421ce1f6304C0c7890D",
-    "SwapModule": "0x5D3cf6e76e9b9E760d4aFF76aE25bEa303Bd5ba1",
-    "TaxClaimModule": "0xE7F170eD67D73CcdA185a52ECdEd20edD9f39Df4",
-    "TokenOpsModule": "0x49C42f71Bd6eca74BC2139854689EFC68e23C5C8",
-    "MagnetaCurveFactory": "0x56B1F90E863542e0491B0d5DbFD19c2d27529e88",
-    "MagnetaStakingFactory": "0x32a7a5c689f36DE8E7cFED32C4cbC4B0a402e554"
+    "MagnetaPool": "0xaC3B726A7582F2B12aE1C7865CBeE93CC0418C8a",
+    "MagnetaSwap": "0x414dC3f0670227Ab3DDAd8B0A52aF7AdebC4a504",
+    "MagnetaLending": "0x749eeB253c7988590651D83bBF005d7b3385E287",
+    "MagnetaFactory": "0x2999D66Ecb8bA3B2dD2Ed70ac8b1C6B135df6ed4",
+    "MagnetaBundler": "0xe16F1A17e6dAB2d7b7Ba628a9165279314A34e29",
+    "MagnetaGateway": "0xBcfEcCE7AfC5C9f4b5B1C67671D2CCbf1c8d6124",
+    "MagnetaBridgeOApp": "0x802135E39fb56FAe17d26eC1B02261BF7cf1D426",
+    "LPModule": "0x9dCd2033C84cCff501D55256be110ffEBE30F441",
+    "SwapModule": "0x8151c725cd637e1664225Cebf32353258F5daaEc",
+    "TaxClaimModule": "0xd418e7dee5De6B822c3Ef368BA1410988619C962",
+    "TokenOpsModule": "0xED990Cf16fC40981381FD4069551339B5Fdb4fDf",
+    "MagnetaCurveFactory": "0x5588Cd99E28518D13A316996dc0D4351afAe4D4a"
   }
 }

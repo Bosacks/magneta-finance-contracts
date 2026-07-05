@@ -32,7 +32,21 @@ interface IMagnetaGateway {
         // Token creation (multi-chain via Gateway.sendFanOut). Sub-op
         // (Standard | AutoLiquidity) selected by the first byte of the
         // params payload — see TokenCreationModule.TemplateKind.
-        CREATE_TOKEN
+        CREATE_TOKEN,
+        // Atomic LP ops (V1.1). One module — LPAtomicModule — handles both,
+        // delegating to MagnetaLpAtomicHelper on the destination chain.
+        // POOL_FEE_COMPOUND: same-router remove + re-add at current ratio.
+        // MIGRATE_LP:        cross-router remove (src) + add (dst), single chain.
+        POOL_FEE_COMPOUND,
+        MIGRATE_LP,
+        // Auto-freeze rule configuration (multi-chain via Gateway.sendFanOut).
+        // Distinct from AUTO_FREEZE (which is the instant blacklist effect):
+        // this op sets the on-chain RULE (active flag + threshold) that the
+        // permissionless `autoFreeze()` trigger and the Magneta listener read.
+        // Handled by TokenOpsModule._setAutoFreezeRule. Appended last to keep
+        // every existing ordinal stable (cross-chain payload encoding depends
+        // on it).
+        AUTO_FREEZE_RULE_SET
     }
 
     /// @notice Emitted when a module processes an operation.
@@ -54,6 +68,13 @@ interface IMagnetaGateway {
 
     /// @notice Emitted when the Magneta fee vault is updated.
     event FeeVaultSet(address indexed previous, address indexed current);
+
+    /// @notice Emitted when the attested DVN quorum is updated by the owner.
+    /// @dev    The attested value is the *floor* the protocol Safe certifies
+    ///         the gateway's actual LZ DVN configuration to be at; modules
+    ///         require it to be ≥ 2 in their constructors (Kelp-DAO-class
+    ///         single-validator-risk mitigation).
+    event RequiredDVNCountSet(uint8 indexed previous, uint8 indexed current);
 
     /// @notice Execute an operation on this chain.
     /// @dev Callable by any user. The fee is paid in msg.value (native) or pulled
@@ -78,6 +99,23 @@ interface IMagnetaGateway {
 
     /// @notice Address of the USDC vault that accumulates Magneta fees on this chain.
     function feeVault() external view returns (address);
+
+    /// @notice Attested floor for the LZ DVN quorum of this gateway's receive
+    ///         library. Set by the protocol Safe after verifying the actual
+    ///         LayerZero ULN configuration off-chain. Modules consuming this
+    ///         gateway MUST require this to be ≥ 2 in their constructors —
+    ///         the value is the on-chain anchor for the Kelp-DAO-class
+    ///         single-validator-risk mitigation.
+    function requiredDVNCount() external view returns (uint8);
+
+    /// @notice Set the attested DVN quorum floor. Owner-only.
+    /// @dev    Re-setting this DOES NOT touch the actual LayerZero config —
+    ///         it only updates the on-chain attestation that downstream
+    ///         modules check. Operators must re-verify the LZ ULN config
+    ///         off-chain and update this whenever the real config changes.
+    ///         A planned downgrade also requires re-deploying any module
+    ///         whose constructor would now fail the ≥ 2 check.
+    function setRequiredDVNCount(uint8 newCount) external;
 
     // ───────────────────── cross-chain ─────────────────────
 

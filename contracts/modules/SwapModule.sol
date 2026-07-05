@@ -73,8 +73,14 @@ contract SwapModule is IModule, ReentrancyGuard, Ownable2Step {
     error EthMismatch();
     error OutputNotUsdc();
 
+    /// @notice Minimum attested DVN quorum the gateway must surface for this
+    ///         module to wire up. Mitigates Kelp-DAO-class single-validator
+    ///         risk (chantier #3 — Sentinelle 2026-06-12 SC01:2026).
+    uint8 public constant MIN_DVN_QUORUM = 2;
+
     constructor(address _gateway, address _router, address _usdc) {
         require(_gateway != address(0) && _router != address(0) && _usdc != address(0), "zero address");
+        require(IMagnetaGateway(_gateway).requiredDVNCount() >= MIN_DVN_QUORUM, "SwapModule: DVN quorum");
         gateway = _gateway;
         router = _router;
         usdc = _usdc;

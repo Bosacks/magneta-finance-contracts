@@ -39,7 +39,13 @@ contract MagnetaSwap is IMagnetaSwap, Ownable2Step, ReentrancyGuard {
     // Paused state
     bool public paused;
 
+    /// @notice Canonical human guardian (back-compat view). Kept in sync with
+    ///         {isPauser} by {setPauseGuardian}. Prefer {addPauser}/{removePauser}.
     address public pauseGuardian;
+
+    /// @notice Multi-pauser set. Any address with isPauser[addr] == true may
+    ///         call {pause}. UNPAUSE remains owner-only.
+    mapping(address => bool) public isPauser;
 
     event TokenWhitelisted(address indexed token, bool whitelisted);
     event FeeExemptUpdated(address indexed addr, bool exempt);
@@ -47,6 +53,8 @@ contract MagnetaSwap is IMagnetaSwap, Ownable2Step, ReentrancyGuard {
     event Paused(address indexed account);
     event Unpaused(address indexed account);
     event PauseGuardianUpdated(address indexed oldGuardian, address indexed newGuardian);
+    event PauserAdded(address indexed account);
+    event PauserRemoved(address indexed account);
     event EmergencyWithdraw(address indexed token, uint256 amount, address indexed caller);
 
     modifier whenNotPaused() {
@@ -84,15 +92,20 @@ contract MagnetaSwap is IMagnetaSwap, Ownable2Step, ReentrancyGuard {
         require(to != address(0), "MagnetaSwap: invalid recipient");
         require(whitelistedTokens[tokenIn] && whitelistedTokens[tokenOut], "MagnetaSwap: token not whitelisted");
 
-        // Transfer tokens from user
+        // Transfer tokens from user, measuring the actual received amount so that
+        // fee-on-transfer tokens cannot make the router approve/forward more than
+        // it truly holds. All downstream math uses `received`, not the nominal amountIn.
+        uint256 balanceBefore = IERC20(tokenIn).balanceOf(address(this));
         IERC20(tokenIn).safeTransferFrom(msg.sender, address(this), amountIn);
+        uint256 received = IERC20(tokenIn).balanceOf(address(this)) - balanceBefore;
+        require(received > 0, "MagnetaSwap: no tokens received");
 
         // Take contract-level fee (skip for exempt addresses like LPModule)
-        uint256 fee = feeExempt[msg.sender] ? 0 : (amountIn * FEE_BPS) / 10000;
+        uint256 fee = feeExempt[msg.sender] ? 0 : (received * FEE_BPS) / 10000;
         if (fee > 0) {
             IERC20(tokenIn).safeTransfer(feeRecipient, fee);
         }
-        uint256 amountToSwap = amountIn - fee;
+        uint256 amountToSwap = received - fee;
 
         // Find pool (defaulting to 0.3% fee tier)
         uint256 poolId = poolContract.getPool(tokenIn, tokenOut, 30);
@@ -174,15 +187,15 @@ contract MagnetaSwap is IMagnetaSwap, Ownable2Step, ReentrancyGuard {
         emit FeeRecipientUpdated(oldRecipient, _feeRecipient);
     }
 
-    modifier onlyOwnerOrGuardian() {
+    modifier onlyOwnerOrPauser() {
         require(
-            msg.sender == owner() || msg.sender == pauseGuardian,
-            "MagnetaSwap: not owner or guardian"
+            msg.sender == owner() || isPauser[msg.sender],
+            "MagnetaSwap: not owner or pauser"
         );
         _;
     }
 
-    function pause() external onlyOwnerOrGuardian {
+    function pause() external onlyOwnerOrPauser {
         paused = true;
         emit Paused(msg.sender);
     }
@@ -192,10 +205,32 @@ contract MagnetaSwap is IMagnetaSwap, Ownable2Step, ReentrancyGuard {
         emit Unpaused(msg.sender);
     }
 
+    /// @notice Grant an address the pauser role. Owner-only.
+    function addPauser(address account) public onlyOwner {
+        require(account != address(0), "MagnetaSwap: zero pauser");
+        isPauser[account] = true;
+        emit PauserAdded(account);
+    }
+
+    /// @notice Revoke an address's pauser role. Owner-only.
+    function removePauser(address account) external onlyOwner {
+        require(account != address(0), "MagnetaSwap: zero pauser");
+        isPauser[account] = false;
+        emit PauserRemoved(account);
+    }
+
+    /// @notice Deprecated single-guardian setter, retained for back-compat.
+    ///         Rotates the canonical {pauseGuardian} within {isPauser}.
     function setPauseGuardian(address _guardian) external onlyOwner {
         require(_guardian != address(0), "MagnetaSwap: zero guardian");
         address old = pauseGuardian;
+        if (old != address(0)) {
+            isPauser[old] = false;
+            emit PauserRemoved(old);
+        }
         pauseGuardian = _guardian;
+        isPauser[_guardian] = true;
+        emit PauserAdded(_guardian);
         emit PauseGuardianUpdated(old, _guardian);
     }
 

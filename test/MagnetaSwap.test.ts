@@ -164,8 +164,21 @@ describe("MagnetaSwap", function () {
 
     it("Should not allow non-owner to pause", async function () {
       await expect(magnetaSwap.connect(user).pause()).to.be.revertedWith(
-        "MagnetaSwap: not owner or guardian"
+        "MagnetaSwap: not owner or pauser"
       );
+    });
+
+    it("Should let an owner-added pauser pause but not unpause", async function () {
+      await magnetaSwap.addPauser(user.address);
+      expect(await magnetaSwap.isPauser(user.address)).to.be.true;
+      await magnetaSwap.connect(user).pause();
+      expect(await magnetaSwap.paused()).to.be.true;
+      // Pauser cannot unpause — owner-only.
+      await expect(magnetaSwap.connect(user).unpause()).to.be.revertedWith(
+        "Ownable: caller is not the owner"
+      );
+      await magnetaSwap.unpause();
+      expect(await magnetaSwap.paused()).to.be.false;
     });
   });
 });

@@ -81,6 +81,10 @@ describe("MagnetaBridgeOApp", function () {
         await bridgeB.setBridgeableToken(EID_A, await token.getAddress(), true);
         await bridgeB.setSupportedToken(EID_B, await token.getAddress(), true);
 
+        // F22: canonical token mapping per route (same address on both mock chains).
+        await bridgeA.setRemoteToken(EID_B, await token.getAddress(), await token.getAddress());
+        await bridgeB.setRemoteToken(EID_A, await token.getAddress(), await token.getAddress());
+
         // ── Seed liquidity on bridgeB for receiving ────────────────────────────
         await token.approve(await bridgeB.getAddress(), LIQUIDITY);
         await bridgeB.addBridgeLiquidity(EID_B, await token.getAddress(), LIQUIDITY);
@@ -387,9 +391,9 @@ describe("MagnetaBridgeOApp", function () {
             await expect(deliverToBridgeB(bob.address, tooMuch)).to.be.reverted;
         });
 
-        it("reverts when token not supported from source chain", async function () {
-            // Remove support from chain A on bridgeB
-            await bridgeB.setSupportedToken(EID_A, await token.getAddress(), false);
+        it("reverts when the incoming token is unmapped (F22)", async function () {
+            // Remove the canonical route mapping on bridgeB → incoming token rejected
+            await bridgeB.setRemoteToken(EID_A, await token.getAddress(), ethers.ZeroAddress);
             await expect(deliverToBridgeB(bob.address, ethers.parseEther("10"))).to.be.reverted;
         });
 
@@ -471,6 +475,99 @@ describe("MagnetaBridgeOApp", function () {
                     payload
                 )
             ).to.be.revertedWith("MagnetaBridgeOApp: incoming guid replayed");
+        });
+    });
+
+    // ─── Inbound pause (F93) ───────────────────────────────────────────────────
+
+    describe("Inbound pause kill-switch (F93)", function () {
+        it("blocks _lzReceive while paused, then allows it after unpause", async function () {
+            const bridgeABytes32 = ethers.zeroPadValue(await bridgeA.getAddress(), 32);
+            const amount = ethers.parseEther("25");
+            const guid = ethers.hexlify(ethers.randomBytes(32));
+            const payload = ethers.AbiCoder.defaultAbiCoder().encode(
+                ["address", "address", "uint256"],
+                [await token.getAddress(), bob.address, amount]
+            );
+
+            // Pause the receiving bridge — a forged/compromised peer drain must
+            // be stopped on the inbound path too, not just bridgeTokens().
+            await bridgeB.pause();
+            await expect(
+                endpointB.deliverMessage(
+                    await bridgeB.getAddress(),
+                    { srcEid: EID_A, sender: bridgeABytes32, nonce: 1n },
+                    guid,
+                    payload
+                )
+            ).to.be.reverted; // "MagnetaBridgeOApp: paused" bubbles via the endpoint
+
+            // Recipient received nothing and the guid was NOT consumed.
+            expect(await bridgeB.processedIncomingGuids(guid)).to.equal(false);
+
+            // After unpause the same message delivers normally.
+            await bridgeB.unpause();
+            const before = await token.balanceOf(bob.address);
+            await endpointB.deliverMessage(
+                await bridgeB.getAddress(),
+                { srcEid: EID_A, sender: bridgeABytes32, nonce: 2n },
+                guid,
+                payload
+            );
+            expect(await token.balanceOf(bob.address)).to.equal(before + amount);
+        });
+    });
+
+    // ─── Fee-on-transfer received-delta accounting (F92) ───────────────────────
+
+    describe("Fee-on-transfer accounting (F92)", function () {
+        const TAX_BPS = 100n; // 1% burn on each transfer
+
+        async function deployFotBridge() {
+            // Fee-on-transfer token
+            const Fot = await ethers.getContractFactory("MockFeeOnTransferToken");
+            const fot = await Fot.deploy("FeeTok", "FOT", ethers.parseEther("1000000"), TAX_BPS);
+
+            // Enable on bridgeA (send to B)
+            await bridgeA.setSupportedToken(EID_B, await fot.getAddress(), true);
+            await bridgeA.setBridgeableToken(EID_B, await fot.getAddress(), true);
+            await bridgeA.setRemoteToken(EID_B, await fot.getAddress(), await fot.getAddress()); // F22 route
+
+            // Fund alice
+            await fot.transfer(alice.address, ethers.parseEther("10000"));
+            return fot;
+        }
+
+        it("derives fee + bridged payload from the actually-received delta, not the nominal amount", async function () {
+            const fot = await deployFotBridge();
+            const tokenAddr = await fot.getAddress();
+
+            await fot.connect(alice).approve(await bridgeA.getAddress(), BRIDGE_AMOUNT);
+
+            // Received by the bridge after the token's 1% transfer burn.
+            const received = BRIDGE_AMOUNT - (BRIDGE_AMOUNT * TAX_BPS) / 10000n;
+            const protocolFee = (received * FEE_BPS) / 10000n;
+            const amountAfterFee = received - protocolFee;
+
+            // The TokenBridged event (and thus the cross-chain payload) must
+            // reflect amountAfterFee computed from `received`, never from the
+            // nominal BRIDGE_AMOUNT.
+            await expect(
+                bridgeA.connect(alice).bridgeTokens(
+                    tokenAddr, BRIDGE_AMOUNT, EID_B, bob.address, "0x", false,
+                    { value: LZ_FEE }
+                )
+            )
+                .to.emit(bridgeA, "TokenBridged")
+                .withArgs(tokenAddr, alice.address, bob.address, amountAfterFee, EID_B, anyValue);
+
+            // Route volume tracks the delta-derived amount, not the nominal one.
+            expect(await bridgeA.routeVolume(EID_B, tokenAddr)).to.equal(amountAfterFee);
+
+            // Sanity: had the bug been present, amountAfterFee would have been
+            // BRIDGE_AMOUNT - nominalFee, which is strictly greater.
+            const buggyAfterFee = BRIDGE_AMOUNT - (BRIDGE_AMOUNT * FEE_BPS) / 10000n;
+            expect(amountAfterFee).to.be.lessThan(buggyAfterFee);
         });
     });
 
@@ -605,12 +702,66 @@ describe("MagnetaBridgeOApp", function () {
         it("non-guardian non-owner cannot pause", async function () {
             await bridgeA.setPauseGuardian(bob.address);
             await expect(bridgeA.connect(alice).pause())
-                .to.be.revertedWith("MagnetaBridgeOApp: not owner or guardian");
+                .to.be.revertedWith("MagnetaBridgeOApp: not owner or pauser");
         });
 
         it("only owner can set the guardian", async function () {
             await expect(bridgeA.connect(alice).setPauseGuardian(alice.address))
                 .to.be.revertedWith("Ownable: caller is not the owner");
+        });
+
+        // ─── Multi-pauser role (human EOA + Defender Relayer + future keeper) ──
+        it("multiple independent pausers can each pause; unpause stays owner-only", async function () {
+            // bob = human guardian (via deprecated setter), alice = Relayer (via addPauser)
+            await bridgeA.setPauseGuardian(bob.address);
+            await expect(bridgeA.addPauser(alice.address))
+                .to.emit(bridgeA, "PauserAdded")
+                .withArgs(alice.address);
+            expect(await bridgeA.isPauser(bob.address)).to.equal(true);
+            expect(await bridgeA.isPauser(alice.address)).to.equal(true);
+
+            // Relayer (alice) pauses.
+            await expect(bridgeA.connect(alice).pause())
+                .to.emit(bridgeA, "Paused")
+                .withArgs(alice.address);
+            expect(await bridgeA.paused()).to.equal(true);
+
+            // A pauser cannot unpause.
+            await expect(bridgeA.connect(alice).unpause())
+                .to.be.revertedWith("Ownable: caller is not the owner");
+            await bridgeA.unpause();
+
+            // Human guardian (bob) can also pause independently.
+            await expect(bridgeA.connect(bob).pause())
+                .to.emit(bridgeA, "Paused")
+                .withArgs(bob.address);
+            await bridgeA.unpause();
+        });
+
+        it("only owner can add/remove pausers; removed pauser loses the right", async function () {
+            await expect(bridgeA.connect(alice).addPauser(alice.address))
+                .to.be.revertedWith("Ownable: caller is not the owner");
+            await expect(bridgeA.addPauser(ethers.ZeroAddress))
+                .to.be.revertedWith("MagnetaBridgeOApp: zero pauser");
+
+            await bridgeA.addPauser(alice.address);
+            await expect(bridgeA.removePauser(alice.address))
+                .to.emit(bridgeA, "PauserRemoved")
+                .withArgs(alice.address);
+            expect(await bridgeA.isPauser(alice.address)).to.equal(false);
+            await expect(bridgeA.connect(alice).pause())
+                .to.be.revertedWith("MagnetaBridgeOApp: not owner or pauser");
+        });
+
+        it("owner can pause+unpause with an empty pauser set", async function () {
+            // Fresh bridge — no pausers configured.
+            expect(await bridgeA.isPauser(owner.address)).to.equal(false);
+            await expect(bridgeA.pause())
+                .to.emit(bridgeA, "Paused")
+                .withArgs(owner.address);
+            await expect(bridgeA.unpause())
+                .to.emit(bridgeA, "Unpaused")
+                .withArgs(owner.address);
         });
     });
 

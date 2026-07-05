@@ -22,6 +22,14 @@ interface IMagnetaManagedToken {
     function enableRevokeUpdate() external;
     function enableRevokeFreeze() external;
     function enableRevokeMint() external;
+
+    /// @notice Configure the on-chain auto-freeze rule (Sprint 8). On the token
+    ///         contract this is `onlyOwner`, so the module can only forward it
+    ///         when the module IS the token owner — i.e. the cross-chain
+    ///         registered path where the OFT factory set initialOwner = module.
+    ///         Local same-chain rule-setting stays on the direct owner path
+    ///         (see useAutoFreezeRule on the frontend).
+    function setAutoFreezeRule(bool active, uint256 threshold) external;
 }
 
 /// @title TokenOpsModule
@@ -72,8 +80,14 @@ contract TokenOpsModule is IModule, ReentrancyGuard, Ownable2Step {
 
     enum RevokeKind { UPDATE, FREEZE, MINT }
 
+    /// @notice Minimum attested DVN quorum the gateway must surface for this
+    ///         module to wire up. Mitigates Kelp-DAO-class single-validator
+    ///         risk (chantier #3 — Sentinelle 2026-06-12 SC01:2026).
+    uint8 public constant MIN_DVN_QUORUM = 2;
+
     constructor(address _gateway, address _usdc) {
         require(_gateway != address(0) && _usdc != address(0), "zero address");
+        require(IMagnetaGateway(_gateway).requiredDVNCount() >= MIN_DVN_QUORUM, "TokenOpsModule: DVN quorum");
         gateway = _gateway;
         usdc = _usdc;
     }
@@ -184,6 +198,8 @@ contract TokenOpsModule is IModule, ReentrancyGuard, Ownable2Step {
             return _setBlacklist(ctx, inner, true);
         } else if (op == IMagnetaGateway.OpType.REVOKE_PERMISSION) {
             return _revokePermission(ctx, inner);
+        } else if (op == IMagnetaGateway.OpType.AUTO_FREEZE_RULE_SET) {
+            return _setAutoFreezeRule(ctx, inner);
         }
         revert UnsupportedOp();
     }
@@ -277,6 +293,32 @@ contract TokenOpsModule is IModule, ReentrancyGuard, Ownable2Step {
 
         emit OpForwarded(IMagnetaGateway.OpType.REVOKE_PERMISSION, p.token, ctx.caller);
         return abi.encode(uint8(p.kind));
+    }
+
+    struct AutoFreezeRuleParams {
+        address token;
+        bool    active;
+        uint256 threshold;
+    }
+
+    /// @notice Set the auto-freeze rule on a managed token. Drives the
+    ///         one-signature multi-chain fan-out: the user signs a single
+    ///         `Gateway.sendFanOut(AUTO_FREEZE_RULE_SET, …)` on the source
+    ///         chain and every sibling gateway forwards here, configuring the
+    ///         same rule on each chain's OFT in one shot.
+    /// @dev    Authorisation mirrors every other op: the caller surfaced by
+    ///         the gateway context must be the registered `tokenAdmin`. Replay
+    ///         protection is provided upstream by `MagnetaGateway.processedGuid`
+    ///         (each LZ message's GUID is consumed exactly once) — re-encoding
+    ///         the same rule is idempotent on-chain anyway.
+    function _setAutoFreezeRule(Context calldata ctx, bytes calldata raw) internal returns (bytes memory) {
+        AutoFreezeRuleParams memory p = abi.decode(raw, (AutoFreezeRuleParams));
+        _assertAdmin(ctx.caller, p.token);
+        _pullUsdc(ctx, flatFeeUsdc);
+
+        IMagnetaManagedToken(p.token).setAutoFreezeRule(p.active, p.threshold);
+        emit OpForwarded(IMagnetaGateway.OpType.AUTO_FREEZE_RULE_SET, p.token, ctx.caller);
+        return abi.encode(p.active, p.threshold);
     }
 
     // ───────────────────── internals ─────────────────────

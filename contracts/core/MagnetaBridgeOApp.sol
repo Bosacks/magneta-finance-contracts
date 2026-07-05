@@ -62,12 +62,24 @@ contract MagnetaBridgeOApp is OApp, ReentrancyGuard {
     // Mapping: endpointId => token => available balance for bridging
     mapping(uint32 => mapping(address => uint256)) public bridgeLiquidity;
 
+    // F22: canonical cross-chain token mapping. remoteToken[eid][localToken] =
+    // that token's address on chain `eid`. Set per route (both directions) by the
+    // owner; gates both the outgoing translation and the incoming acceptance.
+    mapping(uint32 => mapping(address => address)) public remoteToken;
+
     // Paused state
     bool public paused;
 
     // Guardian role: can pause but not unpause. Lets ops/SOC kill the bridge
     // in seconds during an incident without holding owner keys.
+    // Canonical human guardian (back-compat view); kept in sync with {isPauser}
+    // by {setPauseGuardian}. Prefer {addPauser}/{removePauser}.
     address public pauseGuardian;
+
+    // Multi-pauser set: human EOA + Defender Relayer + future on-chain keeper.
+    // Any address with isPauser[addr] == true may call {pause}. UNPAUSE stays
+    // owner-only.
+    mapping(address => bool) public isPauser;
 
     // Per-tx amount cap: maxAmountPerTx[token]. 0 = no cap.
     mapping(address => uint256) public maxAmountPerTx;
@@ -120,10 +132,13 @@ contract MagnetaBridgeOApp is OApp, ReentrancyGuard {
     event BridgeLiquidityAdded(uint32 endpointId, address indexed token, uint256 amount);
     event BridgeLiquidityRemoved(uint32 endpointId, address indexed token, uint256 amount);
     event BridgeableTokenSet(uint32 endpointId, address indexed token, bool bridgeable);
+    event RemoteTokenSet(uint32 indexed endpointId, address indexed localToken, address remote);
     event DefaultFeeBpsUpdated(uint16 oldBps, uint16 newBps);
     event EthereumFeeBpsUpdated(uint16 oldBps, uint16 newBps);
     event DstFeeBpsOverrideUpdated(uint32 indexed dstEid, uint16 oldBps, uint16 newBps);
     event PauseGuardianUpdated(address indexed oldGuardian, address indexed newGuardian);
+    event PauserAdded(address indexed account);
+    event PauserRemoved(address indexed account);
     event MaxAmountPerTxUpdated(address indexed token, uint256 oldCap, uint256 newCap);
     event DailyLimitUpdated(address indexed token, uint256 oldLimit, uint256 newLimit);
     event DailyWindowReset(address indexed token, uint256 newWindowStart);
@@ -135,10 +150,10 @@ contract MagnetaBridgeOApp is OApp, ReentrancyGuard {
         _;
     }
 
-    modifier onlyOwnerOrGuardian() {
+    modifier onlyOwnerOrPauser() {
         require(
-            msg.sender == owner() || msg.sender == pauseGuardian,
-            "MagnetaBridgeOApp: not owner or guardian"
+            msg.sender == owner() || isPauser[msg.sender],
+            "MagnetaBridgeOApp: not owner or pauser"
         );
         _;
     }
@@ -206,28 +221,44 @@ contract MagnetaBridgeOApp is OApp, ReentrancyGuard {
             dailyVolume[token] += amount;
         }
 
-        // Transfer tokens from user
+        // Transfer tokens from user, measuring the ACTUAL received amount via a
+        // balance delta. Fee-on-transfer / deflationary tokens credit less than
+        // the nominal `amount`; computing fee and the bridged payload from the
+        // nominal value would let the bridge release more than it received and
+        // bleed liquidity. Snapshot balance before/after and use the delta as
+        // the authoritative received amount for everything downstream.
+        uint256 balBefore = IERC20(token).balanceOf(address(this));
         IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
+        uint256 received = IERC20(token).balanceOf(address(this)) - balBefore;
+        require(received > 0, "MagnetaBridgeOApp: nothing received");
 
         // Calculate fee — per-route override takes precedence, otherwise
         // routes touching Ethereum pay the ethereumFeeBps, all others pay
-        // defaultFeeBps.
+        // defaultFeeBps. Fee is taken from the actually-received amount.
         uint16 feeBps = dstFeeBpsOverride[dstEid];
         if (feeBps == 0) {
             feeBps = (dstEid == ETHEREUM_EID || localEid == ETHEREUM_EID)
                 ? ethereumFeeBps
                 : defaultFeeBps;
         }
-        uint256 fee = (amount * feeBps) / 10000;
-        uint256 amountAfterFee = amount - fee;
+        uint256 fee = (received * feeBps) / 10000;
+        uint256 amountAfterFee = received - fee;
 
         // Transfer fee to fee recipient
         if (fee > 0) {
             IERC20(token).safeTransfer(feeRecipient, fee);
         }
 
-        // Prepare message payload
-        bytes memory payload = abi.encode(token, to, amountAfterFee);
+        // F22: translate the local token to its CANONICAL address on the
+        // destination chain. Encoding the source address verbatim would make the
+        // destination release the wrong asset (or lock funds) because the same
+        // token has a different address per chain. Require an owner-configured
+        // route mapping so an unmapped token can never be bridged.
+        address dstToken = remoteToken[dstEid][token];
+        require(dstToken != address(0), "MagnetaBridgeOApp: no canonical token for route");
+
+        // Prepare message payload (carries the DESTINATION-chain token address)
+        bytes memory payload = abi.encode(dstToken, to, amountAfterFee);
 
         // Estimate fee and send message via LayerZero
         MessagingFee memory fee_ = _quote(dstEid, payload, options, payInLzToken);
@@ -278,6 +309,13 @@ contract MagnetaBridgeOApp is OApp, ReentrancyGuard {
         address _executor,
         bytes calldata _extraData
     ) internal override {
+        // Inbound kill-switch. bridgeTokens() is guarded by whenNotPaused, but
+        // _lzReceive is an internal LayerZero override and cannot wear the
+        // modifier — so without this inline check a pause could not stop an
+        // inbound drain from a forged/compromised peer. Mirror the same paused
+        // flag here so {pause} freezes BOTH directions of the bridge.
+        require(!paused, "MagnetaBridgeOApp: paused");
+
         // CRITICAL: validate the message comes from one of OUR remote bridge
         // contracts. Without this, any contract on any source chain can call
         // the LayerZero endpoint with a forged payload and drain our liquidity
@@ -302,7 +340,11 @@ contract MagnetaBridgeOApp is OApp, ReentrancyGuard {
         (address token, address to, uint256 amount) = abi.decode(_payload, (address, address, uint256));
 
         require(!bridgeTransactions[_guid].completed, "MagnetaBridgeOApp: guid already processed");
-        require(supportedTokens[_origin.srcEid][token], "MagnetaBridgeOApp: token not supported from source");
+        // F22: `token` is this chain's LOCAL token address (translated on send).
+        // Only accept it if the owner configured a canonical mapping back to the
+        // source — rejects a forged/divergent token instead of releasing a wrong
+        // asset. The bridgeLiquidity check below is the second gate.
+        require(remoteToken[_origin.srcEid][token] != address(0), "MagnetaBridgeOApp: unmapped token from source");
         require(amount > 0, "MagnetaBridgeOApp: invalid amount");
         require(to != address(0), "MagnetaBridgeOApp: zero recipient");
 
@@ -350,6 +392,23 @@ contract MagnetaBridgeOApp is OApp, ReentrancyGuard {
         require(token != address(0), "MagnetaBridgeOApp: invalid token");
         bridgeableTokens[endpointId][token] = bridgeable;
         emit BridgeableTokenSet(endpointId, token, bridgeable);
+    }
+
+    /**
+     * @dev F22: set the canonical address of `localToken` on chain `endpointId`.
+     *      Configure BOTH directions per route: on the source set
+     *      remoteToken[dstEid][srcToken]=dstToken (outgoing translation), and on
+     *      the destination set remoteToken[srcEid][dstToken]=srcToken (incoming
+     *      acceptance). Pass remote=address(0) to unmap a route.
+     */
+    function setRemoteToken(
+        uint32 endpointId,
+        address localToken,
+        address remote
+    ) external onlyOwner {
+        require(localToken != address(0), "MagnetaBridgeOApp: invalid token");
+        remoteToken[endpointId][localToken] = remote;
+        emit RemoteTokenSet(endpointId, localToken, remote);
     }
 
 
@@ -403,13 +462,13 @@ contract MagnetaBridgeOApp is OApp, ReentrancyGuard {
      * @dev Pause the contract. Owner OR guardian — guardian exists so ops/SOC
      *      can react in seconds during an incident without holding owner keys.
      */
-    function pause() external onlyOwnerOrGuardian {
+    function pause() external onlyOwnerOrPauser {
         paused = true;
         emit Paused(msg.sender);
     }
 
     /**
-     * @dev Unpause the contract. Owner only — guardian can stop the bleeding,
+     * @dev Unpause the contract. Owner only — a pauser can stop the bleeding,
      *      but resuming the bridge requires a deliberate owner action.
      */
     function unpause() external onlyOwner {
@@ -418,15 +477,42 @@ contract MagnetaBridgeOApp is OApp, ReentrancyGuard {
     }
 
     /**
-     * @dev Set the pause guardian. To rotate to a different guardian, pass
-     *      the new address. To disable the secondary pause path entirely,
-     *      rotate to the owner Safe — using address(0) is rejected to
-     *      prevent accidental bricking of the emergency response flow.
+     * @dev Grant an address the pauser role (human guardian, Defender Relayer,
+     *      or on-chain keeper). Owner-only.
+     */
+    function addPauser(address account) public onlyOwner {
+        require(account != address(0), "MagnetaBridgeOApp: zero pauser");
+        isPauser[account] = true;
+        emit PauserAdded(account);
+    }
+
+    /**
+     * @dev Revoke an address's pauser role. Owner-only. The owner always
+     *      retains pause+unpause regardless of the pauser set.
+     */
+    function removePauser(address account) external onlyOwner {
+        require(account != address(0), "MagnetaBridgeOApp: zero pauser");
+        isPauser[account] = false;
+        emit PauserRemoved(account);
+    }
+
+    /**
+     * @dev Deprecated single-guardian setter, retained for deploy-script /
+     *      Safe-batch back-compat. Rotates the canonical {pauseGuardian},
+     *      revoking the old one and granting the new one in {isPauser}.
+     *      address(0) is rejected to prevent accidental bricking of the
+     *      emergency response flow. Prefer {addPauser}/{removePauser}.
      */
     function setPauseGuardian(address _guardian) external onlyOwner {
         require(_guardian != address(0), "MagnetaBridgeOApp: zero guardian");
         address old = pauseGuardian;
+        if (old != address(0)) {
+            isPauser[old] = false;
+            emit PauserRemoved(old);
+        }
         pauseGuardian = _guardian;
+        isPauser[_guardian] = true;
+        emit PauserAdded(_guardian);
         emit PauseGuardianUpdated(old, _guardian);
     }
 

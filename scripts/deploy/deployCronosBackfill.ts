@@ -14,7 +14,7 @@
  *   4. TokenOpsModule
  *
  * Then configures the Gateway (setModule for ops 0..12, setUsdc,
- * setPauseGuardian) and marks LPModule fee-exempt on MagnetaSwap.
+ * addPauser) and marks LPModule fee-exempt on MagnetaSwap.
  *
  * Usage:
  *   pnpm hardhat run scripts/deploy/deployCronosBackfill.ts --network cronos
@@ -207,12 +207,12 @@ async function main() {
     console.log(`  ✓ Gateway USDC: ${cfg.usdc}`);
   }
 
-  const currentGuardian = (await gateway.pauseGuardian()) as string;
-  if (currentGuardian.toLowerCase() !== PAUSE_GUARDIAN.toLowerCase()) {
-    const tx = await gateway.setPauseGuardian(PAUSE_GUARDIAN);
+  const alreadyPauser = (await gateway.isPauser(PAUSE_GUARDIAN)) as boolean;
+  if (!alreadyPauser) {
+    const tx = await gateway.addPauser(PAUSE_GUARDIAN);
     await tx.wait();
   }
-  console.log(`  ✓ Gateway pauseGuardian: ${PAUSE_GUARDIAN}`);
+  console.log(`  ✓ Gateway pauser added: ${PAUSE_GUARDIAN}`);
 
   // ─── Mark LPModule fee-exempt on existing MagnetaSwap ────────────────
   // Cronos's MagnetaSwap is owned by the in-house Safe (transferred at

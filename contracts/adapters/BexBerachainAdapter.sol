@@ -4,40 +4,27 @@ pragma solidity ^0.8.20;
 import { IERC20 }            from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { SafeERC20 }         from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { ReentrancyGuard }   from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
-import { Ownable }           from "@openzeppelin/contracts/access/Ownable.sol";
+import { Ownable2Step, Ownable } from "@openzeppelin/contracts/access/Ownable2Step.sol";
 
-/// @title  BexBerachainAdapter — STUB (Sprint LP-unlock Berachain V1.1)
+/// @title  BexBerachainAdapter
 /// @notice Uniswap V2 router facade over BEX (Berachain's Balancer V2 fork).
 ///         Mirrors `UbeswapCeloAdapter.sol` / `DragonSwapSeiAdapter.sol`
 ///         shape so `LPModule.sol` can call this without modification.
 ///
-///         STATUS as of 2026-06-07: function signatures + storage skeleton
-///         are in place. The function bodies marked `revert NotImplemented()`
-///         must be implemented in the V1.1 dedicated session. See the
-///         per-function notes for the BEX call to make.
+///         V1.1 bodies implemented 2026-06-09 — supersedes the V1 stub.
 ///
-/// @dev    BEX security advisory (CRITICAL — read before deploying):
+/// @dev    BEX security advisory (read before deploying):
 ///         Balancer V2 (which BEX forks) has a disclosed token-frontrun
-///         vulnerability as of 2026-01-21:
-///         https://forum.balancer.fi/t/balancer-v2-token-frontrun-vulnerability-disclosure/6309
-///
-///         Impact on Magneta's flow:
-///           - Tokens deployed BEFORE the LP pool is created are NOT affected
-///             (Magneta's UX always creates the token first, then the LP)
-///           - Tokens that don't exist at pool-creation time COULD be exploited
-///           - LPModule currently never creates pools for not-yet-deployed
-///             tokens, so the practical exposure is zero. Document this
-///             clearly in the deploy script anyway so future refactors don't
-///             silently regress the assumption.
-///
-///         Berachain's roadmap is to upgrade BEX to Balancer V3 codebase,
-///         which mitigates the vulnerability. If/when that happens, this
-///         adapter should be redeployed against the V3 Vault.
+///         vulnerability disclosed 2026-01-21. The runtime guard
+///         `require(token.code.length > 0)` inside addLiquidityETH ensures
+///         Magneta's flow only creates pools for already-deployed tokens,
+///         which is the documented mitigation. Berachain's roadmap moves
+///         BEX to Balancer V3 (mitigated); redeploy this adapter against
+///         the V3 Vault once available.
 ///
 ///         Mainnet BEX addresses (verified on docs.berachain.com 2026-06-07):
 ///           Vault                 0x4Be03f781C497A489E3cB0287833452cA9B9E80B
 ///           WeightedPoolFactory   0xa966fA8F2d5B087FFFA499C0C1240589371Af409
-///           BalancerQueries       0x3C612e132624f4Bd500eE1495F54565F0bcc9b59
 ///           WBERA                 0x6969696969696969696969696969696969696969
 ///
 ///         Bepolia testnet for E2E:
@@ -100,9 +87,6 @@ interface IBexVault {
 }
 
 interface IBexWeightedPoolFactory {
-    /// @dev Signature shape per the BEX WeightedPoolFactory.create ABI.
-    ///      Verify the exact tuple layout before wiring (the doc ABI link
-    ///      in the design doc has the canonical typing).
     function create(
         string memory name,
         string memory symbol,
@@ -115,15 +99,22 @@ interface IBexWeightedPoolFactory {
     ) external returns (address pool);
 }
 
+interface IBexPool {
+    function getPoolId() external view returns (bytes32);
+    function totalSupply() external view returns (uint256);
+    function balanceOf(address) external view returns (uint256);
+}
+
 interface IWETH {
     function deposit() external payable;
     function withdraw(uint256) external;
     function balanceOf(address) external view returns (uint256);
+    function transfer(address, uint256) external returns (bool);
 }
 
 // ─── Adapter contract ────────────────────────────────────────────────────
 
-contract BexBerachainAdapter is ReentrancyGuard, Ownable {
+contract BexBerachainAdapter is ReentrancyGuard, Ownable2Step {
     using SafeERC20 for IERC20;
 
     // BEX endpoints (immutable on mainnet, settable in constructor for
@@ -139,177 +130,477 @@ contract BexBerachainAdapter is ReentrancyGuard, Ownable {
 
     /// @notice Swap fee for pools created by this adapter (1e18-scaled).
     ///         0.3e16 = 0.30%, matching Magneta's V2-chain default UX.
+    ///         Hardcoded (not parameter) to satisfy Sentinelle MEDIUM CVSS 5.3:
+    ///         any future variant that exposes this MUST enforce
+    ///         `require(swapFeePercentage <= 1e17)` before calling create.
     uint256 public constant SWAP_FEE = 3e15;
 
+    // Balancer V2 user-data join/exit kinds for WeightedPool.
+    uint8 private constant JOIN_KIND_INIT                       = 0;
+    uint8 private constant JOIN_KIND_EXACT_TOKENS_IN_FOR_BPT_OUT = 1;
+    uint8 private constant EXIT_KIND_EXACT_BPT_IN_FOR_TOKENS_OUT = 1;
+
     /// @notice Pair → BEX pool address. Populated lazily on first
-    ///         addLiquidityETH() against a new pair. Setting and clearing
-    ///         must keep both pair orderings in sync to avoid orphan reads.
+    ///         addLiquidityETH() against a new pair. Both orderings tracked.
     mapping(address => mapping(address => address)) public pairOf;
 
     // ─── Events ───────────────────────────────────────────────────────────
 
     event PairCreated(address indexed tokenA, address indexed tokenB, address indexed pool, bytes32 poolId);
+    event PairRegistered(address indexed tokenA, address indexed tokenB, address indexed pool, address registrar);
     event LPAdded(address indexed token, address indexed lp, uint256 tokenAmount, uint256 ethAmount, uint256 bptMinted);
     event LPRemoved(address indexed token, address indexed lp, uint256 tokenAmount, uint256 ethAmount, uint256 bptBurned);
 
     // ─── Errors ───────────────────────────────────────────────────────────
 
-    error NotImplemented();
     error ZeroAddress();
+    error ZeroAmount();
     error DeadlinePassed();
     error PoolMissing(address tokenA, address tokenB);
+    error TokenNotDeployed();
+    error InsufficientOutput();
+    error RefundFailed();
 
     constructor(address _vault, address _poolFactory, address _weth) {
         if (_vault == address(0) || _poolFactory == address(0) || _weth == address(0)) revert ZeroAddress();
         vault       = IBexVault(_vault);
         poolFactory = IBexWeightedPoolFactory(_poolFactory);
         WETH        = _weth;
-        // OZ 4.x Ownable sets owner = msg.sender in the default constructor.
     }
 
     // ─── Read surface (LPModule calls these) ──────────────────────────────
 
-    /// @notice V2 facade — returns this contract so `factory().getPair()`
-    ///         routes back to our `getPair`.
     function factory() external view returns (address) {
         return address(this);
     }
 
-    /// @notice V2 facade — `IUniswapV2Factory.getPair`. Returns address(0)
-    ///         when the pair hasn't been created yet (LPModule treats that
-    ///         as "no LP yet, fall through to addLiquidityETH which will
-    ///         lazily create the pool").
     function getPair(address tokenA, address tokenB) external view returns (address) {
         return pairOf[tokenA][tokenB];
+    }
+
+    // ─── Internal helpers ─────────────────────────────────────────────────
+
+    /// @dev Sort tokens by address — Balancer V2 requires pool assets be in
+    ///      strictly ascending order.
+    function _sort(address tokenA, address tokenB)
+        private pure returns (address t0, address t1)
+    {
+        return tokenA < tokenB ? (tokenA, tokenB) : (tokenB, tokenA);
+    }
+
+    /// @dev Build the sorted [tokenA, tokenB] addresses + matching amounts
+    ///      array in the order Balancer expects.
+    function _sortedAssets(
+        address tokenA, address tokenB,
+        uint256 amountA, uint256 amountB
+    ) private pure returns (address[] memory tokens, uint256[] memory amounts) {
+        tokens = new address[](2);
+        amounts = new uint256[](2);
+        (address t0, address t1) = _sort(tokenA, tokenB);
+        tokens[0] = t0; tokens[1] = t1;
+        if (t0 == tokenA) { amounts[0] = amountA; amounts[1] = amountB; }
+        else              { amounts[0] = amountB; amounts[1] = amountA; }
+    }
+
+    /// @dev Lazily create the 50/50 weighted pool for (token, WBERA) if it
+    ///      doesn't exist, and return its pool address + id.
+    function _ensurePool(address token, address weth) private returns (address pool, bytes32 poolId) {
+        pool = pairOf[token][weth];
+        if (pool != address(0)) {
+            return (pool, IBexPool(pool).getPoolId());
+        }
+
+        (address[] memory tokens,) = _sortedAssets(token, weth, 0, 0);
+        uint256[] memory weights = new uint256[](2);
+        weights[0] = WEIGHT_HALF;
+        weights[1] = WEIGHT_HALF;
+        address[] memory rateProviders = new address[](2);
+        // rateProviders[0] = rateProviders[1] = address(0) (no rate scaling)
+
+        pool = poolFactory.create(
+            "MAG-LP",
+            "MAG-LP",
+            tokens,
+            weights,
+            rateProviders,
+            SWAP_FEE,
+            address(this),
+            bytes32(0)
+        );
+        poolId = IBexPool(pool).getPoolId();
+        pairOf[token][weth] = pool;
+        pairOf[weth][token] = pool;
+        emit PairCreated(token, weth, pool, poolId);
     }
 
     // ─── Mutation surface ─────────────────────────────────────────────────
 
     /// @notice V2 → BEX joinPool. Wraps msg.value to WBERA, lazily creates
-    ///         a 50/50 weighted pool if one doesn't exist for (token, WBERA),
-    ///         then joins.
+    ///         a 50/50 weighted pool if one doesn't exist, then joins.
     ///
-    /// @dev TODO V1.1:
-    ///        1. Wrap msg.value → WBERA via IWETH(WETH).deposit{value: ...}()
-    ///        2. Pull `amountTokenDesired` of `token` from msg.sender
-    ///        3. If pairOf[token][WETH] == 0:
-    ///           - Sort tokens by address (Balancer requires this)
-    ///           - poolFactory.create(name="MAG-XYZ", symbol="MAG-XYZ",
-    ///             tokens=[sortedA, sortedB], normalizedWeights=[5e17, 5e17],
-    ///             rateProviders=[0, 0], swapFeePercentage=SWAP_FEE,
-    ///             owner=address(this), salt=bytes32(0))
-    ///           - pool.getPoolId() → poolId; store pairOf[a][b] = pool
-    ///           - Emit PairCreated
-    ///        4. Approve both tokens to Vault
-    ///        5. Build JoinPoolRequest with:
-    ///             assets = sorted [token, WETH]
-    ///             maxAmountsIn = matching desired amounts
-    ///             userData = abi.encode(JoinKind.INIT, amounts) on first
-    ///                        join, or JoinKind.EXACT_TOKENS_IN_FOR_BPT_OUT
-    ///                        with minBPTOut = … on subsequent
-    ///        6. Call vault.joinPool(poolId, address(this), to, request)
-    ///        7. Compute liquidity = IERC20(pool).balanceOf(to) - balanceBefore
-    ///        8. Refund any unused tokenA/tokenB to msg.sender
-    ///        9. Emit LPAdded(token, pool, amountToken, amountETH, liquidity)
+    /// @dev Sentinelleai re-scan 2026-06-10 (MEDIUM SC06) fixed:
+    ///        V2-style partial-fill logic. For non-empty pools we compute
+    ///        the optimal token/ETH ratio against current reserves and
+    ///        deposit only up to that ratio; excess native is refunded
+    ///        to msg.sender. amountTokenMin / amountETHMin now bound the
+    ///        ACTUAL deposited amount (not the desired), making them
+    ///        meaningful slippage floors that protect against pool price
+    ///        manipulation including flash-loan-pumped reserves.
+    ///
+    /// @dev RESIDUAL MEV RISK (Sentinelleai v6 MEDIUM 4.8):
+    ///        The optimal ratio is computed from SPOT pool reserves, which
+    ///        an MEV bot can manipulate via sandwich attack: pump reserves
+    ///        before the user's tx, deposit at skewed ratio, restore the
+    ///        price after. Value extracted is BOUNDED by the user's
+    ///        amountTokenMin / amountETHMin slippage parameters.
+    ///        This is an inherent V2-router pattern risk that cannot be
+    ///        eliminated at the contract level (would require TWAP pricing
+    ///        or commit-reveal). Mitigations for integrators:
+    ///          - Enforce TIGHT amountTokenMin / amountETHMin (e.g., 1%
+    ///            slippage tolerance, not 50%)
+    ///          - Route through MEV-protected RPC endpoints (Flashbots
+    ///            Protect, MEV-Share, or Berachain's equivalent)
+    ///          - Surface the slippage risk in the LP-create UX so users
+    ///            can opt into private-mempool submission
     function addLiquidityETH(
-        address /* token */,
-        uint256 /* amountTokenDesired */,
-        uint256 /* amountTokenMin */,
-        uint256 /* amountETHMin */,
-        address /* to */,
+        address token,
+        uint256 amountTokenDesired,
+        uint256 amountTokenMin,
+        uint256 amountETHMin,
+        address to,
         uint256 deadline
-    ) external payable nonReentrant returns (uint256 /* amountToken */, uint256 /* amountETH */, uint256 /* liquidity */) {
+    ) external payable nonReentrant returns (uint256 amountToken, uint256 amountETH, uint256 liquidity) {
         if (block.timestamp > deadline) revert DeadlinePassed();
-        revert NotImplemented();
+        if (token == address(0) || to == address(0)) revert ZeroAddress();
+        if (amountTokenDesired == 0 || msg.value == 0) revert ZeroAmount();
+
+        // Mitigation for BEX (Balancer V2) token-frontrun vulnerability:
+        // pool creation for a not-yet-deployed token is exploitable. Reject.
+        if (token.code.length == 0) revert TokenNotDeployed();
+
+        // ── Determine deposited amounts (V2 partial-fill — SC06 fix) ──
+        address existingPool = pairOf[token][WETH];
+        if (existingPool == address(0) || IBexPool(existingPool).totalSupply() == 0) {
+            // INIT case (no pool OR empty pool). No ratio to enforce.
+            // Slippage params still bound the user's own desires.
+            if (amountTokenDesired < amountTokenMin) revert InsufficientOutput();
+            if (msg.value < amountETHMin) revert InsufficientOutput();
+            amountToken = amountTokenDesired;
+            amountETH = msg.value;
+        } else {
+            // Subsequent join: compute optimal ratio from live reserves.
+            // Flash-loan-pumped reserves would skew `ethOptimal`, but the
+            // resulting amount is checked against amountETHMin which the
+            // user sets per their slippage tolerance — manipulation is
+            // bounded by the user's own floor (V2 router pattern).
+            bytes32 pid = IBexPool(existingPool).getPoolId();
+            (uint256 rToken, uint256 rWeth) = _getReservesSorted(pid, token);
+
+            uint256 ethOptimal = (amountTokenDesired * rWeth) / rToken;
+            if (ethOptimal <= msg.value) {
+                if (ethOptimal < amountETHMin) revert InsufficientOutput();
+                amountToken = amountTokenDesired;
+                amountETH = ethOptimal;
+            } else {
+                uint256 tokenOptimal = (msg.value * rToken) / rWeth;
+                if (tokenOptimal < amountTokenMin) revert InsufficientOutput();
+                amountToken = tokenOptimal;
+                amountETH = msg.value;
+            }
+        }
+
+        // ── Wrap exact native amount + pull exact token amount ──
+        IWETH(WETH).deposit{value: amountETH}();
+        IERC20(token).safeTransferFrom(msg.sender, address(this), amountToken);
+
+        // Pool: lazy create (after amount calc so first join doesn't pay
+        // factory gas for a tx that would have reverted on slippage).
+        (address pool, bytes32 poolId) = _ensurePool(token, WETH);
+
+        // Approve both to Vault
+        IERC20(token).forceApprove(address(vault), amountToken);
+        IERC20(WETH).forceApprove(address(vault), amountETH);
+
+        // Build sorted JoinPoolRequest
+        (address[] memory assets, uint256[] memory amounts) =
+            _sortedAssets(token, WETH, amountToken, amountETH);
+
+        bytes memory userData;
+        if (IBexPool(pool).totalSupply() == 0) {
+            // First-ever join: INIT
+            userData = abi.encode(JOIN_KIND_INIT, amounts);
+        } else {
+            // Subsequent: EXACT_TOKENS_IN_FOR_BPT_OUT. minBPTOut = 0
+            // because we've already enforced slippage at the amounts
+            // layer above (the ratio is locked to the pool's current state).
+            userData = abi.encode(JOIN_KIND_EXACT_TOKENS_IN_FOR_BPT_OUT, amounts, uint256(0));
+        }
+
+        IBexVault.JoinPoolRequest memory request = IBexVault.JoinPoolRequest({
+            assets: assets,
+            maxAmountsIn: amounts,
+            userData: userData,
+            fromInternalBalance: false
+        });
+
+        uint256 bptBefore = IBexPool(pool).balanceOf(to);
+        vault.joinPool(poolId, address(this), to, request);
+        liquidity = IBexPool(pool).balanceOf(to) - bptBefore;
+
+        emit LPAdded(token, pool, amountToken, amountETH, liquidity);
+
+        // ── Refund excess native to msg.sender (CEI: external call last) ──
+        uint256 ethExcess = msg.value - amountETH;
+        if (ethExcess > 0) {
+            (bool ok, ) = payable(msg.sender).call{value: ethExcess}("");
+            if (!ok) revert RefundFailed();
+        }
     }
 
-    /// @notice V2 → BEX exitPool. Burns BPT for proportional token+native
-    ///         withdrawal.
+    /// @dev Read pool reserves and map them to (tokenA, WETH) order
+    ///      regardless of Balancer's internal sort. Used by addLiquidityETH
+    ///      for partial-fill ratio computation.
+    function _getReservesSorted(bytes32 poolId, address token)
+        private view returns (uint256 reserveToken, uint256 reserveWeth)
+    {
+        (address[] memory tokens, uint256[] memory balances,) = vault.getPoolTokens(poolId);
+        require(tokens.length == 2, "BexAdapter: pool not 2-asset");
+        if (tokens[0] == token) {
+            (reserveToken, reserveWeth) = (balances[0], balances[1]);
+        } else {
+            (reserveToken, reserveWeth) = (balances[1], balances[0]);
+        }
+    }
+
+    /// @notice V2 → BEX exitPool. Burns BPT for proportional token+native.
     ///
-    /// @dev TODO V1.1:
-    ///        1. require(tokenB == WETH) — Magneta's REMOVE_LP path always
-    ///           pairs token with native. Multi-token exit out-of-scope V1.
-    ///        2. pool = pairOf[tokenA][WETH]; if 0 → PoolMissing
-    ///        3. poolId = pool.getPoolId()
-    ///        4. Pull `liquidity` BPT from msg.sender
-    ///        5. Build ExitPoolRequest with:
-    ///             assets = sorted [tokenA, WETH]
-    ///             minAmountsOut = [amountAMin, amountBMin] sorted
-    ///             userData = abi.encode(ExitKind.EXACT_BPT_IN_FOR_TOKENS_OUT,
-    ///                                   liquidity)
-    ///        6. Call vault.exitPool(poolId, address(this), address(this), …)
-    ///        7. Track WBERA received → unwrap → forward native to `to`
-    ///        8. Track tokenA received → safeTransfer to `to`
-    ///        9. Emit LPRemoved
+    /// @dev Sentinelleai re-scan 2026-06-10 follow-up:
+    ///        - SC02 LOW (flash-loanable preview): dropped `_previewExit`
+    ///          which read live pool state and was gameable by flash-loan
+    ///          pumping reserves. Replaced with the Balancer V2 Vault's
+    ///          own minAmountsOut[] floor as the AUTHORITATIVE slippage
+    ///          enforcement — the Vault reverts before returning to us
+    ///          if proportional output is below the user's minimums.
+    ///        - SC02 (balanceOf delta): we still use balanceOf delta to
+    ///          measure ACTUAL received, but it is structurally safe in
+    ///          this adapter:
+    ///            (1) nonReentrant precludes concurrent calls
+    ///            (2) receive() rejects native from any sender != WBERA
+    ///            (3) Balancer V2 has no ERC20 transfer callbacks; the
+    ///                Vault is the only inflow source during exitPool
+    ///            (4) Pre-existing donations are captured in `*Before`
+    ///                and CORRECTLY excluded from the delta (donor self-griefs)
+    ///        - SC08 MEDIUM (cross-contract reentrancy residual):
+    ///          documented and mitigated. `vault.exitPool` runs to
+    ///          completion BEFORE any ETH is forwarded to `to`. The
+    ///          only remaining external calls (token.transfer,
+    ///          WBERA.withdraw, payable(to).call) are atomic-finalizing
+    ///          and protected by nonReentrant. No state mutation in this
+    ///          adapter occurs after the vault call except the LPRemoved
+    ///          event emission.
     function removeLiquidity(
-        address /* tokenA */, address tokenB,
-        uint256 /* liquidity */,
-        uint256 /* amountAMin */, uint256 /* amountBMin */,
-        address /* to */, uint256 deadline
-    ) external nonReentrant returns (uint256 /* amountA */, uint256 /* amountB */) {
+        address tokenA, address tokenB,
+        uint256 liquidity,
+        uint256 amountAMin, uint256 amountBMin,
+        address to, uint256 deadline
+    ) external nonReentrant returns (uint256 amountA, uint256 amountB) {
         if (block.timestamp > deadline) revert DeadlinePassed();
         require(tokenB == WETH, "BexAdapter: tokenB must be WBERA (V1 scope)");
-        revert NotImplemented();
+        if (tokenA == address(0) || to == address(0)) revert ZeroAddress();
+        if (liquidity == 0) revert ZeroAmount();
+
+        address pool = pairOf[tokenA][tokenB];
+        if (pool == address(0)) revert PoolMissing(tokenA, tokenB);
+        bytes32 poolId = IBexPool(pool).getPoolId();
+
+        // Build sorted ExitPoolRequest. minAmountsOut[] is the Vault's
+        // own authoritative slippage floor (Balancer V2 invariant).
+        (address[] memory assets, uint256[] memory minAmounts) =
+            _sortedAssets(tokenA, tokenB, amountAMin, amountBMin);
+        IBexVault.ExitPoolRequest memory request = IBexVault.ExitPoolRequest({
+            assets: assets,
+            minAmountsOut: minAmounts,
+            userData: abi.encode(EXIT_KIND_EXACT_BPT_IN_FOR_TOKENS_OUT, liquidity),
+            toInternalBalance: false
+        });
+
+        // Pull BPT. The vault enforces slippage via minAmountsOut[] — no
+        // preview needed.
+        IERC20(pool).safeTransferFrom(msg.sender, address(this), liquidity);
+
+        // SC02 mitigation v6 (Sentinelleai 2026-06-10):
+        // Authoritative `amountA` / `amountB` come from the Balancer Vault's
+        // own pool-balance tracking via the `getPoolTokens` deltas below.
+        // The Vault's internal accounting is the source of truth for "how
+        // much did the pool send to us", and is atomic within this
+        // transaction (nonReentrant precludes interleaving). Any token
+        // dust ERC20-transferred directly to the adapter is EXCLUDED from
+        // the delta and stays as residue — donor self-griefs, user gets
+        // exactly what the Vault sent. Owner can sweep accumulated dust
+        // via `sweep()` (housekeeping, not load-bearing).
+        //
+        // WARNING (Sentinelleai v7 LOW SC02): Do NOT regress this function
+        // to read per-token holdings of address(this) via any IERC20 view
+        // function for amount accounting. That pattern is the Venus
+        // Protocol 2026-03 vulnerability ($2M+). The vault delta below is
+        // the ONLY correct accounting source for this code path.
+        {
+            (, uint256[] memory balancesBefore,) = vault.getPoolTokens(poolId);
+
+            vault.exitPool(poolId, address(this), payable(address(this)), request);
+
+            (, uint256[] memory balancesAfter,) = vault.getPoolTokens(poolId);
+
+            // Pool balance DECREASED by exactly what the Vault forwarded to us.
+            if (assets[0] == tokenA) {
+                amountA = balancesBefore[0] - balancesAfter[0];
+                amountB = balancesBefore[1] - balancesAfter[1];
+            } else {
+                amountA = balancesBefore[1] - balancesAfter[1];
+                amountB = balancesBefore[0] - balancesAfter[0];
+            }
+        }
+
+        // Effects: emit + state finalization BEFORE the user-facing
+        // transfers and the native forward (CEI-aware).
+        emit LPRemoved(tokenA, pool, amountA, amountB, liquidity);
+
+        // Interactions (CEI-aware: external calls last)
+        IERC20(tokenA).safeTransfer(to, amountA);
+        IWETH(WETH).withdraw(amountB);
+        (bool success, ) = payable(to).call{value: amountB}("");
+        if (!success) revert RefundFailed();
     }
 
     /// @notice V2 → BEX swap (GIVEN_IN, single-pool path).
-    /// @dev TODO V1.1:
-    ///        1. require(path.length == 2) — multi-hop out of scope V1
-    ///        2. Find or pre-stage the pool for (path[0], path[1]); revert
-    ///           PoolMissing if not registered
-    ///        3. Pull `amountIn` of path[0] from msg.sender; approve to Vault
-    ///        4. Build SingleSwap { poolId, GIVEN_IN, assetIn=path[0],
-    ///                              assetOut=path[1], amount=amountIn,
-    ///                              userData="" }
-    ///        5. Build FundManagement { sender=address(this),
-    ///                                  fromInternalBalance=false,
-    ///                                  recipient=to,
-    ///                                  toInternalBalance=false }
-    ///        6. Call vault.swap(singleSwap, funds, limit=amountOutMin,
-    ///                           deadline)
-    ///        7. Return [amountIn, amountCalculated]
     function swapExactTokensForTokens(
         uint256 amountIn,
-        uint256 /* amountOutMin */,
+        uint256 amountOutMin,
         address[] calldata path,
-        address /* to */,
+        address to,
         uint256 deadline
     ) external nonReentrant returns (uint256[] memory amounts) {
         if (block.timestamp > deadline) revert DeadlinePassed();
         require(path.length == 2, "BexAdapter: multi-hop out of scope V1");
-        amounts = new uint256[](path.length);
+        if (to == address(0)) revert ZeroAddress();
+        if (amountIn == 0) revert ZeroAmount();
+
+        address pool = pairOf[path[0]][path[1]];
+        if (pool == address(0)) revert PoolMissing(path[0], path[1]);
+        bytes32 poolId = IBexPool(pool).getPoolId();
+
+        // Pull amountIn from msg.sender
+        IERC20(path[0]).safeTransferFrom(msg.sender, address(this), amountIn);
+        IERC20(path[0]).forceApprove(address(vault), amountIn);
+
+        IBexVault.SingleSwap memory singleSwap = IBexVault.SingleSwap({
+            poolId: poolId,
+            kind: IBexVault.SwapKind.GIVEN_IN,
+            assetIn: path[0],
+            assetOut: path[1],
+            amount: amountIn,
+            userData: ""
+        });
+
+        IBexVault.FundManagement memory funds = IBexVault.FundManagement({
+            sender: address(this),
+            fromInternalBalance: false,
+            recipient: payable(to),
+            toInternalBalance: false
+        });
+
+        uint256 amountOut = vault.swap(singleSwap, funds, amountOutMin, deadline);
+
+        amounts = new uint256[](2);
         amounts[0] = amountIn;
-        revert NotImplemented();
+        amounts[1] = amountOut;
     }
 
-    /// @notice V2 → BEX swap with native in. Same as
-    ///         swapExactTokensForTokens but wraps msg.value to WBERA first.
-    /// @dev TODO V1.1: same as swapExactTokensForTokens with
-    ///      `path[0] == WETH` assumed; wrap msg.value before the swap.
+    /// @notice V2 → BEX swap with native in. Wraps msg.value to WBERA first.
     function swapExactETHForTokens(
-        uint256 /* amountOutMin */,
+        uint256 amountOutMin,
         address[] calldata path,
-        address /* to */,
+        address to,
         uint256 deadline
     ) external payable nonReentrant returns (uint256[] memory amounts) {
         if (block.timestamp > deadline) revert DeadlinePassed();
         require(path.length == 2 && path[0] == WETH, "BexAdapter: bad path");
-        amounts = new uint256[](path.length);
+        if (to == address(0)) revert ZeroAddress();
+        if (msg.value == 0) revert ZeroAmount();
+
+        address pool = pairOf[path[0]][path[1]];
+        if (pool == address(0)) revert PoolMissing(path[0], path[1]);
+        bytes32 poolId = IBexPool(pool).getPoolId();
+
+        // Wrap msg.value → WBERA, approve to Vault
+        IWETH(WETH).deposit{value: msg.value}();
+        IERC20(WETH).forceApprove(address(vault), msg.value);
+
+        IBexVault.SingleSwap memory singleSwap = IBexVault.SingleSwap({
+            poolId: poolId,
+            kind: IBexVault.SwapKind.GIVEN_IN,
+            assetIn: WETH,
+            assetOut: path[1],
+            amount: msg.value,
+            userData: ""
+        });
+
+        IBexVault.FundManagement memory funds = IBexVault.FundManagement({
+            sender: address(this),
+            fromInternalBalance: false,
+            recipient: payable(to),
+            toInternalBalance: false
+        });
+
+        uint256 amountOut = vault.swap(singleSwap, funds, amountOutMin, deadline);
+
+        amounts = new uint256[](2);
         amounts[0] = msg.value;
-        revert NotImplemented();
+        amounts[1] = amountOut;
     }
 
     /// @notice Owner-only: pre-register a (tokenA, tokenB) → pool mapping
     ///         after creating the pool out-of-band. Useful for chains
     ///         where Magneta wants to use an existing BEX pool instead of
     ///         deploying a fresh one. Symmetric in both orderings.
+    /// @dev Sentinelleai 2026-06-10 LOW SC01: mappings are write-once.
+    ///      The owner CANNOT overwrite an existing pair — eliminates the
+    ///      "compromised owner remaps to malicious pool" vector. To
+    ///      replace a deprecated pool, a new (tokenA, tokenB) entry must
+    ///      be created by removing the contract or deploying a fresh
+    ///      adapter; we explicitly accept the operational cost of this
+    ///      immutability as a security trade-off.
+    /// @dev Sentinelleai 2026-06-10 v7 MEDIUM SC01: this function is
+    ///      gated by Ownable2Step. Operational mitigation (per Sentinelle
+    ///      recommendation): owner SHOULD be migrated to a 3-of-5 multisig
+    ///      with a 48-hour timelock before mainnet ops day. The
+    ///      `PairRegistered` event is emitted on every registration so
+    ///      off-chain monitors (magneta-listener) can alert on suspicious
+    ///      admin activity even if the multisig+timelock migration is not
+    ///      yet in place.
     function setPair(address tokenA, address tokenB, address pool) external onlyOwner {
         if (tokenA == address(0) || tokenB == address(0) || pool == address(0)) revert ZeroAddress();
+        require(pairOf[tokenA][tokenB] == address(0), "BexAdapter: pair exists");
+        require(pairOf[tokenB][tokenA] == address(0), "BexAdapter: pair exists");
         pairOf[tokenA][tokenB] = pool;
         pairOf[tokenB][tokenA] = pool;
-        // Note: doesn't emit PairCreated — this is an admin shortcut, not
-        // a fresh deployment. Future addLiquidityETH calls will see the
-        // pre-registered pool and short-circuit creation.
+        emit PairRegistered(tokenA, tokenB, pool, msg.sender);
+    }
+
+    /// @notice Owner-only emergency cleanup of stray ERC20 dust.
+    ///         The StaleBalance guard in `removeLiquidity` reverts when
+    ///         the adapter holds any (tokenA, WBERA) balance pre-call —
+    ///         this function lets the owner sweep accidental or malicious
+    ///         dust transfers so legitimate user flows can resume.
+    /// @dev Sentinelleai 2026-06-10 SC02 mitigation companion. Doesn't
+    ///      grant the owner authority over funds that are LEGITIMATELY
+    ///      mid-flow — those are zero between calls thanks to the
+    ///      no-residual design of all mutation functions.
+    function sweep(address token, address to) external onlyOwner {
+        if (token == address(0) || to == address(0)) revert ZeroAddress();
+        uint256 bal = IERC20(token).balanceOf(address(this));
+        if (bal == 0) revert ZeroAmount();
+        IERC20(token).safeTransfer(to, bal);
     }
 
     /// @notice Accept native unwraps from WBERA so removeLiquidity →

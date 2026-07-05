@@ -37,6 +37,11 @@ async function deployCommon() {
         owner.address,
         feeVault.address
     );
+    // Chantier #3 — modules require the gateway's attested DVN floor to be
+    // ≥ 2 before they will wire up. The Safe sets this on mainnet after
+    // verifying the actual LZ ULN config off-chain; in tests we attest
+    // directly from the deployer.
+    await gateway.connect(owner).setRequiredDVNCount(2);
 
     return { owner, admin, user, feeVault, endpoint, usdc, weth, gateway };
 }

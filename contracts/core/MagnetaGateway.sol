@@ -29,6 +29,21 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
     /// @notice USDC vault that collects the Magneta markup on this chain.
     address private _feeVault;
 
+    /// @notice Attested floor for this gateway's LayerZero receive-DVN quorum.
+    ///         The protocol Safe sets this after verifying the actual LZ ULN
+    ///         configuration off-chain (≥ 2 DVNs required and `confirmations`
+    ///         meets policy). Downstream modules consume this in their
+    ///         constructors to refuse wiring into a gateway whose attested
+    ///         quorum is too low — the on-chain anchor for the Kelp-DAO-class
+    ///         single-validator-risk mitigation.
+    ///
+    ///         IMPORTANT: setting this does NOT change the actual LZ config.
+    ///         It is a Safe attestation. Operators must update it after any
+    ///         LZ config change AND re-verify that no module's constructor
+    ///         invariant is now violated. A planned downgrade ALSO requires
+    ///         re-deploying any module that asserts ≥ 2.
+    uint8 private _requiredDVNCount;
+
     /// @notice Guards against replayed LZ messages at the gateway level
     ///         (OApp already deduplicates, but we track processed GUIDs so a
     ///         module callback never re-enters the dispatcher for a given msg).
@@ -87,8 +102,17 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
     error TokensNotArrived();
     error CctpNotConfigured();
 
+    /// @notice Canonical human guardian (back-compat view). Kept in sync with
+    ///         {isPauser} by {setPauseGuardian}. Prefer {addPauser}/{removePauser}.
     address public pauseGuardian;
+
+    /// @notice Multi-pauser set. Any address with isPauser[addr] == true may
+    ///         call {pause}. UNPAUSE remains owner-only.
+    mapping(address => bool) public isPauser;
+
     event PauseGuardianUpdated(address indexed oldGuardian, address indexed newGuardian);
+    event PauserAdded(address indexed account);
+    event PauserRemoved(address indexed account);
     event CrossChainOpSent(uint32 indexed dstEid, OpType indexed op, address indexed caller, bytes32 guid);
     event CrossChainFanOut(OpType indexed op, address indexed caller, uint256 chainCount);
     event EidMappingSet(uint32 eid, uint256 chainId);
@@ -100,10 +124,10 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
     event EidCctpDomainSet(uint32 indexed eid, uint32 indexed cctpDomain);
     event Rescued(address indexed token, address indexed to, uint256 amount);
 
-    modifier onlyOwnerOrGuardian() {
+    modifier onlyOwnerOrPauser() {
         require(
-            msg.sender == owner() || msg.sender == pauseGuardian,
-            "MagnetaGateway: not owner or guardian"
+            msg.sender == owner() || isPauser[msg.sender],
+            "MagnetaGateway: not owner or pauser"
         );
         _;
     }
@@ -245,8 +269,25 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
         PendingValueOp memory p = pendingValueOps[_guid];
         require(p.bridgedAmount > 0, "MagnetaGateway: no pending op");
 
+        // F38: PER-OP arrival check (was global `available >= totalEarmarked`).
+        //
+        // The old global check required EVERY pending op's bridged USDC to have
+        // landed before ANY op could be fulfilled, so one stuck/delayed CCTP
+        // transfer (or an attacker queuing a large op that never settles, which
+        // inflates totalEarmarked) blocked every other op whose own funds had
+        // already arrived — a liveness DoS.
+        //
+        // Instead, an op is fulfillable as soon as ITS OWN bridgedAmount is
+        // present in the gateway. Double-spend across concurrent ready ops is
+        // still impossible: fulfilling this op pulls its USDC out of the gateway
+        // in THIS same transaction (forceApprove + module.execute below), and we
+        // decrement totalEarmarked before the external call (CEI). So if two ops
+        // of 100 each share only 100 arrived USDC, the first to fulfill drains
+        // the balance to 0 and the second reverts here until its own funds land.
+        // totalEarmarked is retained purely as the rescue/accounting bound (see
+        // rescueERC20) — it no longer gates fulfillment.
         uint256 available = IERC20(p.bridgedToken).balanceOf(address(this));
-        require(available >= totalEarmarked, "MagnetaGateway: tokens not arrived");
+        require(available >= p.bridgedAmount, "MagnetaGateway: tokens not arrived");
 
         address module = _modules[p.op];
         if (module == address(0)) revert ModuleNotSet(p.op);
@@ -512,7 +553,19 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
         emit FeeVaultSet(previous, vault);
     }
 
-    function pause() external onlyOwnerOrGuardian {
+    /// @inheritdoc IMagnetaGateway
+    function requiredDVNCount() external view override returns (uint8) {
+        return _requiredDVNCount;
+    }
+
+    /// @inheritdoc IMagnetaGateway
+    function setRequiredDVNCount(uint8 newCount) external override onlyOwner {
+        uint8 previous = _requiredDVNCount;
+        _requiredDVNCount = newCount;
+        emit RequiredDVNCountSet(previous, newCount);
+    }
+
+    function pause() external onlyOwnerOrPauser {
         _pause();
     }
 
@@ -520,10 +573,32 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
         _unpause();
     }
 
+    /// @notice Grant an address the pauser role. Owner-only.
+    function addPauser(address account) public onlyOwner {
+        require(account != address(0), "MagnetaGateway: zero pauser");
+        isPauser[account] = true;
+        emit PauserAdded(account);
+    }
+
+    /// @notice Revoke an address's pauser role. Owner-only.
+    function removePauser(address account) external onlyOwner {
+        require(account != address(0), "MagnetaGateway: zero pauser");
+        isPauser[account] = false;
+        emit PauserRemoved(account);
+    }
+
+    /// @notice Deprecated single-guardian setter, retained for back-compat.
+    ///         Rotates the canonical {pauseGuardian} within {isPauser}.
     function setPauseGuardian(address _guardian) external onlyOwner {
         require(_guardian != address(0), "MagnetaGateway: zero guardian");
         address old = pauseGuardian;
+        if (old != address(0)) {
+            isPauser[old] = false;
+            emit PauserRemoved(old);
+        }
         pauseGuardian = _guardian;
+        isPauser[_guardian] = true;
+        emit PauserAdded(_guardian);
         emit PauseGuardianUpdated(old, _guardian);
     }
 

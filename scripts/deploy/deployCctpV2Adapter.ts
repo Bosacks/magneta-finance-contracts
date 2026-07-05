@@ -1,29 +1,35 @@
 /**
- * Sprint C — Deploy CctpV2Adapter on Linea or Sonic.
+ * Sprint C — Deploy CctpV2Adapter on a CCTP V2 chain (mainnet or testnet).
  *
- * CCTP V2 chains (Linea domain 11, Sonic domain 13) use a 7-arg
- * `depositForBurn(...)` signature that the immutable MagnetaGateway can't
- * call directly. The adapter wraps it to the V1 4-arg ABI the Gateway
- * already speaks; after deploy, the Safe wires the adapter as the
- * Gateway's `cctpMessenger` via setup-cctp-v2-batch.json.
+ * CCTP V2 chains use a 7-arg `depositForBurn(...)` signature that the
+ * immutable MagnetaGateway can't call directly. The adapter wraps it to
+ * the V1 4-arg ABI the Gateway already speaks; after deploy, the Safe
+ * wires the adapter as the Gateway's `cctpMessenger` via
+ * setup-cctp-v2-batch.json.
  *
- * V2 TokenMessenger is at the SAME unified address on all V2 chains:
- *   0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d
+ * Mainnet and testnet TokenMessengerV2 live at different deterministic
+ * addresses (Circle uses one CREATE2 deploy per environment). The
+ * CHAIN_CONFIG table below holds both — keyed by chainId. Source for
+ * new entries: https://developers.circle.com/cctp/references/contract-addresses
  *
  * Usage:
- *   pnpm hardhat run scripts/deploy/deployCctpV2Adapter.ts --network linea
- *   pnpm hardhat run scripts/deploy/deployCctpV2Adapter.ts --network sonic
+ *   pnpm hardhat run scripts/deploy/deployCctpV2Adapter.ts --network <name>
  */
 import { ethers, network } from "hardhat";
 import fs from "node:fs";
 import path from "node:path";
 
-const V2_TOKEN_MESSENGER = "0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d";
-
-// chainId → CCTP V2 domain (per Circle docs)
-const V2_DOMAINS: Record<number, number> = {
-  59144: 11, // Linea
-  146:   13, // Sonic
+// chainId → { v2 messenger address, CCTP V2 destination domain, env }
+const CHAIN_CONFIG: Record<number, { messenger: string; domain: number; env: "mainnet" | "testnet" }> = {
+  // Mainnets — unified V2 messenger 0x28b5...cf5d
+  59144: { messenger: "0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d", domain: 11, env: "mainnet" }, // Linea
+  146:   { messenger: "0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d", domain: 13, env: "mainnet" }, // Sonic
+  // Testnets — unified V2 messenger 0x8FE6...DAA
+  84532:    { messenger: "0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA", domain: 6,  env: "testnet" }, // Base Sepolia
+  59141:    { messenger: "0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA", domain: 11, env: "testnet" }, // Linea Sepolia
+  11155111: { messenger: "0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA", domain: 0,  env: "testnet" }, // Ethereum Sepolia
+  11155420: { messenger: "0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA", domain: 2,  env: "testnet" }, // OP Sepolia
+  421614:   { messenger: "0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA", domain: 3,  env: "testnet" }, // Arbitrum Sepolia
 };
 
 async function main() {
@@ -31,10 +37,15 @@ async function main() {
   const net = await ethers.provider.getNetwork();
   const chainId = Number(net.chainId);
 
-  const domain = V2_DOMAINS[chainId];
-  if (domain === undefined) {
-    throw new Error(`Sprint C only supports Linea (59144) and Sonic (146); got chainId ${chainId}`);
+  const cfg = CHAIN_CONFIG[chainId];
+  if (!cfg) {
+    throw new Error(
+      `chainId ${chainId} not in CHAIN_CONFIG. Add the V2 messenger address ` +
+      `(per Circle docs) and CCTP V2 domain id, then re-run.`,
+    );
   }
+  const V2_TOKEN_MESSENGER = cfg.messenger;
+  const domain = cfg.domain;
 
   // Sanity: V2 messenger must have code on this chain
   const code = await ethers.provider.getCode(V2_TOKEN_MESSENGER);
@@ -45,7 +56,7 @@ async function main() {
     );
   }
 
-  console.log(`\n── Sprint C — CctpV2Adapter ──`);
+  console.log(`\n── Sprint C — CctpV2Adapter (${cfg.env}) ──`);
   console.log(`Network        : ${network.name} (chainId ${chainId})`);
   console.log(`Deployer       : ${deployer.address}`);
   console.log(`V2 messenger   : ${V2_TOKEN_MESSENGER}`);

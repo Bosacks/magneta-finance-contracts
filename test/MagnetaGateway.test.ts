@@ -50,6 +50,8 @@ describe("MagnetaGateway", function () {
             owner.address,
             feeVault.address
         );
+        // Chantier #3 — modules require the gateway's attested DVN floor ≥ 2.
+        await gateway.setRequiredDVNCount(2);
 
         const MockSwap = await ethers.getContractFactory("MockSwapRouter");
         const mockSwap = await MockSwap.deploy();
@@ -101,13 +103,22 @@ describe("MagnetaGateway", function () {
     });
 
     describe("CREATE_LP end-to-end", () => {
+        // F53: the LOCAL fee floor is derived ON-CHAIN from the op's USD value
+        // (native side priced via MagnetaSwap, doubled for the balanced LP, then
+        // × FEE_BPS). The MockSwapRouter quotes 1:1 in raw units, so the floor
+        // here is ethAmount × 2 × FEE_BPS / 10_000, but the contract also enforces
+        // a flat MIN_LOCAL_FEE_USDC = 100_000 (6dp, $0.10) floor that fails closed
+        // when no on-chain price exists — so we mirror max(quoted, floor).
+        const MIN_LOCAL_FEE_USDC = 100_000n;
+        const ethAmount = 1_000_000n; // wei; tiny so the derived fee is small
+        const quotedFee = (ethAmount * 2n * FEE_BPS) / 10_000n;
+        const expectedFee = quotedFee > MIN_LOCAL_FEE_USDC ? quotedFee : MIN_LOCAL_FEE_USDC;
+
         it("dispatches through the gateway, pulls USDC fee, mints LP to alice", async () => {
             await gateway.setModule(OP_CREATE_LP, await lpModule.getAddress());
 
             const tokenAmount = ethers.parseEther("1000");
-            const ethAmount = ethers.parseEther("1");
-            const valueUsdc = ethers.parseUnits("100", 6);
-            const usdcFee = (valueUsdc * FEE_BPS) / 10_000n;
+            const usdcFee = expectedFee;
 
             // Alice approves: module pulls tokens + USDC fee.
             await token.connect(alice).approve(await router.getAddress(), tokenAmount);
@@ -145,6 +156,37 @@ describe("MagnetaGateway", function () {
             const pair = await router.pair();
             const lpToken = await ethers.getContractAt("MockLPToken", pair);
             expect(await lpToken.balanceOf(alice.address)).to.be.gt(0n);
+        });
+
+        // F53 regression: a LOCAL caller (originChainId == block.chainid) must
+        // NOT be able to pass usdcFee = 0 to evade the 0.15% markup. Before the
+        // fix _collectFee early-returned on zero; now _requireLocalFee floors it.
+        it("rejects a LOCAL CREATE_LP with usdcFee=0 (fee-evasion guard)", async () => {
+            await gateway.setModule(OP_CREATE_LP, await lpModule.getAddress());
+
+            const tokenAmount = ethers.parseEther("1000");
+            await token.connect(alice).approve(await lpModule.getAddress(), tokenAmount);
+
+            const coder = new ethers.AbiCoder();
+            const encoded = coder.encode(
+                [
+                    "tuple(address token,uint256 tokenAmount,uint256 ethAmount,uint256 amountTokenMin,uint256 amountETHMin,uint256 usdcFee,uint256 deadline)"
+                ],
+                [[
+                    await token.getAddress(),
+                    tokenAmount,
+                    ethAmount,
+                    0n,
+                    0n,
+                    0n, // usdcFee = 0 → must revert for a local op
+                    Math.floor(Date.now() / 1000) + 3600,
+                ]]
+            );
+            const params = ethers.concat(["0x00", encoded]);
+
+            await expect(
+                gateway.connect(alice).executeOperation(OP_CREATE_LP, params, { value: ethAmount })
+            ).to.be.revertedWith("LPModule: fee below minimum");
         });
     });
 
@@ -375,6 +417,105 @@ describe("MagnetaGateway", function () {
         it("adminClearPendingValueOp reverts on unknown guid", async () => {
             await expect(gateway.adminClearPendingValueOp(ethers.id("never-existed")))
                 .to.be.revertedWith("MagnetaGateway: no pending op");
+        });
+    });
+
+    describe("F38: fulfillValueOp uses a PER-OP arrival check (liveness DoS fix)", () => {
+        // Pre-patch, fulfillValueOp required `balanceOf(this) >= totalEarmarked`,
+        // i.e. EVERY pending op's bridged USDC had to have landed before ANY op
+        // could be fulfilled. One stuck/never-settling CCTP transfer (or an
+        // attacker queuing a large op that never arrives) inflated
+        // totalEarmarked and blocked every other op whose own funds were already
+        // present. The patch checks `balanceOf(this) >= p.bridgedAmount` so each
+        // op is fulfillable independently, while pulling the funds out in the
+        // same tx preserves the anti-double-spend guarantee.
+
+        const OP_VALUE = 0; // CREATE_LP slot, repurposed for the mock module
+        let valueModule: any;
+        let endpointSigner: SignerWithAddress;
+
+        const buildValuePayload = (caller: string, params: string, bridgedToken: string, amount: bigint) =>
+            ethers.AbiCoder.defaultAbiCoder().encode(
+                ["uint8", "uint8", "address", "bytes", "address", "uint256"],
+                [1, OP_VALUE, caller, params, bridgedToken, amount]
+            );
+
+        // Mock module pulls `amount` of `token` from the gateway (tokenSource).
+        const innerParams = (token: string, amount: bigint) =>
+            ethers.AbiCoder.defaultAbiCoder().encode(["address", "uint256"], [token, amount]);
+
+        const queueOp = async (guid: string, nonce: number, amount: bigint) => {
+            const usdcAddr = await usdc.getAddress();
+            const payload = buildValuePayload(alice.address, innerParams(usdcAddr, amount), usdcAddr, amount);
+            const origin = { srcEid: EID, sender: ethers.zeroPadValue(await gateway.getAddress(), 32), nonce };
+            await (gateway.connect(endpointSigner) as any).lzReceive(origin, guid, payload, ethers.ZeroAddress, "0x");
+        };
+
+        beforeEach(async () => {
+            await gateway.setUsdc(await usdc.getAddress());
+            await gateway.setPeer(EID, ethers.zeroPadValue(await gateway.getAddress(), 32));
+
+            const Mod = await ethers.getContractFactory("MockValueOpModule");
+            valueModule = await Mod.deploy();
+            await gateway.setModule(OP_VALUE, await valueModule.getAddress());
+
+            await ethers.provider.send("hardhat_impersonateAccount", [await endpoint.getAddress()]);
+            await ethers.provider.send("hardhat_setBalance", [
+                await endpoint.getAddress(),
+                "0x" + ethers.parseEther("10").toString(16),
+            ]);
+            endpointSigner = await ethers.getSigner(await endpoint.getAddress()) as any;
+        });
+
+        it("fulfills an op whose own funds arrived even while a larger op is still pending", async () => {
+            const big = ethers.id("f38-big-stuck");
+            const small = ethers.id("f38-small-ready");
+            await queueOp(big, 10, 1_000_000n);   // never funded (stuck CCTP)
+            await queueOp(small, 11, 100_000n);   // funds will arrive
+
+            // totalEarmarked = 1.1M, but only the small op's 100k lands.
+            expect(await gateway.totalEarmarked()).to.equal(1_100_000n);
+            await usdc.mint(await gateway.getAddress(), 100_000n);
+
+            // Pre-patch this reverted ("tokens not arrived": 100k < 1.1M).
+            const before = await usdc.balanceOf(alice.address);
+            await expect(gateway.connect(alice).fulfillValueOp(small))
+                .to.emit(gateway, "ValueOpFulfilled");
+
+            expect(await usdc.balanceOf(alice.address)).to.equal(before + 100_000n);
+            expect(await gateway.totalEarmarked()).to.equal(1_000_000n); // big op still reserved
+        });
+
+        it("blocks an op whose own funds have NOT arrived (no double-spend)", async () => {
+            const big = ethers.id("f38-big-stuck-2");
+            const small = ethers.id("f38-small-ready-2");
+            await queueOp(big, 20, 1_000_000n);
+            await queueOp(small, 21, 100_000n);
+
+            // Only the small op's funds are present; the big op cannot borrow them.
+            await usdc.mint(await gateway.getAddress(), 100_000n);
+            await expect(gateway.connect(alice).fulfillValueOp(big))
+                .to.be.revertedWith("MagnetaGateway: tokens not arrived");
+        });
+
+        it("fulfilling one op drains its funds so a second equal op must wait for its own", async () => {
+            const a = ethers.id("f38-A");
+            const b = ethers.id("f38-B");
+            await queueOp(a, 30, 100_000n);
+            await queueOp(b, 31, 100_000n);
+
+            // Only 100k arrives — enough for exactly ONE of the two ops.
+            await usdc.mint(await gateway.getAddress(), 100_000n);
+
+            await gateway.connect(alice).fulfillValueOp(a); // drains balance to 0
+            await expect(gateway.connect(alice).fulfillValueOp(b))
+                .to.be.revertedWith("MagnetaGateway: tokens not arrived");
+
+            // Once B's own funds land, it fulfills too.
+            await usdc.mint(await gateway.getAddress(), 100_000n);
+            await expect(gateway.connect(alice).fulfillValueOp(b))
+                .to.emit(gateway, "ValueOpFulfilled");
+            expect(await gateway.totalEarmarked()).to.equal(0n);
         });
     });
 

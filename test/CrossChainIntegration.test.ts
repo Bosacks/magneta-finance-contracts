@@ -42,6 +42,9 @@ describe("Cross-chain integration", function () {
         const Gateway = await ethers.getContractFactory("MagnetaGateway");
         gatewayA = await Gateway.deploy(await endpointA.getAddress(), owner.address, owner.address);
         gatewayB = await Gateway.deploy(await endpointB.getAddress(), owner.address, feeVaultB.address);
+        // Chantier #3 — attest DVN floor so modules accept these gateways.
+        await gatewayA.setRequiredDVNCount(2);
+        await gatewayB.setRequiredDVNCount(2);
 
         // OApp peer handshake.
         const peerA = ethers.zeroPadValue(await gatewayA.getAddress(), 32);
@@ -311,6 +314,7 @@ describe("Cross-chain integration", function () {
 
         const Gateway = await ethers.getContractFactory("MagnetaGateway");
         const gatewayC = await Gateway.deploy(await endpointC.getAddress(), owner.address, feeVaultB.address);
+        await gatewayC.setRequiredDVNCount(2);
 
         // Peer handshake: A→B, A→C
         const peerA = ethers.zeroPadValue(await gatewayA.getAddress(), 32);
