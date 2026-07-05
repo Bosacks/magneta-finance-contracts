@@ -34,5 +34,20 @@
     "@layerzerolabs/lz-evm-oapp-v2": "3.0.168",
     "@layerzerolabs/lz-evm-protocol-v2": "3.0.168",
     "ethers": "6.16.0"
+  },
+  "pnpm": {
+    "overrides": {
+      "axios": "=1.16.0",
+      "esbuild": "=0.28.1",
+      "form-data": "=4.0.6",
+      "qs": "=6.15.2",
+      "serialize-javascript": "=7.0.5",
+      "tmp": "=0.2.6",
+      "undici": "=6.27.0",
+      "uuid": "=11.1.1",
+      "vite": "=6.4.3",
+      "vitest": "=3.2.6",
+      "ws": "=8.21.0"
+    }
   }
 }
