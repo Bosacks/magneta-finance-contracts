@@ -355,4 +355,120 @@ describe("MagnetaProxy", function () {
             expect(await magnetaProxy.feeBps()).to.equal(50);
         });
     });
+
+    // ─── Emergency pause (defense-in-depth kill-switch, added 2026-07-05) ──
+    describe("emergency pause", function () {
+        async function emptyCallData() {
+            return mockRouter.interface.encodeFunctionData("swap", [
+                await tokenOut.getAddress(),
+                1n,
+                await magnetaProxy.getAddress(),
+            ]);
+        }
+
+        it("executeSwap reverts when paused", async function () {
+            await whitelistRouter();
+            await magnetaProxy.pause();
+
+            await tokenIn.connect(user).approve(await magnetaProxy.getAddress(), ethers.parseEther("1"));
+
+            await expect(
+                magnetaProxy.connect(user).executeSwap(
+                    await tokenIn.getAddress(),
+                    await tokenOut.getAddress(),
+                    ethers.parseEther("1"),
+                    1n,
+                    await mockRouter.getAddress(),
+                    await mockRouter.getAddress(),
+                    await emptyCallData(),
+                ),
+            ).to.be.revertedWith("Pausable: paused");
+        });
+
+        it("executeSwapETH reverts when paused", async function () {
+            await whitelistRouter();
+            await magnetaProxy.pause();
+
+            await expect(
+                magnetaProxy.connect(user).executeSwapETH(
+                    await tokenOut.getAddress(),
+                    1n,
+                    await mockRouter.getAddress(),
+                    await mockRouter.getAddress(),
+                    await emptyCallData(),
+                    { value: ethers.parseEther("1") },
+                ),
+            ).to.be.revertedWith("Pausable: paused");
+        });
+
+        it("executeSwapToETH reverts when paused", async function () {
+            await whitelistRouter();
+            await magnetaProxy.pause();
+
+            await tokenIn.connect(user).approve(await magnetaProxy.getAddress(), ethers.parseEther("1"));
+
+            await expect(
+                magnetaProxy.connect(user).executeSwapToETH(
+                    await tokenIn.getAddress(),
+                    ethers.parseEther("1"),
+                    1n,
+                    await mockRouter.getAddress(),
+                    await mockRouter.getAddress(),
+                    await emptyCallData(),
+                ),
+            ).to.be.revertedWith("Pausable: paused");
+        });
+
+        it("a designated pauser can pause, but not unpause", async function () {
+            await magnetaProxy.addPauser(stranger.address);
+
+            await expect(magnetaProxy.connect(stranger).pause())
+                .to.emit(magnetaProxy, "Paused")
+                .withArgs(stranger.address);
+            expect(await magnetaProxy.paused()).to.equal(true);
+
+            await expect(magnetaProxy.connect(stranger).unpause()).to.be.reverted;
+
+            // Owner can still unpause.
+            await magnetaProxy.unpause();
+            expect(await magnetaProxy.paused()).to.equal(false);
+        });
+
+        it("non-owner/non-pauser cannot pause", async function () {
+            await expect(magnetaProxy.connect(stranger).pause())
+                .to.be.revertedWith("MagnetaProxy: not owner or pauser");
+        });
+
+        it("removePauser revokes pause rights", async function () {
+            await magnetaProxy.addPauser(stranger.address);
+            await magnetaProxy.removePauser(stranger.address);
+
+            await expect(magnetaProxy.connect(stranger).pause())
+                .to.be.revertedWith("MagnetaProxy: not owner or pauser");
+        });
+
+        it("addPauser/removePauser are owner-only and reject zero address", async function () {
+            await expect(magnetaProxy.connect(stranger).addPauser(stranger.address)).to.be.reverted;
+            await expect(magnetaProxy.connect(stranger).removePauser(owner.address)).to.be.reverted;
+
+            await expect(magnetaProxy.addPauser(ethers.ZeroAddress))
+                .to.be.revertedWith("MagnetaProxy: zero pauser");
+            await expect(magnetaProxy.removePauser(ethers.ZeroAddress))
+                .to.be.revertedWith("MagnetaProxy: zero pauser");
+        });
+
+        it("rescueERC20 and rescueETH remain callable while paused", async function () {
+            await magnetaProxy.pause();
+
+            await tokenOut.transfer(await magnetaProxy.getAddress(), ethers.parseEther("10"));
+            await expect(
+                magnetaProxy.rescueERC20(await tokenOut.getAddress(), owner.address, ethers.parseEther("10")),
+            ).to.emit(magnetaProxy, "Rescued");
+
+            await owner.sendTransaction({ to: await magnetaProxy.getAddress(), value: ethers.parseEther("1") });
+            await expect(
+                magnetaProxy.rescueETH(stranger.address, ethers.parseEther("1")),
+            ).to.emit(magnetaProxy, "Rescued");
+        });
+    });
 });

@@ -5,12 +5,13 @@ import "@openzeppelin/contracts/access/Ownable2Step.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/security/Pausable.sol";
 
 /**
  * @title MagnetaProxy
  * @dev Proxy contract for executing swaps via 0x API while collecting fees.
  */
-contract MagnetaProxy is Ownable2Step, ReentrancyGuard {
+contract MagnetaProxy is Ownable2Step, ReentrancyGuard, Pausable {
     using SafeERC20 for IERC20;
 
     // Fee in basis points (100 = 1%)
@@ -35,6 +36,15 @@ contract MagnetaProxy is Ownable2Step, ReentrancyGuard {
     // be added later without touching the swap-target list.
     mapping(address => bool) public allowedSpenders;
 
+    /// @notice Multi-pauser set. Any address with isPauser[addr] == true may
+    ///         call {pause}. UNPAUSE remains owner-only. Defense-in-depth
+    ///         kill-switch: executeSwap/executeSwapETH/executeSwapToETH move
+    ///         user funds through an owner-allowlisted but otherwise
+    ///         arbitrary `.call()` target; if a listed router is ever
+    ///         compromised, this lets ops halt all swap execution instantly
+    ///         instead of racing to de-list every affected entry one by one.
+    mapping(address => bool) public isPauser;
+
     // Events
     event FeeRecipientUpdated(address indexed oldRecipient, address indexed newRecipient);
     event FeeBpsUpdated(uint256 oldFeeBps, uint256 newFeeBps);
@@ -49,6 +59,16 @@ contract MagnetaProxy is Ownable2Step, ReentrancyGuard {
         uint256 amountOut,
         uint256 fee
     );
+    event PauserAdded(address indexed account);
+    event PauserRemoved(address indexed account);
+
+    modifier onlyOwnerOrPauser() {
+        require(
+            msg.sender == owner() || isPauser[msg.sender],
+            "MagnetaProxy: not owner or pauser"
+        );
+        _;
+    }
 
     constructor(address _feeRecipient) {
         require(_feeRecipient != address(0), "Invalid fee recipient");
@@ -73,7 +93,7 @@ contract MagnetaProxy is Ownable2Step, ReentrancyGuard {
         address spender,
         address swapTarget,
         bytes calldata swapCallData
-    ) external payable nonReentrant {
+    ) external payable nonReentrant whenNotPaused {
         require(amountIn > 0, "Invalid amount");
         require(allowedSpenders[spender], "MagnetaProxy: spender not allowed");
         require(allowedSwapTargets[swapTarget], "MagnetaProxy: target not allowed");
@@ -123,7 +143,7 @@ contract MagnetaProxy is Ownable2Step, ReentrancyGuard {
         address spender,
         address swapTarget,
         bytes calldata swapCallData
-    ) external payable nonReentrant {
+    ) external payable nonReentrant whenNotPaused {
         require(msg.sender != address(0), "Invalid sender");
         require(msg.value > 0, "Invalid ETH amount");
         require(allowedSpenders[spender], "MagnetaProxy: spender not allowed");
@@ -182,7 +202,7 @@ contract MagnetaProxy is Ownable2Step, ReentrancyGuard {
         address spender,
         address swapTarget,
         bytes calldata swapCallData
-    ) external nonReentrant {
+    ) external nonReentrant whenNotPaused {
         require(amountIn > 0, "Invalid amount");
         require(allowedSpenders[spender], "MagnetaProxy: spender not allowed");
         require(allowedSwapTargets[swapTarget], "MagnetaProxy: target not allowed");
@@ -304,4 +324,37 @@ contract MagnetaProxy is Ownable2Step, ReentrancyGuard {
 
     // Allow receiving ETH (required for unwrapping WETH or refunds)
     receive() external payable {}
+
+    // ─── Emergency pause ──────────────────────────────────────────────────
+
+    /**
+     * @dev Defense-in-depth kill-switch for compromised-router scenarios.
+     *      Pauses executeSwap/executeSwapETH/executeSwapToETH so no new
+     *      funds can be routed through a listed swapTarget while the owner
+     *      Safe investigates and de-lists the affected entry. Owner config
+     *      setters (fee/whitelist) and the rescue* recovery paths remain
+     *      callable while paused so ops can still remediate and recover
+     *      stuck funds during an incident.
+     */
+    function pause() external onlyOwnerOrPauser {
+        _pause();
+    }
+
+    function unpause() external onlyOwner {
+        _unpause();
+    }
+
+    /// @notice Grant an address the pauser role. Owner-only.
+    function addPauser(address account) public onlyOwner {
+        require(account != address(0), "MagnetaProxy: zero pauser");
+        isPauser[account] = true;
+        emit PauserAdded(account);
+    }
+
+    /// @notice Revoke an address's pauser role. Owner-only.
+    function removePauser(address account) external onlyOwner {
+        require(account != address(0), "MagnetaProxy: zero pauser");
+        isPauser[account] = false;
+        emit PauserRemoved(account);
+    }
 }
