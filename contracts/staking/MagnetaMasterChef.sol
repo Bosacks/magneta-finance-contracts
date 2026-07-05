@@ -8,14 +8,13 @@ pragma solidity 0.8.20;
 ///   - HIGH SC01: all privileged ops (addPool/setPool/setRewardsPerSecond/
 ///     setEndTime/fundRewards) gated by single-EOA Ownable with no
 ///     timelock or multisig. Drift Protocol / TrustedVolumes 2026 pattern.
-///   - LOW SC01: single-step Ownable (no Ownable2Step).
-/// Migrate to Ownable2Step + transfer ownership to a Safe with timelock
-/// before any production use.
+/// Transfer ownership to a Safe with timelock before any production use.
 
 import { IERC20 }          from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { SafeERC20 }       from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import { Ownable }         from "@openzeppelin/contracts/access/Ownable.sol";
+import { Ownable2Step }    from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import { ReentrancyGuard } from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import { Pausable }        from "@openzeppelin/contracts/security/Pausable.sol";
 
 /**
  * @title MagnetaMasterChef
@@ -39,7 +38,7 @@ import { ReentrancyGuard } from "@openzeppelin/contracts/security/ReentrancyGuar
  *         known weakness — owner could swap LP token mid-flight). V1.1
  *         could add a timelock + role-gated migrate path.
  */
-contract MagnetaMasterChef is Ownable, ReentrancyGuard {
+contract MagnetaMasterChef is Ownable2Step, ReentrancyGuard, Pausable {
     using SafeERC20 for IERC20;
 
     struct PoolInfo {
@@ -82,6 +81,20 @@ contract MagnetaMasterChef is Ownable, ReentrancyGuard {
     event RewardsFunded(uint256 newRewardsPerSecond, uint64 newEndTime);
     event RewardsRateUpdated(uint256 oldRate, uint256 newRate);
     event EndTimeUpdated(uint64 oldEnd, uint64 newEnd);
+    event PauserAdded(address indexed account);
+    event PauserRemoved(address indexed account);
+
+    /// @notice Multi-pauser set. Any address with isPauser[addr] == true may
+    ///         call {pause}. UNPAUSE remains owner-only.
+    mapping(address => bool) public isPauser;
+
+    modifier onlyOwnerOrPauser() {
+        require(
+            msg.sender == owner() || isPauser[msg.sender],
+            "MagnetaMasterChef: not owner or pauser"
+        );
+        _;
+    }
 
     constructor(
         address initialOwner,
@@ -195,7 +208,13 @@ contract MagnetaMasterChef is Ownable, ReentrancyGuard {
         pool.lastRewardTime = refTime;
     }
 
-    function deposit(uint256 pid, uint256 amount) external nonReentrant {
+    /// @notice Deposit LP tokens (and/or harvest pending rewards by passing
+    ///         amount == 0). Gated by {whenNotPaused} — this blocks new fund
+    ///         entry AND the deposit(pid, 0) harvest idiom while paused, but
+    ///         `withdraw(pid, 0)` below is NOT paused and remains a valid
+    ///         harvest-only path, so stakers can always claim rewards even
+    ///         during an emergency pause. See {pause} for the exit guarantee.
+    function deposit(uint256 pid, uint256 amount) external nonReentrant whenNotPaused {
         PoolInfo storage pool = poolInfo[pid];
         UserInfo storage user = userInfo[pid][msg.sender];
 
@@ -219,6 +238,10 @@ contract MagnetaMasterChef is Ownable, ReentrancyGuard {
         emit Deposit(msg.sender, pid, amount);
     }
 
+    /// @notice Withdraw LP tokens (and/or harvest pending rewards by passing
+    ///         amount == 0). Deliberately NOT gated by {whenNotPaused} — this
+    ///         is the fund-exit path (and the only harvest path while paused)
+    ///         and must always be callable.
     function withdraw(uint256 pid, uint256 amount) external nonReentrant {
         PoolInfo storage pool = poolInfo[pid];
         UserInfo storage user = userInfo[pid][msg.sender];
@@ -241,7 +264,8 @@ contract MagnetaMasterChef is Ownable, ReentrancyGuard {
     }
 
     /// @notice Withdraw without claiming pending rewards — emergency exit
-    ///         in case the rewards pool is broken or out of funds.
+    ///         in case the rewards pool is broken or out of funds. Deliberately
+    ///         NOT gated by {whenNotPaused} — must always be callable.
     function emergencyWithdraw(uint256 pid) external nonReentrant {
         PoolInfo storage pool = poolInfo[pid];
         UserInfo storage user = userInfo[pid][msg.sender];
@@ -251,5 +275,32 @@ contract MagnetaMasterChef is Ownable, ReentrancyGuard {
         pool.totalStaked -= amount;
         pool.lpToken.safeTransfer(msg.sender, amount);
         emit EmergencyWithdraw(msg.sender, pid, amount);
+    }
+
+    // ─── Emergency pause ──────────────────────────────────────────────────
+
+    /// @notice Pause new deposits. `withdraw` and `emergencyWithdraw` (and the
+    ///         `withdraw(pid, 0)` harvest idiom) remain callable while paused —
+    ///         stakers can always exit and claim.
+    function pause() external onlyOwnerOrPauser {
+        _pause();
+    }
+
+    function unpause() external onlyOwner {
+        _unpause();
+    }
+
+    /// @notice Grant an address the pauser role. Owner-only.
+    function addPauser(address account) public onlyOwner {
+        require(account != address(0), "MagnetaMasterChef: zero pauser");
+        isPauser[account] = true;
+        emit PauserAdded(account);
+    }
+
+    /// @notice Revoke an address's pauser role. Owner-only.
+    function removePauser(address account) external onlyOwner {
+        require(account != address(0), "MagnetaMasterChef: zero pauser");
+        isPauser[account] = false;
+        emit PauserRemoved(account);
     }
 }

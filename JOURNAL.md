@@ -3,6 +3,18 @@
 > Fil chronologique des sessions. Anti-chronologique (plus récent en haut).
 > Voir `~/CLAUDE.md` pour la règle d'édition.
 
+## 2026-07-05
+- Durcissement staking/ (MasterChef, StakingRewards, StakingFactory) : Ownable→Ownable2Step + Pausable multi-pauser (pattern MagnetaFactory), whenNotPaused sur entrées seulement (deposit/stake/createStakingPool), sorties jamais bloquées
+- 45 tests staking créés (0 avant) : 42+3 fichiers, pause/rôles/2-step ; suite complète 410 verts, zéro régression
+- Re-scan custody repo entier : aucun autre trou pause/custody ; reste = 4 adapters sans tests (smoke), MagnetaProxy sans kill-switch (defense-in-depth), vérifier décommission XChainLpReceiver gnosis
+- Note ops : pools créés par StakingFactory naissent sans pauser protocole (owner=créateur, addPauser opt-in)
+- Non committé (branche security/pause-hardening, working tree)
+
+## 2026-06-30 — F112 MagnetaSwap fee-on-transfer fix
+
+- `MagnetaSwap.swap()` mesure désormais `received = balanceAfter - balanceBefore` autour du `safeTransferFrom` ; fee + `amountToSwap` calculés sur `received` (plus sur `amountIn` nominal) → un tokenIn fee-on-transfer ne fait plus approve/forward plus que le router ne détient. Guard `received > 0`. Non-FOT path inchangé (`received == amountIn`)
+- Vérifié via solc 0.8.20 isolé (flatten + native compiler) : OK. Suite Hardhat globale non lançable (erreurs préexistantes MagnetaCurvePool.sol / LPModule.sol sur cette branche multi-session)
+
 ## 2026-05-30 — V1.1 LPModule V2-direct + LPSourceWrapper + keeper bot opérationnel
 
 - **LPModule V1.1** patché : `_createLPFromBridgedUsdc` route dest swap via V2 router direct (USDC→WNATIVE 1-hop puis USDC→WNATIVE→token 2-hop), bypass MagnetaSwap pour cross-chain. Magneta-first reste valide pour Token Manage swaps locaux (commit `a75fe17`)

@@ -20,8 +20,9 @@ pragma solidity 0.8.20;
 
 import { IERC20 }          from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { SafeERC20 }       from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import { Ownable }         from "@openzeppelin/contracts/access/Ownable.sol";
+import { Ownable2Step }    from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import { ReentrancyGuard } from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import { Pausable }        from "@openzeppelin/contracts/security/Pausable.sol";
 
 /**
  * @title MagnetaStakingRewards
@@ -45,7 +46,7 @@ import { ReentrancyGuard } from "@openzeppelin/contracts/security/ReentrancyGuar
  *           - Recovery: rescueERC20 lets the owner pull mistakenly-sent tokens
  *             EXCEPT the staking token (would let owner steal stakes)
  */
-contract MagnetaStakingRewards is Ownable, ReentrancyGuard {
+contract MagnetaStakingRewards is Ownable2Step, ReentrancyGuard, Pausable {
     using SafeERC20 for IERC20;
 
     // ─── Wired tokens (immutable post-deploy) ─────────────────────────────
@@ -95,6 +96,20 @@ contract MagnetaStakingRewards is Ownable, ReentrancyGuard {
     event RewardPaid(address indexed user, uint256 reward);
     event RewardsDurationUpdated(uint256 newDuration);
     event Recovered(address token, uint256 amount);
+    event PauserAdded(address indexed account);
+    event PauserRemoved(address indexed account);
+
+    /// @notice Multi-pauser set. Any address with isPauser[addr] == true may
+    ///         call {pause}. UNPAUSE remains owner-only.
+    mapping(address => bool) public isPauser;
+
+    modifier onlyOwnerOrPauser() {
+        require(
+            msg.sender == owner() || isPauser[msg.sender],
+            "MagnetaStakingRewards: not owner or pauser"
+        );
+        _;
+    }
 
     // ─── Constructor ──────────────────────────────────────────────────────
 
@@ -148,7 +163,11 @@ contract MagnetaStakingRewards is Ownable, ReentrancyGuard {
 
     // ─── Mutators ─────────────────────────────────────────────────────────
 
-    function stake(uint256 amount) external nonReentrant updateReward(msg.sender) {
+    /// @notice Stake `amount` of `stakingToken`. Gated by {whenNotPaused} —
+    ///         blocks new fund entry during an emergency pause. `withdraw`,
+    ///         `getReward` and `exit` below are NOT paused, so stakers can
+    ///         always leave and claim. See {pause}.
+    function stake(uint256 amount) external nonReentrant whenNotPaused updateReward(msg.sender) {
         require(amount > 0, "zero amount");
         _totalSupply += amount;
         _balances[msg.sender] += amount;
@@ -156,6 +175,9 @@ contract MagnetaStakingRewards is Ownable, ReentrancyGuard {
         emit Staked(msg.sender, amount);
     }
 
+    /// @notice Withdraw staked tokens. Deliberately NOT gated by
+    ///         {whenNotPaused} — this is the fund-exit path and must always
+    ///         be callable, including while paused.
     function withdraw(uint256 amount) public nonReentrant updateReward(msg.sender) {
         require(amount > 0, "zero amount");
         _totalSupply -= amount;
@@ -164,6 +186,8 @@ contract MagnetaStakingRewards is Ownable, ReentrancyGuard {
         emit Withdrawn(msg.sender, amount);
     }
 
+    /// @notice Claim pending rewards. Deliberately NOT gated by
+    ///         {whenNotPaused} — must always be callable, including while paused.
     function getReward() public nonReentrant updateReward(msg.sender) {
         uint256 reward = rewards[msg.sender];
         if (reward > 0) {
@@ -174,6 +198,8 @@ contract MagnetaStakingRewards is Ownable, ReentrancyGuard {
     }
 
     /// @notice Withdraw entire stake AND claim all pending rewards in one tx.
+    ///         Deliberately NOT gated by {whenNotPaused} — must always be
+    ///         callable, including while paused.
     function exit() external {
         withdraw(_balances[msg.sender]);
         getReward();
@@ -228,6 +254,32 @@ contract MagnetaStakingRewards is Ownable, ReentrancyGuard {
         }
         IERC20(tokenAddress).safeTransfer(owner(), tokenAmount);
         emit Recovered(tokenAddress, tokenAmount);
+    }
+
+    // ─── Emergency pause ──────────────────────────────────────────────────
+
+    /// @notice Pause new stakes. `withdraw`, `getReward` and `exit` remain
+    ///         callable while paused — stakers can always exit and claim.
+    function pause() external onlyOwnerOrPauser {
+        _pause();
+    }
+
+    function unpause() external onlyOwner {
+        _unpause();
+    }
+
+    /// @notice Grant an address the pauser role. Owner-only.
+    function addPauser(address account) public onlyOwner {
+        require(account != address(0), "MagnetaStakingRewards: zero pauser");
+        isPauser[account] = true;
+        emit PauserAdded(account);
+    }
+
+    /// @notice Revoke an address's pauser role. Owner-only.
+    function removePauser(address account) external onlyOwner {
+        require(account != address(0), "MagnetaStakingRewards: zero pauser");
+        isPauser[account] = false;
+        emit PauserRemoved(account);
     }
 
     // ─── Modifier ─────────────────────────────────────────────────────────

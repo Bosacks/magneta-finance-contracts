@@ -5,15 +5,15 @@ pragma solidity 0.8.20;
 ///
 /// MagnetaStakingFactory is V1.1+ scope — staking is outside V1 launch.
 /// Sentinelle Multi-AI 2026-05-22 returned CAUTION 62/100 with:
-///   - MEDIUM SC01 OWN-1: single-step Ownable.
 ///   - MEDIUM SC05 FACT-2: createPool() lacks zero-address validation
 ///     on stakingToken and rewardsToken, can produce permanently
 ///     bricked pools.
-/// Migrate to Ownable2Step, add createPool input validation, and
-/// transfer ownership to a Safe before any production use.
+/// Add createPool input validation and transfer ownership to a Safe
+/// before any production use.
 
-import { Ownable }              from "@openzeppelin/contracts/access/Ownable.sol";
+import { Ownable2Step }         from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import { ReentrancyGuard }      from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import { Pausable }             from "@openzeppelin/contracts/security/Pausable.sol";
 import { MagnetaStakingRewards } from "./MagnetaStakingRewards.sol";
 
 /**
@@ -30,7 +30,7 @@ import { MagnetaStakingRewards } from "./MagnetaStakingRewards.sol";
  *         Bookkeeping: `userPools[creator]` and `allPools[]` so the frontend
  *         can list the user's pools and an explorer-side global feed.
  */
-contract MagnetaStakingFactory is Ownable, ReentrancyGuard {
+contract MagnetaStakingFactory is Ownable2Step, ReentrancyGuard, Pausable {
     /// @notice Magneta FeeVault — receives `createFee` per pool created.
     address public feeVault;
 
@@ -51,6 +51,20 @@ contract MagnetaStakingFactory is Ownable, ReentrancyGuard {
     );
     event CreateFeeUpdated(uint256 oldFee, uint256 newFee);
     event FeeVaultUpdated(address oldVault, address newVault);
+    event PauserAdded(address indexed account);
+    event PauserRemoved(address indexed account);
+
+    /// @notice Multi-pauser set. Any address with isPauser[addr] == true may
+    ///         call {pause}. UNPAUSE remains owner-only.
+    mapping(address => bool) public isPauser;
+
+    modifier onlyOwnerOrPauser() {
+        require(
+            msg.sender == owner() || isPauser[msg.sender],
+            "MagnetaStakingFactory: not owner or pauser"
+        );
+        _;
+    }
 
     constructor(address _feeVault, address initialOwner) {
         require(_feeVault != address(0) && initialOwner != address(0), "zero address");
@@ -79,7 +93,7 @@ contract MagnetaStakingFactory is Ownable, ReentrancyGuard {
     function createStakingPool(
         address stakingToken,
         address rewardsToken
-    ) external payable nonReentrant returns (address pool) {
+    ) external payable nonReentrant whenNotPaused returns (address pool) {
         require(msg.value >= createFee, "insufficient fee");
 
         MagnetaStakingRewards p = new MagnetaStakingRewards(
@@ -114,5 +128,32 @@ contract MagnetaStakingFactory is Ownable, ReentrancyGuard {
 
     function getPoolCount() external view returns (uint256) {
         return allPools.length;
+    }
+
+    // ─── Emergency pause ──────────────────────────────────────────────────
+
+    /// @notice Pause new pool creation. Does not affect any already-deployed
+    ///         `MagnetaStakingRewards` pool — each is independently owned and
+    ///         paused (see that contract's own pause controls).
+    function pause() external onlyOwnerOrPauser {
+        _pause();
+    }
+
+    function unpause() external onlyOwner {
+        _unpause();
+    }
+
+    /// @notice Grant an address the pauser role. Owner-only.
+    function addPauser(address account) public onlyOwner {
+        require(account != address(0), "MagnetaStakingFactory: zero pauser");
+        isPauser[account] = true;
+        emit PauserAdded(account);
+    }
+
+    /// @notice Revoke an address's pauser role. Owner-only.
+    function removePauser(address account) external onlyOwner {
+        require(account != address(0), "MagnetaStakingFactory: zero pauser");
+        isPauser[account] = false;
+        emit PauserRemoved(account);
     }
 }
