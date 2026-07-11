@@ -139,6 +139,20 @@ contract MagnetaCurvePool is ReentrancyGuard {
     ///         dust-griefed V2 pair can never brick trading or graduation.
     bool public graduationFinalized;
 
+    /// @notice Timestamp at which the curve closed (`graduated` set true). Used
+    ///         to time-gate the graduation rescue: within GRADUATION_RESCUE_DELAY
+    ///         the strict price band is enforced, after it a persistently
+    ///         out-of-band (griefed) pair no longer bricks migration.
+    uint256 public graduatedAt;
+
+    /// @notice Grace window after graduation during which finalizeGraduation
+    ///         insists on the tight price band. Once it elapses, migration may
+    ///         proceed at the pair's prevailing ratio so a griefer who keeps a
+    ///         pre-seeded pair out of band can no longer lock buyer funds
+    ///         forever (H-1). Funds still flow only into the burned V2 LP —
+    ///         never to any admin (this contract has no owner by design).
+    uint256 public constant GRADUATION_RESCUE_DELAY = 7 days;
+
     // ─── Events ──────────────────────────────────────────────────────────
 
     event Trade(
@@ -157,6 +171,11 @@ contract MagnetaCurvePool is ReentrancyGuard {
         uint256 tokensMigrated,
         uint256 lpBurned
     );
+
+    /// @notice Emitted when finalizeGraduation had to accept a griefed pair's
+    ///         prevailing ratio because the rescue delay elapsed (H-1 escape
+    ///         hatch). Signals a degraded launch price, not a loss of funds.
+    event GraduationForced(address indexed pair, uint256 nativeMigrated, uint256 tokensMigrated);
 
     /// @notice Emitted when the curve closes and is ready for LP migration.
     ///         A keeper (or anyone) then calls finalizeGraduation().
@@ -285,6 +304,7 @@ contract MagnetaCurvePool is ReentrancyGuard {
         // can never make this buy revert.
         if (totalNativeBought >= graduationThreshold && !graduated) {
             graduated = true;
+            graduatedAt = block.timestamp;
             emit GraduationReady(nativeRaised, tokensSold);
         }
     }
@@ -329,6 +349,7 @@ contract MagnetaCurvePool is ReentrancyGuard {
         if (graduated) revert AlreadyGraduated();
         require(totalNativeBought >= graduationThreshold, "below threshold");
         graduated = true;
+        graduatedAt = block.timestamp;
         emit GraduationReady(nativeRaised, tokensSold);
     }
 
@@ -368,25 +389,46 @@ contract MagnetaCurvePool is ReentrancyGuard {
         // but we DO refuse to deposit into a pair whose spot ratio deviates from
         // the curve terminal price beyond the tolerance band (F82): doing so at
         // mins = 0 would seed the V2 launch at a manipulated price.
+        // After GRADUATION_RESCUE_DELAY a persistently out-of-band pair no
+        // longer bricks migration: we accept its prevailing ratio rather than
+        // leaving buyer funds locked forever (H-1). This only relaxes the price
+        // band — funds still go solely into the burned V2 LP, never to an admin.
+        bool forced = block.timestamp > graduatedAt + GRADUATION_RESCUE_DELAY;
+        bool acceptPrevailingRatio = false;
+
         address existingPair = IUniswapV2Factory(router.factory()).getPair(address(token), wnative);
         bool emptyPair = existingPair == address(0);
         if (!emptyPair) {
             (uint112 r0, uint112 r1, ) = IUniswapV2Pair(existingPair).getReserves();
             emptyPair = (r0 == 0 && r1 == 0);
             if (!emptyPair) {
-                _requirePairWithinBand(uint256(r0), uint256(r1));
+                if (forced) {
+                    // Grief outlasted the rescue delay — deposit at the pair's
+                    // current ratio (mins relaxed below) instead of reverting.
+                    acceptPrevailingRatio = true;
+                } else {
+                    _requirePairWithinBand(uint256(r0), uint256(r1));
+                }
             }
         }
 
         token.forceApprove(address(router), tokenForLp);
 
-        // Both the empty-pair (we set the price) and the within-band seeded-pair
-        // paths deposit at the curve terminal ratio, so a single band on our own
-        // desired amounts protects the launch price in either case (F82). No
-        // more mins = 0.
-        uint256 band = 10_000 - GRADUATION_TOLERANCE_BPS;
-        uint256 amountTokenMin = (tokenForLp * band) / 10_000;
-        uint256 amountETHMin   = (nativeForLp * band) / 10_000;
+        // Empty-pair and within-band seeded-pair paths deposit at the curve
+        // terminal ratio, so a single band on our own desired amounts protects
+        // the launch price (F82). The rescue path (acceptPrevailingRatio) drops
+        // the mins so the deposit succeeds at the griefed ratio; leftover on
+        // either side is swept below, so nothing is stranded.
+        uint256 amountTokenMin;
+        uint256 amountETHMin;
+        if (acceptPrevailingRatio) {
+            amountTokenMin = 0;
+            amountETHMin   = 0;
+        } else {
+            uint256 band = 10_000 - GRADUATION_TOLERANCE_BPS;
+            amountTokenMin = (tokenForLp * band) / 10_000;
+            amountETHMin   = (nativeForLp * band) / 10_000;
+        }
 
         (uint256 usedToken, uint256 usedNative, uint256 lp) = router.addLiquidityETH{value: nativeForLp}(
             address(token),
@@ -414,6 +456,9 @@ contract MagnetaCurvePool is ReentrancyGuard {
         }
 
         emit Graduated(pair, usedNative, usedToken, lp);
+        if (acceptPrevailingRatio) {
+            emit GraduationForced(pair, usedNative, usedToken);
+        }
     }
 
     /// @dev Revert unless the seeded pair's spot ratio (native per token) is

@@ -35,6 +35,14 @@ contract MagnetaFactory is Ownable2Step, Pausable {
     ///         fees, so 1e17 = 10%).
     uint256 public constant MAX_SWAP_FEE_WAD = 1e17; // 10%
 
+    /// @notice Gate for {createMultiPool}. Disabled by default so that even
+    ///         after the MagnetaMultiPool reserve-accounting rework a
+    ///         governance review must explicitly enable multi-pool creation
+    ///         per deployment. Closes the gap where MagnetaMultiPool's header
+    ///         claimed a factory-level gate that did not actually exist.
+    bool public multiPoolCreationEnabled;
+
+    event MultiPoolCreationEnabledSet(bool enabled);
     event MultiPoolCreated(address indexed pool, address[] tokens, uint256[] weights, address creator);
     event DLMMPoolCreated(address indexed pool, address tokenX, address tokenY, uint16 binStep, address creator);
     event StandardPoolCreated(uint256 indexed poolId, address token0, address token1, uint24 fee);
@@ -67,6 +75,7 @@ contract MagnetaFactory is Ownable2Step, Pausable {
         uint256[] memory weights,
         uint256 swapFee
     ) external whenNotPaused returns (address pool) {
+        require(multiPoolCreationEnabled, "MagnetaFactory: multipool creation disabled");
         // Factory-level fee cap. Token/weight invariants are enforced by
         // MagnetaMultiPool's constructor (length match, no zero/duplicate,
         // weights sum to 1e18) and we let those reverts bubble up.
@@ -106,6 +115,13 @@ contract MagnetaFactory is Ownable2Step, Pausable {
         require(token0 != address(0) && token1 != address(0), "MagnetaFactory: zero token");
         poolId = standardPoolManager.createPool(token0, token1, fee);
         emit StandardPoolCreated(poolId, token0, token1, fee);
+    }
+
+    /// @notice Enable or disable {createMultiPool}. Owner-only. Kept off until
+    ///         a governance review clears the reworked MagnetaMultiPool.
+    function setMultiPoolCreationEnabled(bool enabled) external onlyOwner {
+        multiPoolCreationEnabled = enabled;
+        emit MultiPoolCreationEnabledSet(enabled);
     }
 
     // Emergency controls

@@ -38,6 +38,11 @@ contract MagnetaMultiPool is ERC20, Ownable2Step, ReentrancyGuard, Pausable {
     IERC20[] public tokens;
     // Normalized weights (sum to 1 ether)
     uint256[] public weights;
+    // Per-token internal reserve accounting. All pricing and share math read
+    // these values, never balanceOf(address(this)), so a direct ERC20 donation
+    // (or flashloan) can no longer move the price (Sentinelle SC02 remediation,
+    // Venus March 2026 pattern). Indexed parallel to {tokens}.
+    uint256[] public reserves;
     // Swap fee (1e18 scale, e.g., 0.003e18 = 0.3%)
     uint256 public immutable swapFee;
 
@@ -86,6 +91,7 @@ contract MagnetaMultiPool is ERC20, Ownable2Step, ReentrancyGuard, Pausable {
             
             tokens.push(IERC20(_tokens[i]));
             weights.push(_weights[i]);
+            reserves.push(0);
             isTokenInPool[address(_tokens[i])] = true;
             totalWeight += _weights[i];
         }
@@ -103,9 +109,13 @@ contract MagnetaMultiPool is ERC20, Ownable2Step, ReentrancyGuard, Pausable {
         require(amounts.length == length, "Length mismatch");
 
         uint256 _totalSupply = totalSupply();
-        
+        // Amount of each token actually pulled from the provider. For the
+        // proportional branch this is <= amounts[i] (the supplied budget).
+        uint256[] memory pulled = new uint256[](length);
+
         if (_totalSupply == 0) {
-            // Initial liquidity
+            // Initial liquidity — the provider sets the ratio, so pull exactly
+            // what is supplied.
             uint256 totalNormalized = 0;
             for (uint256 i = 0; i < length; i++) {
                 require(amounts[i] > 0, "Initial liquidity must be positive");
@@ -113,34 +123,48 @@ contract MagnetaMultiPool is ERC20, Ownable2Step, ReentrancyGuard, Pausable {
                 uint256 tokenDecimals = ERC20(address(tokens[i])).decimals();
                 uint256 normalized = amounts[i] * (10**(18 - tokenDecimals));
                 totalNormalized += (normalized * weights[i]) / 1e18;
+                pulled[i] = amounts[i];
             }
-            
+
             lpAmount = totalNormalized;
             require(lpAmount > 1000, "Initial liquidity too low");
-            
+
             // Burn the first 1000 wei to prevent "inflation attack"
             // We mint it to a dead address as _mint(address(0)) is prohibited
             _mint(address(0x000000000000000000000000000000000000dEaD), 1000);
             lpAmount -= 1000;
         } else {
-            // Proportional deposit
-            // Calculate ratio based on first non-zero amount
-            // Currently requiring all tokens for simplicity
-            lpAmount = (_totalSupply * amounts[0]) / tokens[0].balanceOf(address(this));
+            // Proportional deposit. Mint the largest LP amount that EVERY
+            // token's supplied budget can back (the min across tokens), then
+            // pull only the strictly proportional amount of each token. This
+            // closes the disproportionate-deposit mint where depositing
+            // [x, 0, ...] minted shares against token0 alone.
+            lpAmount = type(uint256).max;
+            for (uint256 i = 0; i < length; i++) {
+                require(reserves[i] > 0, "Empty reserve");
+                uint256 lpForToken = (_totalSupply * amounts[i]) / reserves[i];
+                if (lpForToken < lpAmount) lpAmount = lpForToken;
+            }
+            require(lpAmount > 0, "Zero LP");
+
+            for (uint256 i = 0; i < length; i++) {
+                pulled[i] = (reserves[i] * lpAmount) / _totalSupply;
+            }
         }
 
         require(lpAmount >= minLpAmount, "Slippage");
 
         _mint(msg.sender, lpAmount);
 
-        // Transfer tokens
+        // Transfer tokens and credit internal reserves.
         for (uint256 i = 0; i < length; i++) {
-            if (amounts[i] > 0) {
-                tokens[i].safeTransferFrom(msg.sender, address(this), amounts[i]);
+            if (pulled[i] > 0) {
+                tokens[i].safeTransferFrom(msg.sender, address(this), pulled[i]);
+                reserves[i] += pulled[i];
             }
         }
 
-        emit LiquidityAdded(msg.sender, amounts, lpAmount);
+        emit LiquidityAdded(msg.sender, pulled, lpAmount);
     }
 
     /**
@@ -151,11 +175,11 @@ contract MagnetaMultiPool is ERC20, Ownable2Step, ReentrancyGuard, Pausable {
         
         uint256 _totalSupply = totalSupply();
         uint256 length = tokens.length;
+        require(minAmounts.length == length, "Length mismatch");
         uint256[] memory amountsOut = new uint256[](length);
 
         for (uint256 i = 0; i < length; i++) {
-            uint256 balance = tokens[i].balanceOf(address(this));
-            uint256 amount = (balance * lpAmount) / _totalSupply;
+            uint256 amount = (reserves[i] * lpAmount) / _totalSupply;
             require(amount >= minAmounts[i], "Slippage");
             amountsOut[i] = amount;
         }
@@ -163,6 +187,7 @@ contract MagnetaMultiPool is ERC20, Ownable2Step, ReentrancyGuard, Pausable {
         _burn(msg.sender, lpAmount);
 
         for (uint256 i = 0; i < length; i++) {
+            reserves[i] -= amountsOut[i];
             tokens[i].safeTransfer(msg.sender, amountsOut[i]);
         }
 
@@ -176,43 +201,49 @@ contract MagnetaMultiPool is ERC20, Ownable2Step, ReentrancyGuard, Pausable {
      */
     function swap(address tokenIn, address tokenOut, uint256 amountIn, uint256 minAmountOut) external nonReentrant whenNotPaused returns (uint256 amountOut) {
         require(isTokenInPool[tokenIn] && isTokenInPool[tokenOut], "Invalid token");
-        
+        require(tokenIn != tokenOut, "Same token");
+        require(amountIn > 0, "Zero amountIn");
+
+        uint256 idxIn = _indexOf(tokenIn);
+        uint256 idxOut = _indexOf(tokenOut);
+
+        require(weights[idxIn] == weights[idxOut], "MagnetaMultiPool: Mixed weights not supported in V1");
+
+        // Price strictly from internal reserves — donations/flashloans to the
+        // pool balance cannot move these values.
+        uint256 balanceIn = reserves[idxIn];
+        uint256 balanceOut = reserves[idxOut];
+        require(balanceIn > 0 && balanceOut > 0, "Empty reserve");
+
         IERC20(tokenIn).safeTransferFrom(msg.sender, address(this), amountIn);
-        
-        uint256 balanceIn = IERC20(tokenIn).balanceOf(address(this)) - amountIn; // Pre-deposit balance
-        uint256 balanceOut = IERC20(tokenOut).balanceOf(address(this));
 
-        uint256 weightIn = getWeight(tokenIn);
-        uint256 weightOut = getWeight(tokenOut);
-        require(weightIn == weightOut, "MagnetaMultiPool: Mixed weights not supported in V1");
-
+        // Constant-product between the two equal-weight legs (MVP). The full
+        // fee (not just the net) stays in the pool and accrues to LPs.
         uint256 amountInAfterFee = amountIn * (1e18 - swapFee) / 1e18;
-        
-        // Simplified Calc for MVP (assuming 50/50 if weights equal, else full formula)
-        // Ao = Bo * (1 - (Bi / (Bi + Ai)) ^ (Wi/Wo))
-        
-        // For MVP, implementing Constant Product for any pair
-        // (Bi + Ai) * balanceOut_new = Bi * Bo
-        
         uint256 denominator = balanceIn + amountInAfterFee;
-        // Basic xy=k style for MVP (ignoring weights for moment to ensure safety)
-        // To strictly follow weights:
-        // amountOut = balanceOut * (1 - (balanceIn / (balanceIn + amountInAfterFee)) ^ (weightIn / weightOut))
-        
-        // Simplified constant product for MVP (assuming equal weights essentially or simplified)
-        // Actual Balancer math: amountOut = amountIn * (1 - (Bi / (Bi + Ai)) ^ (Wi / Wo))
-        // MVP: x * y = k logic between the two tokens
-        
         amountOut = (amountInAfterFee * balanceOut) / denominator;
 
         require(amountOut >= minAmountOut, "Slippage");
-        
-        // Transfer to user
+        require(amountOut < balanceOut, "Insufficient liquidity");
+
+        // Effects on reserves before the external transfer out.
+        reserves[idxIn] = balanceIn + amountIn;
+        reserves[idxOut] = balanceOut - amountOut;
+
         IERC20(tokenOut).safeTransfer(msg.sender, amountOut);
-        
-        emit Swap(msg.sender, address(tokenIn), address(tokenOut), amountIn, amountOut);
+
+        emit Swap(msg.sender, tokenIn, tokenOut, amountIn, amountOut);
     }
-    
+
+    /// @dev Index of a token in {tokens}; reverts if absent.
+    function _indexOf(address token) internal view returns (uint256) {
+        uint256 length = tokens.length;
+        for (uint256 i = 0; i < length; i++) {
+            if (address(tokens[i]) == token) return i;
+        }
+        revert("Invalid token");
+    }
+
     function getTokens() public view returns (IERC20[] memory) {
         return tokens;
     }
