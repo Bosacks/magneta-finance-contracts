@@ -206,5 +206,40 @@ describe("MagnetaCurvePool — graduation DoS fix (finalizeGraduation)", functio
         .to.be.revertedWithCustomError(pool, "PairRatioOutOfBand");
       expect(await pool.graduationFinalized()).to.equal(false);
     });
+
+    it("H-1: after GRADUATION_RESCUE_DELAY a persistently griefed pair no longer locks funds", async function () {
+      const wethAddr  = await weth.getAddress();
+      const tokenAddr = await token.getAddress();
+
+      // Same grief setup: attacker pre-seeds an out-of-band pair.
+      await factory.connect(attacker).createPair(tokenAddr, wethAddr);
+      const pairAddr: string = await factory.getPair(tokenAddr, wethAddr);
+      const pair = await ethers.getContractAt(
+        "@uniswap/v2-core/contracts/interfaces/IUniswapV2Pair.sol:IUniswapV2Pair", pairAddr);
+
+      await pool.connect(alice).buy(0, { value: ethers.parseEther("1") });
+      const aliceBal: bigint = await token.balanceOf(alice.address);
+      await token.connect(alice).transfer(pairAddr, aliceBal);
+      await weth.connect(attacker).deposit({ value: ethers.parseEther("0.001") });
+      await weth.connect(attacker).transfer(pairAddr, ethers.parseEther("0.001"));
+      await pair.sync();
+
+      await buyToGraduation(alice);
+      expect(await pool.graduated()).to.equal(true);
+
+      // Within the delay it still reverts (price band protected).
+      await expect(pool.connect(attacker).finalizeGraduation())
+        .to.be.revertedWithCustomError(pool, "PairRatioOutOfBand");
+
+      // Advance time past the rescue delay: migration now proceeds at the
+      // prevailing (griefed) ratio instead of locking buyer funds forever.
+      const delay: bigint = await pool.GRADUATION_RESCUE_DELAY();
+      await ethers.provider.send("evm_increaseTime", [Number(delay) + 1]);
+      await ethers.provider.send("evm_mine", []);
+
+      await expect(pool.connect(attacker).finalizeGraduation())
+        .to.emit(pool, "GraduationForced");
+      expect(await pool.graduationFinalized()).to.equal(true);
+    });
   });
 });

@@ -72,6 +72,31 @@ describe("MagnetaMultiPool", function () {
 
             expect(await multiPool.balanceOf(user.address)).to.be.gt(0);
         });
+
+        it("C-1: rejects a disproportionate deposit (mint on one token only)", async function () {
+            const [, , attacker] = await ethers.getSigners();
+            // Seed the pool with honest proportional liquidity.
+            const seed = [ethers.parseEther("300"), ethers.parseEther("300"), ethers.parseEther("400")];
+            await token0.connect(user).approve(await multiPool.getAddress(), ethers.MaxUint256);
+            await token1.connect(user).approve(await multiPool.getAddress(), ethers.MaxUint256);
+            await token2.connect(user).approve(await multiPool.getAddress(), ethers.MaxUint256);
+            await multiPool.connect(user).addLiquidity(seed, 0);
+
+            // Fund the attacker and let them try to mint LP by supplying token0 only.
+            await token0.transfer(attacker.address, ethers.parseEther("1000"));
+            await token0.connect(attacker).approve(await multiPool.getAddress(), ethers.MaxUint256);
+
+            // Old bug: [x, 0, 0] minted ~x/reserve0 * supply shares for free.
+            // Now the LP amount is the MIN across tokens → 0 → revert.
+            await expect(
+                multiPool.connect(attacker).addLiquidity(
+                    [ethers.parseEther("1000"), 0, 0],
+                    0
+                )
+            ).to.be.revertedWith("Zero LP");
+
+            expect(await multiPool.balanceOf(attacker.address)).to.equal(0);
+        });
     });
 
     describe("Swapping", function () {

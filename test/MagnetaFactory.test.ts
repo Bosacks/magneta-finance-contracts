@@ -29,6 +29,10 @@ describe("MagnetaFactory", function () {
         const MagnetaFactoryContract = await ethers.getContractFactory("MagnetaFactory");
         factory = await MagnetaFactoryContract.deploy(await standardPool.getAddress(), owner.address);
 
+        // MultiPool creation is gated off by default (defense-in-depth after the
+        // reserve-accounting rework); enable it for the creation tests.
+        await factory.setMultiPoolCreationEnabled(true);
+
         // Give pool creation permission to factory in standard pool
         // Actually standardPool.createPool is public, but let's check
     });
