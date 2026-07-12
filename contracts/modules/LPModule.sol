@@ -165,11 +165,14 @@ contract LPModule is IModule, ReentrancyGuard, Ownable2Step {
         CreateLPParams memory p = abi.decode(raw, (CreateLPParams));
         require(msg.value == p.ethAmount, "eth mismatch");
 
-        // F53: for LOCAL ops the fee is collected here, so a caller-supplied
-        // usdcFee=0 must not slip the 0.15% markup. Derive the minimum on-chain
-        // from the op's USD value and floor the supplied fee against it. Cross
-        // -chain ops were already charged source-side (see _collectFee).
-        _requireLocalFee(ctx, p.ethAmount, p.usdcFee);
+        // NATIVE-FEE MIGRATION: the local Magneta service fee is now collected in
+        // NATIVE by MagnetaGateway.executeOperation (opServiceFeeNative), skimmed
+        // before this module runs — product policy is native-only (users never
+        // convert to USDC). The old USDC local floor (F53 _requireLocalFee) is
+        // therefore dropped for LOCAL ops; usdcFee may be 0. The fail-safe against
+        // an unconfigured/evaded fee is off-chain reconciliation in MagnetaTerminal
+        // (usage vs ServiceFeeCollected per chain/op). `_collectFee` is kept so any
+        // non-zero usdcFee (and the cross-chain source-side markup) still works.
         _collectFee(ctx, p.usdcFee);
 
         _pullToken(ctx, p.token, p.tokenAmount);
@@ -274,10 +277,9 @@ contract LPModule is IModule, ReentrancyGuard, Ownable2Step {
         CreateLPAndBuyParams memory p = abi.decode(raw, (CreateLPAndBuyParams));
         require(msg.value == p.lp.ethAmount + p.buyEth, "eth mismatch");
 
-        // F53: enforce the on-chain-derived fee floor for LOCAL ops. The value
-        // priced for the markup is the LP native side (p.lp.ethAmount); the
-        // first-buy ETH is the caller's own swap, not Magneta-marked-up value.
-        _requireLocalFee(ctx, p.lp.ethAmount, p.lp.usdcFee);
+        // NATIVE-FEE MIGRATION (see _createLP): local fee is now native, skimmed
+        // by the Gateway; USDC local floor dropped, usdcFee may be 0. `_collectFee`
+        // kept for any non-zero usdcFee and the cross-chain source-side markup.
         _collectFee(ctx, p.lp.usdcFee);
 
         _pullToken(ctx, p.lp.token, p.lp.tokenAmount);
@@ -426,6 +428,11 @@ contract LPModule is IModule, ReentrancyGuard, Ownable2Step {
         IERC20(usdc).safeTransferFrom(ctx.caller, ctx.feeVault, amount);
     }
 
+    /// @dev DEPRECATED / NO LONGER CALLED (native-fee migration): the local
+    ///      Magneta fee is now collected in NATIVE by the Gateway, so this USDC
+    ///      floor is not invoked. Retained (not deleted) so it can be re-enabled
+    ///      if a chain ever needs a USDC fallback, and to avoid an unused-state
+    ///      cascade on `magnetaSwap`. Not a live guard anymore.
     /// @dev F53: enforce the 0.15% Magneta markup floor for LOCAL value ops.
     ///      Without this, a local caller (originChainId == block.chainid) could
     ///      pass usdcFee = 0 and _collectFee would early-return, evading the fee

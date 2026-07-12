@@ -70,6 +70,22 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
     ///         protocol could skim arbitrary amounts of bridged value.
     uint16 public constant MAX_CROSSCHAIN_VALUE_FEE_BPS = 1000;
 
+    /// @notice Flat NATIVE service fee per LOCAL op-type (wei), skimmed from
+    ///         msg.value on {executeOperation} and forwarded to the FeeVault.
+    ///         Native-only by product policy — users never have to convert to
+    ///         USDC to pay a Magneta fee. The fee is protocol-set (NOT a caller
+    ///         argument), so it cannot be bypassed: the target module asserts
+    ///         `msg.value == the op's native amount`, so the caller must include
+    ///         this fee on top or the op reverts. Default 0 per op until the
+    ///         owner (Safe) switches it on — existing flows keep working.
+    mapping(OpType => uint256) public opServiceFeeNative;
+
+    /// @notice Upper bound on any single {opServiceFeeNative} entry — a
+    ///         fat-finger / extractive-fee guard. Native amounts are
+    ///         chain-specific, so this is owner-settable (not a fixed constant).
+    ///         Default 1 native unit (mirrors MagnetaBundler.maxFeePerTx).
+    uint256 public maxOpServiceFeeNative = 1 ether;
+
     /// @notice Circle CCTP TokenMessenger for burning/minting USDC cross-chain.
     ITokenMessenger public cctpMessenger;
 
@@ -117,6 +133,9 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
     event CrossChainFanOut(OpType indexed op, address indexed caller, uint256 chainCount);
     event EidMappingSet(uint32 eid, uint256 chainId);
     event CrossChainFeesUpdated(uint256 commandFee, uint16 valueFeeBps);
+    event OpServiceFeeNativeUpdated(OpType indexed op, uint256 fee);
+    event MaxOpServiceFeeNativeUpdated(uint256 maxFee);
+    event ServiceFeeCollected(address indexed caller, OpType indexed op, uint256 amount);
     event ValueOpPending(bytes32 indexed guid, OpType indexed op, address indexed caller, address token, uint256 amount);
     event ValueOpFulfilled(bytes32 indexed guid, OpType indexed op, address indexed caller);
     event CctpConfigUpdated(address messenger, uint32 localDomain);
@@ -157,6 +176,22 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
         address module = _modules[op];
         if (module == address(0)) revert ModuleNotSet(op);
 
+        // Skim the protocol-set NATIVE service fee to the FeeVault, then forward
+        // only the op's own native amount to the module. Because the module
+        // asserts `msg.value == <op amount>`, the caller must send
+        // `<op amount> + fee` or the op reverts — the fee cannot be bypassed.
+        // The FeeVault is a native-capable EOA (same sink as the Bundler's
+        // _forwardFee). nonReentrant + EOA sink ⇒ no reentrancy on the call.
+        uint256 opValue = msg.value;
+        uint256 fee = opServiceFeeNative[op];
+        if (fee > 0) {
+            require(msg.value >= fee, "MagnetaGateway: value below service fee");
+            opValue = msg.value - fee;
+            (bool feeOk, ) = payable(_feeVault).call{value: fee}("");
+            require(feeOk, "MagnetaGateway: fee transfer failed");
+            emit ServiceFeeCollected(msg.sender, op, fee);
+        }
+
         IModule.Context memory ctx = IModule.Context({
             caller: msg.sender,
             originChainId: block.chainid,
@@ -164,7 +199,7 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
             tokenSource: address(0)
         });
 
-        result = IModule(module).execute{value: msg.value}(ctx, params);
+        result = IModule(module).execute{value: opValue}(ctx, params);
 
         emit OperationExecuted(op, module, msg.sender, block.chainid, keccak256(result));
     }
@@ -616,6 +651,22 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
         crossChainCommandFee = commandFee;
         crossChainValueFeeBps = valueFeeBps;
         emit CrossChainFeesUpdated(commandFee, valueFeeBps);
+    }
+
+    /// @notice Owner (Safe) sets the flat NATIVE service fee for a local op-type.
+    ///         Skimmed to the FeeVault on {executeOperation}. Bounded by
+    ///         {maxOpServiceFeeNative} to prevent a fat-finger / extractive fee.
+    function setOpServiceFeeNative(OpType op, uint256 fee) external onlyOwner {
+        require(fee <= maxOpServiceFeeNative, "MagnetaGateway: fee too high");
+        opServiceFeeNative[op] = fee;
+        emit OpServiceFeeNativeUpdated(op, fee);
+    }
+
+    /// @notice Owner (Safe) sets the upper bound for {setOpServiceFeeNative}.
+    ///         Lowering it does not retroactively change fees already set.
+    function setMaxOpServiceFeeNative(uint256 maxFee) external onlyOwner {
+        maxOpServiceFeeNative = maxFee;
+        emit MaxOpServiceFeeNativeUpdated(maxFee);
     }
 
     /// @notice Configure Circle CCTP for cross-chain USDC bridging.

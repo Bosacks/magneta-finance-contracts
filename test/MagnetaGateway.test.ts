@@ -158,13 +158,14 @@ describe("MagnetaGateway", function () {
             expect(await lpToken.balanceOf(alice.address)).to.be.gt(0n);
         });
 
-        // F53 regression: a LOCAL caller (originChainId == block.chainid) must
-        // NOT be able to pass usdcFee = 0 to evade the 0.15% markup. Before the
-        // fix _collectFee early-returned on zero; now _requireLocalFee floors it.
-        it("rejects a LOCAL CREATE_LP with usdcFee=0 (fee-evasion guard)", async () => {
+        // NATIVE-FEE MIGRATION: the old F53 USDC local floor is removed — a LOCAL
+        // CREATE_LP with usdcFee=0 now SUCCEEDS and pulls no USDC (the Magneta fee
+        // is collected in NATIVE by the Gateway skim; see the native-fee suite).
+        it("allows a LOCAL CREATE_LP with usdcFee=0 and pulls no USDC (native-fee migration)", async () => {
             await gateway.setModule(OP_CREATE_LP, await lpModule.getAddress());
 
             const tokenAmount = ethers.parseEther("1000");
+            await token.connect(alice).approve(await router.getAddress(), tokenAmount);
             await token.connect(alice).approve(await lpModule.getAddress(), tokenAmount);
 
             const coder = new ethers.AbiCoder();
@@ -178,15 +179,86 @@ describe("MagnetaGateway", function () {
                     ethAmount,
                     0n,
                     0n,
-                    0n, // usdcFee = 0 → must revert for a local op
+                    0n, // usdcFee = 0 → now allowed (native fee replaces the USDC floor)
                     Math.floor(Date.now() / 1000) + 3600,
                 ]]
             );
             const params = ethers.concat(["0x00", encoded]);
 
+            const feeVaultUsdcBefore = await usdc.balanceOf(feeVault.address);
             await expect(
                 gateway.connect(alice).executeOperation(OP_CREATE_LP, params, { value: ethAmount })
-            ).to.be.revertedWith("LPModule: fee below minimum");
+            ).to.emit(gateway, "OperationExecuted");
+            // No USDC skimmed when usdcFee = 0.
+            expect(await usdc.balanceOf(feeVault.address)).to.equal(feeVaultUsdcBefore);
+
+            const pair = await router.pair();
+            const lpToken = await ethers.getContractAt("MockLPToken", pair);
+            expect(await lpToken.balanceOf(alice.address)).to.be.gt(0n);
+        });
+    });
+
+    describe("Native service fee (opServiceFeeNative)", () => {
+        const ethAmount = 1_000_000n;
+        const nativeFee = 500_000n; // wei
+
+        async function encodeCreateLpParams(usdcFee: bigint) {
+            const tokenAmount = ethers.parseEther("1000");
+            await token.connect(alice).approve(await router.getAddress(), tokenAmount);
+            await token.connect(alice).approve(await lpModule.getAddress(), tokenAmount);
+            const coder = new ethers.AbiCoder();
+            const encoded = coder.encode(
+                ["tuple(address token,uint256 tokenAmount,uint256 ethAmount,uint256 amountTokenMin,uint256 amountETHMin,uint256 usdcFee,uint256 deadline)"],
+                [[await token.getAddress(), tokenAmount, ethAmount, 0n, 0n, usdcFee, Math.floor(Date.now() / 1000) + 3600]]
+            );
+            return ethers.concat(["0x00", encoded]);
+        }
+
+        it("skims the native fee to the FeeVault and forwards the op amount to the module", async () => {
+            await gateway.setModule(OP_CREATE_LP, await lpModule.getAddress());
+            await gateway.setOpServiceFeeNative(OP_CREATE_LP, nativeFee);
+            const params = await encodeCreateLpParams(0n);
+
+            const fvBefore = await ethers.provider.getBalance(feeVault.address);
+            await expect(
+                gateway.connect(alice).executeOperation(OP_CREATE_LP, params, { value: ethAmount + nativeFee })
+            ).to.emit(gateway, "ServiceFeeCollected").withArgs(alice.address, OP_CREATE_LP, nativeFee);
+            // Native fee landed in the FeeVault; the module still got exactly ethAmount (LP minted).
+            expect((await ethers.provider.getBalance(feeVault.address)) - fvBefore).to.equal(nativeFee);
+            const lpToken = await ethers.getContractAt("MockLPToken", await router.pair());
+            expect(await lpToken.balanceOf(alice.address)).to.be.gt(0n);
+        });
+
+        it("cannot be bypassed: omitting the fee makes the module's eth-check fail", async () => {
+            await gateway.setModule(OP_CREATE_LP, await lpModule.getAddress());
+            await gateway.setOpServiceFeeNative(OP_CREATE_LP, nativeFee);
+            const params = await encodeCreateLpParams(0n);
+            // Send only ethAmount: Gateway skims nativeFee, forwards ethAmount-fee,
+            // module requires msg.value == p.ethAmount → reverts. Fee is enforced.
+            await expect(
+                gateway.connect(alice).executeOperation(OP_CREATE_LP, params, { value: ethAmount })
+            ).to.be.revertedWith("eth mismatch");
+        });
+
+        it("default fee is 0 (no skim, backward compatible)", async () => {
+            await gateway.setModule(OP_CREATE_LP, await lpModule.getAddress());
+            expect(await gateway.opServiceFeeNative(OP_CREATE_LP)).to.equal(0n);
+            const params = await encodeCreateLpParams(0n);
+            const fvBefore = await ethers.provider.getBalance(feeVault.address);
+            await gateway.connect(alice).executeOperation(OP_CREATE_LP, params, { value: ethAmount });
+            expect(await ethers.provider.getBalance(feeVault.address)).to.equal(fvBefore);
+        });
+
+        it("setOpServiceFeeNative is owner-only and bounded by maxOpServiceFeeNative", async () => {
+            await expect(
+                gateway.connect(alice).setOpServiceFeeNative(OP_CREATE_LP, 1n)
+            ).to.be.revertedWith("Ownable: caller is not the owner");
+            const max = await gateway.maxOpServiceFeeNative();
+            await expect(
+                gateway.setOpServiceFeeNative(OP_CREATE_LP, max + 1n)
+            ).to.be.revertedWith("MagnetaGateway: fee too high");
+            await expect(gateway.setOpServiceFeeNative(OP_CREATE_LP, nativeFee))
+                .to.emit(gateway, "OpServiceFeeNativeUpdated").withArgs(OP_CREATE_LP, nativeFee);
         });
     });
 

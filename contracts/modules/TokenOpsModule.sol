@@ -228,6 +228,14 @@ contract TokenOpsModule is IModule, ReentrancyGuard, Ownable2Step {
         // != block.chainid) the fee was already collected on the source chain
         // by the Gateway, so we waive the local check via _pullUsdc's own
         // origin-chain guard.
+        //
+        // NATIVE-FEE MIGRATION: to go native-only the operator sets
+        // `flatFeeUsdc = 0` at cutover (setFlatFee) — the floor then passes with
+        // usdcFee=0 and _pullUsdc(0) is a no-op, so the Magneta fee is collected
+        // in NATIVE by MagnetaGateway.executeOperation (opServiceFeeNative)
+        // instead. No code change needed here; the USDC path stays available if a
+        // chain ever needs it. Fail-safe direction: if flatFeeUsdc is left > 0 the
+        // op still charges (never silently free).
         if (ctx.originChainId == block.chainid) {
             require(p.usdcFee >= flatFeeUsdc, "MagnetaOps: fee below minimum");
         }
