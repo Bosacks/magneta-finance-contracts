@@ -3,6 +3,12 @@
 > Fil chronologique des sessions. Anti-chronologique (plus récent en haut).
 > Voir `~/CLAUDE.md` pour la règle d'édition.
 
+## 2026-07-13 — Centralisation des contrats
+- Mergé `feat/native-service-fee` + `fix/cronos-verify-config` → main, pushé
+- Committé le backlog : sources AMM V2 (`uniswap/`, `imports/` — déployées mainnet, jamais versionnées), chain-service (CREATE_TOKEN, LP atomique, createLpFromUsdc, messaging tracker), archives vague Safe (batches → `Fait/`, gnosisSafe dans les 20 deployments)
+- **Migration : `tokens/` = contrats du launcher** (depuis magneta-finance-tokens/contracts/solidity, avec les 7 dossiers deployments-*) ; package workspace pnpm ; 511 + 171 tests verts
+- Nouveau `scripts/export-abis.mjs` (`pnpm export:abis`) : check de dérive ABI par défaut, 3/3 DRIFT attendu (sources durcies ≠ contrats déployés) ; `--write` réservé au cutover/redeploy
+
 ## 2026-07-09 (transfert Safe de la vague TERMINÉ)
 - **20/20 chaînes = 231 contrats de la vague sous multisig 2/2** ✅ (vérifié on-chain owner==Safe, tous)
 - Accepts (step-2) : UI Safe pour ~10 chaînes ; **execBatch.ts** pour berachain/unichain + les 4 INH (flare/sei/abstract/cronos) car UI plante (Safe SDK/Tenderly/Safe Shield mal supportés sur chaînes récentes)
