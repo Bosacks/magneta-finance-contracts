@@ -1,0 +1,14 @@
+[profile.default]
+src = "contracts"
+out = "out"
+libs = ["node_modules", "lib"]
+remappings = [
+    "@openzeppelin/=node_modules/@openzeppelin/",
+    "hardhat/=node_modules/hardhat/",
+    "eth-gas-reporter/=node_modules/eth-gas-reporter/",
+    "ds-test/=lib/forge-std/lib/ds-test/src/",
+    "forge-std/=lib/forge-std/src/"
+]
+solc = "0.8.20"
+
+# See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options

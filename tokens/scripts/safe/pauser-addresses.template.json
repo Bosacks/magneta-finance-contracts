@@ -1,0 +1,62 @@
+{
+  "_README": [
+    "Address table for generate-pauser-batches.ts (multipauser addPauser).",
+    "",
+    "HOW TO USE:",
+    "  1. cp pauser-addresses.template.json pauser-addresses.json",
+    "  2. Per chain fill: safe, guardian (0x92F440Bc...4260), relayer (Defender",
+    "     Relayer address — leave blank to skip), and each DEPLOYED pausable address.",
+    "  3. npx hardhat run scripts/safe/generate-pauser-batches.ts",
+    "",
+    "Any contract address left blank/zero is skipped. Emits addPauser(guardian) +",
+    "addPauser(relayer) per contract. unpause() stays Safe-only. Run AFTER ownership",
+    "of the contracts is on the Safe (the deployer already added the guardian to",
+    "gateway+swap inline in deployAll.ts — this batch covers the rest + the relayer)."
+  ],
+  "chains": {
+    "137": {
+      "network": "polygon",
+      "safe": "0x4AeA3A398Db41b45e146c08131aD27c75b02EC2F",
+      "guardian": "0x92F440Bc1f1FaBD6D3e6256491631E07857F4260",
+      "relayer": "",
+      "contracts": {
+        "gateway": "",
+        "swap": "",
+        "factory": "",
+        "pool": "",
+        "bundler": "",
+        "proxy": "",
+        "lpModule": "",
+        "swapModule": "",
+        "taxClaimModule": "",
+        "tokenOpsModule": "",
+        "lpAtomicModule": "",
+        "curveFactory": "",
+        "curvePool": "",
+        "bridge": ""
+      }
+    },
+    "8453": {
+      "network": "base",
+      "safe": "0xC4c9...717a",
+      "guardian": "0x92F440Bc1f1FaBD6D3e6256491631E07857F4260",
+      "relayer": "",
+      "contracts": {
+        "gateway": "",
+        "swap": "",
+        "factory": "",
+        "pool": "",
+        "bundler": "",
+        "proxy": "",
+        "lpModule": "",
+        "swapModule": "",
+        "taxClaimModule": "",
+        "tokenOpsModule": "",
+        "lpAtomicModule": "",
+        "curveFactory": "",
+        "curvePool": "",
+        "bridge": ""
+      }
+    }
+  }
+}

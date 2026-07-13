@@ -1,0 +1,9 @@
+{
+  "network": "polygon",
+  "chainId": 137,
+  "contract": "MagnetaLpAtomicHelper",
+  "address": "0xEFCC47eBd717af4f4012F6b1E9052f1cD03d8aB5",
+  "deployer": "0x620684F822da9adF36F41e3554791D889947e25E",
+  "safe": null,
+  "timestamp": "2026-07-01T18:18:22.698Z"
+}

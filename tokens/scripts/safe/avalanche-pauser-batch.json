@@ -1,0 +1,88 @@
+{
+  "version": "1.0",
+  "chainId": "43114",
+  "createdAt": 1783098932,
+  "meta": {
+    "name": "Magneta multipauser — avalanche",
+    "description": "addPauser for [0x92F440Bc1f1FaBD6D3e6256491631E07857F4260] on 11 contract(s): gateway, swap, factory, pool, bundler, lpModule, swapModule, taxClaimModule, tokenOpsModule, lpAtomicModule, bridge. unpause() stays Safe-only. Sign with Safe 0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a."
+  },
+  "transactions": [
+    {
+      "to": "0xEc12a802D854a9170041695319a79F0Ef568D847",
+      "value": "0",
+      "data": "0x82dc1ec400000000000000000000000092f440bc1f1fabd6d3e6256491631e07857f4260",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x0cf3481f35338963C86404a6adFE5400330f2E0D",
+      "value": "0",
+      "data": "0x82dc1ec400000000000000000000000092f440bc1f1fabd6d3e6256491631e07857f4260",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x4aF497dA6012811c1B146B0450CADaFcBcAc0348",
+      "value": "0",
+      "data": "0x82dc1ec400000000000000000000000092f440bc1f1fabd6d3e6256491631e07857f4260",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0xc0Bc9150D6d2f64d999072d4263ff87aF0357F4D",
+      "value": "0",
+      "data": "0x82dc1ec400000000000000000000000092f440bc1f1fabd6d3e6256491631e07857f4260",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x019fA045a0D8270c6D3839D519E43E30d4F6d9Bf",
+      "value": "0",
+      "data": "0x82dc1ec400000000000000000000000092f440bc1f1fabd6d3e6256491631e07857f4260",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0xa476a4f7E1AEd94c216101DC883A0c9a2e7D01e3",
+      "value": "0",
+      "data": "0x82dc1ec400000000000000000000000092f440bc1f1fabd6d3e6256491631e07857f4260",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0xE9DD3385B0C9695FEAafADefE5e851072FaEB5aa",
+      "value": "0",
+      "data": "0x82dc1ec400000000000000000000000092f440bc1f1fabd6d3e6256491631e07857f4260",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x3355b4D0adD012fF92A35F7675A4BF9C9FC62501",
+      "value": "0",
+      "data": "0x82dc1ec400000000000000000000000092f440bc1f1fabd6d3e6256491631e07857f4260",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x5588Cd99E28518D13A316996dc0D4351afAe4D4a",
+      "value": "0",
+      "data": "0x82dc1ec400000000000000000000000092f440bc1f1fabd6d3e6256491631e07857f4260",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x0A82e323f769c7c663B30Bab51570fAD5e982334",
+      "value": "0",
+      "data": "0x82dc1ec400000000000000000000000092f440bc1f1fabd6d3e6256491631e07857f4260",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x8a498f5A2cee23fa40352156A87Cc8073B7c1a87",
+      "value": "0",
+      "data": "0x82dc1ec400000000000000000000000092f440bc1f1fabd6d3e6256491631e07857f4260",
+      "contractMethod": null,
+      "contractInputsValues": null
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "network": "arbitrum",
+  "chainId": 42161,
+  "mag": "0x41c71d95a948267742a524887A501da283898Cf4",
+  "lzEndpoint": "0x1a44076050125825900e736c501f859c50fE728c",
+  "tokenOpsModule": "0x56B1F90E863542e0491B0d5DbFD19c2d27529e88",
+  "deployer": "0x620684F822da9adF36F41e3554791D889947e25E",
+  "deployedAt": "2026-05-08T00:47:59.109Z"
+}

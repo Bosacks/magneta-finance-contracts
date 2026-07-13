@@ -1,0 +1,9 @@
+{
+  "network": "gnosis",
+  "chainId": 100,
+  "contract": "MagnetaLpAtomicHelper",
+  "address": "0xC59c1A1ff4F9a7129D5AE29b8636e35C8B603547",
+  "deployer": "0x620684F822da9adF36F41e3554791D889947e25E",
+  "safe": null,
+  "timestamp": "2026-07-01T16:52:51.928Z"
+}

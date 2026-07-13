@@ -1,0 +1,13 @@
+{
+  "contractAddress": "0xD80bc1d82e4BE87d2a947fBC6FaeE6515165D0A9",
+  "deployer": "0x7900F22d8d6b234E87499F1d5b59e868963387EB",
+  "network": "optimismSepolia",
+  "chainId": "11155420",
+  "tokenName": "Test Token",
+  "tokenSymbol": "TEST",
+  "totalSupply": "1000000000000000000000000",
+  "revokeUpdate": false,
+  "revokeFreeze": false,
+  "revokeMint": false,
+  "deployedAt": "2026-02-01T22:03:11.123Z"
+}

@@ -1,0 +1,9 @@
+{
+  "network": "cronos",
+  "chainId": 25,
+  "contract": "MagnetaLpAtomicHelper",
+  "address": "0xB89181a73f3c1E92885D072Bb61eC7E7389D985f",
+  "deployer": "0x620684F822da9adF36F41e3554791D889947e25E",
+  "safe": null,
+  "timestamp": "2026-07-01T23:20:53.602Z"
+}

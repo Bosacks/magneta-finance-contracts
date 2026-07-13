@@ -1,0 +1,11 @@
+{
+  "network": "sei",
+  "chainId": "1329",
+  "deployer": "0x620684F822da9adF36F41e3554791D889947e25E",
+  "treasury": "0x68109132Ecf7540A0A983e1Aaa7DebC469d9d68b",
+  "lzEndpoint": "0x1a44076050125825900e736c501f859c50fE728c",
+  "timestamp": "2026-07-01T16:52:42.792Z",
+  "factories": {
+    "MagnetaOFTStandardFactory": "0xb03dd050Cb042dd42E032097f1a06f46655B2096"
+  }
+}

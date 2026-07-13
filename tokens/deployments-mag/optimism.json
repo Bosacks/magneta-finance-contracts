@@ -1,0 +1,9 @@
+{
+  "network": "optimism",
+  "chainId": 10,
+  "mag": "0xA0ea39EC7503b4A18018fAC8d34450967c69788A",
+  "lzEndpoint": "0x1a44076050125825900e736c501f859c50fE728c",
+  "tokenOpsModule": "0xDe1752E266C3978240014DFc616dd34EbF9cDF31",
+  "deployer": "0x620684F822da9adF36F41e3554791D889947e25E",
+  "deployedAt": "2026-05-08T00:47:50.725Z"
+}

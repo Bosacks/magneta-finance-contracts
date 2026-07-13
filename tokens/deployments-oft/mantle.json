@@ -1,0 +1,11 @@
+{
+  "network": "mantle",
+  "chainId": "5000",
+  "deployer": "0x620684F822da9adF36F41e3554791D889947e25E",
+  "treasury": "0x68109132Ecf7540A0A983e1Aaa7DebC469d9d68b",
+  "lzEndpoint": "0x1a44076050125825900e736c501f859c50fE728c",
+  "timestamp": "2026-07-01T23:30:05.743Z",
+  "factories": {
+    "MagnetaOFTStandardFactory": "0x0A82e323f769c7c663B30Bab51570fAD5e982334"
+  }
+}

@@ -1,0 +1,53 @@
+Slither Analysis — Magneta Tokens Solidity Contracts
+Date: 2026-03-01
+Target: contracts/solidity/contracts/ (ERC20Token, ERC20TokenAutoLiquidity, Faucet, MagnetaTokenFactory, Multisender)
+Filter: node_modules, forge-std, lib/, test/, src/Counter
+
+== HIGH (1) — FALSE POSITIVE / BY-DESIGN ==
+
+[arbitrary-send-eth] Multisender.multisendEther
+  → By-design: a multisender contract is SUPPOSED to send ETH to arbitrary
+    recipient addresses provided by the caller. No fix needed.
+
+== LOW (2) — BY-DESIGN ==
+
+[calls-loop] Multisender.multisendEther
+  → External calls inside loop — inherent to multisender pattern.
+    Gas limit risk mitigated by batch size; acceptable for utility contract.
+
+[timestamp] Faucet._drip
+  → block.timestamp used for cooldown check. ±15s miner manipulation
+    is inconsequential for a testnet faucet. By-design.
+
+== INFORMATIONAL ==
+
+[solc-version] 0.8.20 has known compiler bugs
+  → VerbatimInvalidDeduplication, FullInlinerNonExpressionSplitArgumentEvaluationOrder,
+    MissingSideEffectsOnSelectorAccess
+  → None of these affect the patterns used in these contracts.
+  → Consider upgrading to 0.8.24+ in a future iteration.
+  Files: ERC20Token.sol, ERC20TokenAutoLiquidity.sol, Faucet.sol,
+         MagnetaTokenFactory.sol, Multisender.sol
+
+[low-level-calls] Multiple contracts — acceptable patterns
+  → Faucet._drip, Faucet.withdrawAll: ETH transfer via .call (correct pattern post-EIP-1884)
+  → Multisender.multisendEther: ETH transfer + excess refund via .call
+  → Multisender.multisendToken: excess refund via .call
+  → Multisender.withdrawFees: owner withdrawal via .call
+  → MagnetaTokenFactory.createStandardToken: fee + refund via .call
+  → MagnetaTokenFactory.withdraw: owner withdrawal via .call
+  All use (success, ) = addr.call{value: ...}() with success check. Acceptable.
+
+[naming-convention] _underscore parameters — style only
+  → Faucet.setDripAmount(_amount), Faucet.setCooldownTime(_seconds)
+  → MagnetaTokenFactory.setCreateFee(_newFee), setTreasury(_newTreasury)
+
+[unindexed-event-address] Gas optimization
+  → ERC20Token.MarketingWalletUpdated(address) — add indexed
+  → Multisender.MultisendEther(uint256, address) — add indexed
+
+== CONCLUSION ==
+
+No actionable security fixes required.
+All HIGH and LOW findings are false positives or by-design behaviors.
+Informational items are gas/style optimizations for future consideration.

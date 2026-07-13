@@ -1,0 +1,9 @@
+{
+  "network": "monad",
+  "chainId": 143,
+  "contract": "MagnetaLpAtomicHelper",
+  "address": "0x1750E8d4FbF8D47b1Cf95554100BfC085E42090A",
+  "deployer": "0x620684F822da9adF36F41e3554791D889947e25E",
+  "safe": null,
+  "timestamp": "2026-07-01T23:21:41.132Z"
+}

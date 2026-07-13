@@ -1,0 +1,21 @@
+{
+  "network": "baseSepolia",
+  "chainId": "84532",
+  "deployer": "0x7900F22d8d6b234E87499F1d5b59e868963387EB",
+  "treasury": "0x7900F22d8d6b234E87499F1d5b59e868963387EB",
+  "lzEndpoint": "0x6EDCE65403992e310A62460808c4b910D972f10f",
+  "timestamp": "2026-05-17T20:47:50.842Z",
+  "factories": {
+    "MagnetaOFTStandardFactory": "0x8b36B40C5a874aEF50A30CFdF1DB03733028b2AF",
+    "MagnetaOFTAutoLiquidityFactory": "0x584A41c2cC772b88cCd7D43db51Bf020cc1A0658"
+  },
+  "createTokenDispatcher": "0x54092b83687aF324ABfa431425306b60DB04B8dC",
+  "safe": "0x7900F22d8d6b234E87499F1d5b59e868963387EB",
+  "crossChainCreatorWired": {
+    "stdFactory": "(skipped — old factories owned by SAFE)",
+    "alFactory": "(skipped)"
+  },
+  "notes": [
+    "Manual record after deploy-create-token-dispatcher.ts crashed on RPC race"
+  ]
+}

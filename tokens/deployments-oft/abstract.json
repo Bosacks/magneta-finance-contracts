@@ -1,0 +1,11 @@
+{
+  "network": "abstract",
+  "chainId": "2741",
+  "deployer": "0x620684F822da9adF36F41e3554791D889947e25E",
+  "treasury": "0x68109132Ecf7540A0A983e1Aaa7DebC469d9d68b",
+  "lzEndpoint": "0x5c6cfF4b7C49805F8295Ff73C204ac83f3bC4AE7",
+  "timestamp": "2026-07-01T23:30:11.722Z",
+  "factories": {
+    "MagnetaOFTStandardFactory": "0x3355b4D0adD012fF92A35F7675A4BF9C9FC62501"
+  }
+}

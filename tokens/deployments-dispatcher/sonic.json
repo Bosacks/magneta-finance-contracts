@@ -1,0 +1,24 @@
+{
+  "network": "sonic",
+  "chainId": "146",
+  "deployer": "0x620684F822da9adF36F41e3554791D889947e25E",
+  "treasury": "0x68109132Ecf7540A0A983e1Aaa7DebC469d9d68b",
+  "lzEndpoint": "0x6F475642a6e85809B1c36Fa62763669b1b48DD5B",
+  "timestamp": "2026-05-01T00:55:04.375Z",
+  "factories": {
+    "MagnetaOFTStandardFactory": "0x7534FC227a1e30dF6F5E99d506DB6c148F8cFd15",
+    "MagnetaOFTAutoLiquidityFactory": "0xA74B3610e4EE6b4DF1bd50a59AF4ED1ff02875B4"
+  },
+  "createTokenDispatcher": "0xA0ea39EC7503b4A18018fAC8d34450967c69788A",
+  "safe": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a",
+  "crossChainCreatorWired": {
+    "stdFactory": "(complete)",
+    "alFactory": "(complete)"
+  },
+  "ownershipTransfer": {
+    "stdFactory": "0x7483647bd21554085d35c41dead2269163f156f3465c9882ade8b2826be6679d",
+    "alFactory": "0xbce230889c7b581e764cbda4852c81db03d910842eefbad8008ff78130de33b5",
+    "dispatcher": "0x30219ae82fdcc08aa3dc12f2c9047aae68a0e0eab1f76243b4936ea187985314"
+  },
+  "recoveredFromPartialDeploy": true
+}

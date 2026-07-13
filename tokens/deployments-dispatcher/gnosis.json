@@ -1,0 +1,18 @@
+{
+  "network": "gnosis",
+  "chainId": "100",
+  "deployer": "0x620684F822da9adF36F41e3554791D889947e25E",
+  "treasury": "0x68109132Ecf7540A0A983e1Aaa7DebC469d9d68b",
+  "lzEndpoint": "0x1a44076050125825900e736c501f859c50fE728c",
+  "timestamp": "2026-04-30T23:21:46.419Z",
+  "factories": {
+    "MagnetaOFTStandardFactory": "0x714d0Ae0Ba1420D046CD2818697E41EF69448Ff0",
+    "MagnetaOFTAutoLiquidityFactory": "0x9FF21887b355d06fB0A426E34857567b9D8bbD2a"
+  },
+  "createTokenDispatcher": "0x3B254e69916d0946B55515c1C982d6e1fD7A72AA",
+  "safe": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a",
+  "crossChainCreatorWired": {
+    "stdFactory": "(pending Safe)",
+    "alFactory": "(pending Safe)"
+  }
+}

@@ -1,0 +1,149 @@
+{
+  "_README": [
+    "Phase 2 address table for generate-phase2-peer-batches.ts.",
+    "",
+    "PURPOSE: re-wire the LayerZero V2 CREATE_TOKEN peer mesh after redeploying the",
+    "dispatchers. Each dispatcher must setPeer(eid, bytes32(peer)) for every OTHER",
+    "chain's dispatcher. V2 mesh = all 19 chains below (19*18 = 342 wires). V3 mesh =",
+    "ONLY arbitrum/base/polygon (the 3 chains with a CreateTokenDispatcherV3) among",
+    "themselves (3*2 = 6 wires). The two meshes are wired SEPARATELY, never mixed.",
+    "",
+    "HOW TO USE:",
+    "  1. cp phase2-addresses.template.json phase2-addresses.json",
+    "  2. Redeploy the dispatcher(s) per chain (scripts/deploy-create-token-dispatcher.ts",
+    "     for V2, deploy-create-token-dispatcher-v3.ts for the 3 V3 chains).",
+    "  3. Fill 'newDispatcher' (the new V2 CreateTokenDispatcher just deployed) for every",
+    "     chain, and 'newDispatcherV3' for arbitrum/base/polygon.",
+    "  4. Run: npx ts-node scripts/safe/generate-phase2-peer-batches.ts",
+    "     (reads phase2-addresses.json; falls back to this template if absent).",
+    "",
+    "Chains with a blank/zero 'newDispatcher' are SKIPPED in the V2 mesh, and chains",
+    "with a blank/zero 'newDispatcherV3' are simply not part of the V3 mesh — so you",
+    "can generate a partial set and wire in waves as chains come online.",
+    "",
+    "'eid' is from lib/constants/gatewayChains.ts (source of truth, cross-checked against",
+    "scripts/generatePeerWiringBatches.ts CHAIN_EIDS). 'safe' is from",
+    "scripts/safe/phase1-addresses.template.json (per-chain Safe owner). Verify both",
+    "before signing. Cronos (25) is excluded: no LZ V2 endpoint. Ethereum (1) is not a",
+    "live dispatcher chain and is excluded."
+  ],
+  "chains": {
+    "42161": {
+      "network": "arbitrum",
+      "newDispatcher": "0x0000000000000000000000000000000000000000",
+      "newDispatcherV3": "0x0000000000000000000000000000000000000000",
+      "eid": 30110,
+      "safe": "0x4AeA3A398Db41b45e146c08131aD27c75b02EC2F"
+    },
+    "137": {
+      "network": "polygon",
+      "newDispatcher": "0x0000000000000000000000000000000000000000",
+      "newDispatcherV3": "0x0000000000000000000000000000000000000000",
+      "eid": 30109,
+      "safe": "0x4AeA3A398Db41b45e146c08131aD27c75b02EC2F"
+    },
+    "8453": {
+      "network": "base",
+      "newDispatcher": "0x0000000000000000000000000000000000000000",
+      "newDispatcherV3": "0x0000000000000000000000000000000000000000",
+      "eid": 30184,
+      "safe": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a"
+    },
+    "56": {
+      "network": "bsc",
+      "newDispatcher": "0x0000000000000000000000000000000000000000",
+      "eid": 30102,
+      "safe": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a"
+    },
+    "10": {
+      "network": "optimism",
+      "newDispatcher": "0x0000000000000000000000000000000000000000",
+      "eid": 30111,
+      "safe": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a"
+    },
+    "43114": {
+      "network": "avalanche",
+      "newDispatcher": "0x0000000000000000000000000000000000000000",
+      "eid": 30106,
+      "safe": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a"
+    },
+    "59144": {
+      "network": "linea",
+      "newDispatcher": "0x0000000000000000000000000000000000000000",
+      "eid": 30183,
+      "safe": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a"
+    },
+    "5000": {
+      "network": "mantle",
+      "newDispatcher": "0x0000000000000000000000000000000000000000",
+      "eid": 30181,
+      "safe": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a"
+    },
+    "100": {
+      "network": "gnosis",
+      "newDispatcher": "0x0000000000000000000000000000000000000000",
+      "eid": 30145,
+      "safe": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a"
+    },
+    "42220": {
+      "network": "celo",
+      "newDispatcher": "0x0000000000000000000000000000000000000000",
+      "eid": 30125,
+      "safe": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a"
+    },
+    "14": {
+      "network": "flare",
+      "newDispatcher": "0x0000000000000000000000000000000000000000",
+      "eid": 30295,
+      "safe": "0x40ea2908Ea490d58E62D1Fd3364464D8A857b297"
+    },
+    "1329": {
+      "network": "sei",
+      "newDispatcher": "0x0000000000000000000000000000000000000000",
+      "eid": 30280,
+      "safe": "0x40ea2908Ea490d58E62D1Fd3364464D8A857b297"
+    },
+    "130": {
+      "network": "unichain",
+      "newDispatcher": "0x0000000000000000000000000000000000000000",
+      "eid": 30320,
+      "safe": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a"
+    },
+    "146": {
+      "network": "sonic",
+      "newDispatcher": "0x0000000000000000000000000000000000000000",
+      "eid": 30332,
+      "safe": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a"
+    },
+    "80094": {
+      "network": "berachain",
+      "newDispatcher": "0x0000000000000000000000000000000000000000",
+      "eid": 30362,
+      "safe": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a"
+    },
+    "747474": {
+      "network": "katana",
+      "newDispatcher": "0x0000000000000000000000000000000000000000",
+      "eid": 30375,
+      "safe": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a"
+    },
+    "143": {
+      "network": "monad",
+      "newDispatcher": "0x0000000000000000000000000000000000000000",
+      "eid": 30390,
+      "safe": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a"
+    },
+    "9745": {
+      "network": "plasma",
+      "newDispatcher": "0x0000000000000000000000000000000000000000",
+      "eid": 30383,
+      "safe": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a"
+    },
+    "2741": {
+      "network": "abstract",
+      "newDispatcher": "0x0000000000000000000000000000000000000000",
+      "eid": 30324,
+      "safe": "0x40ea2908Ea490d58E62D1Fd3364464D8A857b297"
+    }
+  }
+}

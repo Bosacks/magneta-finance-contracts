@@ -1,0 +1,10 @@
+{
+  "network": "cronos",
+  "chainId": "25",
+  "contract": "MagnetaTokenFactory",
+  "address": "0x37dfBE103ec62b95CAed3e9C4F3dD22cD53B02B2",
+  "treasury": "0x68109132Ecf7540A0A983e1Aaa7DebC469d9d68b",
+  "deployer": "0x620684F822da9adF36F41e3554791D889947e25E",
+  "deployedAt": "2026-06-05T19:20:48.275Z",
+  "txHash": "0x3d7b102840efb9c86db603f103954644dad40eb9e55bfd428efdeaab362627bf"
+}

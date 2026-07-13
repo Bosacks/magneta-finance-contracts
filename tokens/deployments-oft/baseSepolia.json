@@ -1,0 +1,16 @@
+{
+  "network": "baseSepolia",
+  "chainId": "84532",
+  "deployer": "0x7900F22d8d6b234E87499F1d5b59e868963387EB",
+  "treasury": "0x7900F22d8d6b234E87499F1d5b59e868963387EB",
+  "lzEndpoint": "0x6EDCE65403992e310A62460808c4b910D972f10f",
+  "timestamp": "2026-06-09T12:54:22.077Z",
+  "factories": {
+    "MagnetaOFTStandardFactory": "0x12aC8360f599e46BEd9fF0c7F649bB573144600A",
+    "MagnetaOFTAutoLiquidityFactory": "0x584A41c2cC772b88cCd7D43db51Bf020cc1A0658",
+    "MagnetaOFTStandardFactory_old": "0x8b36B40C5a874aEF50A30CFdF1DB03733028b2AF"
+  },
+  "notes": [
+    "2026-06-09 — Sprint D #3 testnet rehearsal redeploy. Old factory at MagnetaOFTStandardFactory_old = 0x8b36B40C5a874aEF50A30CFdF1DB03733028b2AF. Wire via scripts/safe/baseSepolia-d3-redeploy-batch.json."
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "network": "arbitrum",
+  "chainId": 42161,
+  "contract": "MagnetaLpAtomicHelper",
+  "address": "0x0811b06175d4FBd76DE6A150f22101FFb4fA1e08",
+  "deployer": "0x620684F822da9adF36F41e3554791D889947e25E",
+  "safe": null,
+  "timestamp": "2026-07-01T22:51:54.312Z"
+}

@@ -1,0 +1,10 @@
+{
+  "network": "cronos",
+  "chainId": "25",
+  "deployer": "0x620684F822da9adF36F41e3554791D889947e25E",
+  "timestamp": "2026-06-05T19:21:53.416Z",
+  "factory": "0x37dfBE103ec62b95CAed3e9C4F3dD22cD53B02B2",
+  "receiver": "0x352a3dc814fa53Ba9b94aABb15B3b92399Fdd9f2",
+  "relayer": "0x2B898219Ce1dbEb3ECd3956223b9Ff0C0B126aC2",
+  "owner": "0x40ea2908Ea490d58E62D1Fd3364464D8A857b297"
+}

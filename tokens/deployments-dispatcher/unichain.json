@@ -1,0 +1,22 @@
+{
+  "network": "unichain",
+  "chainId": "130",
+  "deployer": "0x620684F822da9adF36F41e3554791D889947e25E",
+  "treasury": "0x68109132Ecf7540A0A983e1Aaa7DebC469d9d68b",
+  "lzEndpoint": "0x6F475642a6e85809B1c36Fa62763669b1b48DD5B",
+  "timestamp": "2026-05-01T19:17:33.421Z",
+  "factories": {
+    "MagnetaOFTStandardFactory": "0xAC5b2e2cbe6502Ba348a1e7abaac071169612D9C",
+    "MagnetaOFTAutoLiquidityFactory": "0x714d0Ae0Ba1420D046CD2818697E41EF69448Ff0"
+  },
+  "createTokenDispatcher": "0x9FF21887b355d06fB0A426E34857567b9D8bbD2a",
+  "safe": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a",
+  "crossChainCreatorWired": {
+    "stdFactory": "(complete)",
+    "alFactory": "(complete)"
+  },
+  "ownershipTransfer": {
+    "recovered": "via mempool unstick"
+  },
+  "recoveredFromPartialDeploy": true
+}

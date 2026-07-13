@@ -1,0 +1,9 @@
+{
+  "network": "base",
+  "chainId": 8453,
+  "mag": "0x520F7E6B31778bFd70c4F73e034d82aB5189E181",
+  "lzEndpoint": "0x1a44076050125825900e736c501f859c50fE728c",
+  "tokenOpsModule": "0x252B47F1818f9f6229Ba939120d113EC81185182",
+  "deployer": "0x620684F822da9adF36F41e3554791D889947e25E",
+  "deployedAt": "2026-05-08T00:47:55.125Z"
+}

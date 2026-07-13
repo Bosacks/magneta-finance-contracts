@@ -1,0 +1,11 @@
+{
+  "network": "polygon",
+  "chainId": "137",
+  "deployer": "0x620684F822da9adF36F41e3554791D889947e25E",
+  "treasury": "0x68109132Ecf7540A0A983e1Aaa7DebC469d9d68b",
+  "lzEndpoint": "0x1a44076050125825900e736c501f859c50fE728c",
+  "timestamp": "2026-07-01T18:18:28.759Z",
+  "factories": {
+    "MagnetaOFTStandardFactory": "0x88D1828a105172Fe754b223e866b4769541B8068"
+  }
+}

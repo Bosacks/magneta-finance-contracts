@@ -1,0 +1,9 @@
+{
+  "network": "linea",
+  "chainId": 59144,
+  "mag": "0xCeC322deD6D48d078db2EfC34135549e0632d3b4",
+  "lzEndpoint": "0x1a44076050125825900e736c501f859c50fE728c",
+  "tokenOpsModule": "0x9F9A3DC819e5229b63b504d7A0FDE93FA436919E",
+  "deployer": "0x620684F822da9adF36F41e3554791D889947e25E",
+  "deployedAt": "2026-05-08T00:48:08.498Z"
+}

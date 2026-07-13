@@ -1,0 +1,24 @@
+{
+  "network": "berachain",
+  "chainId": "80094",
+  "deployer": "0x620684F822da9adF36F41e3554791D889947e25E",
+  "treasury": "0x68109132Ecf7540A0A983e1Aaa7DebC469d9d68b",
+  "lzEndpoint": "0x6F475642a6e85809B1c36Fa62763669b1b48DD5B",
+  "timestamp": "2026-05-01T00:53:04.204Z",
+  "factories": {
+    "MagnetaOFTStandardFactory": "0x2cdFef6074702A004cf36965Ae08A27B0Cc3361f",
+    "MagnetaOFTAutoLiquidityFactory": "0x657217170923c424A07f8f8330dcc566968683Db"
+  },
+  "createTokenDispatcher": "0x4c2E7b9Ac2D146c8e3942b24Bc4Da5fF96Dc4AEf",
+  "safe": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a",
+  "crossChainCreatorWired": {
+    "stdFactory": "(complete)",
+    "alFactory": "(complete)"
+  },
+  "ownershipTransfer": {
+    "stdFactory": "0x29ccc5d3848e811d579dc13128493fb935c635498d545b26265e1b08fcae86d0",
+    "alFactory": "0x5f282ad378d969c0c41c2722e63ad70e2d2b55587e51ed25758be0c746c2d06c",
+    "dispatcher": "0xe738863f934606f4f9b3ba92534fb4ea6eda48a130a6f5f4142f1caa07af5209"
+  },
+  "recoveredFromPartialDeploy": true
+}

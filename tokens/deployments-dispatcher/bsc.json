@@ -1,0 +1,24 @@
+{
+  "network": "bsc",
+  "chainId": "56",
+  "deployer": "0x620684F822da9adF36F41e3554791D889947e25E",
+  "treasury": "0x68109132Ecf7540A0A983e1Aaa7DebC469d9d68b",
+  "lzEndpoint": "0x1a44076050125825900e736c501f859c50fE728c",
+  "timestamp": "2026-05-01T19:08:49.751Z",
+  "factories": {
+    "MagnetaOFTStandardFactory": "0x9FF21887b355d06fB0A426E34857567b9D8bbD2a",
+    "MagnetaOFTAutoLiquidityFactory": "0xae78a0d6d7E4536ADD1269f16E4fF28f7DB15Cd4"
+  },
+  "createTokenDispatcher": "0xDbFb571F620f1c9C2dBf23aA065F6F1436bf3eE5",
+  "safe": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a",
+  "crossChainCreatorWired": {
+    "stdFactory": "(complete)",
+    "alFactory": "(complete)"
+  },
+  "ownershipTransfer": {
+    "std": "(skipped)",
+    "al": "(skipped)",
+    "disp": "(skipped)"
+  },
+  "recoveredFromPartialDeploy": true
+}

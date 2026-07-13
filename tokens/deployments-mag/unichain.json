@@ -1,0 +1,9 @@
+{
+  "network": "unichain",
+  "chainId": 130,
+  "mag": "0xFc0c499c6a59014EB63c3CDaC7A382d9A2EED6EF",
+  "lzEndpoint": "0x6F475642a6e85809B1c36Fa62763669b1b48DD5B",
+  "tokenOpsModule": "0x9F9A3DC819e5229b63b504d7A0FDE93FA436919E",
+  "deployer": "0x620684F822da9adF36F41e3554791D889947e25E",
+  "deployedAt": "2026-05-08T00:48:12.886Z"
+}

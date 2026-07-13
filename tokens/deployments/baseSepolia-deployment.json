@@ -1,0 +1,13 @@
+{
+  "contractAddress": "0x10AD2Fb7B3c9F71d79EA328781017e0184FA9596",
+  "deployer": "0x7900F22d8d6b234E87499F1d5b59e868963387EB",
+  "network": "baseSepolia",
+  "chainId": "84532",
+  "tokenName": "Test Token",
+  "tokenSymbol": "TEST",
+  "totalSupply": "1000000000000000000000000",
+  "revokeUpdate": false,
+  "revokeFreeze": false,
+  "revokeMint": false,
+  "deployedAt": "2026-02-01T20:28:18.792Z"
+}

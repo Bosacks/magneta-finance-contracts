@@ -1,0 +1,10 @@
+{
+  "network": "arbitrum",
+  "chainId": "42161",
+  "contract": "MagnetaTokenFactory",
+  "address": "0x781fe150a73266359288C1B36947A7A5B151814d",
+  "treasury": "0x68109132Ecf7540A0A983e1Aaa7DebC469d9d68b",
+  "deployer": "0x620684F822da9adF36F41e3554791D889947e25E",
+  "deployedAt": "2026-04-21T02:10:41.357Z",
+  "txHash": "0x20b403c4400d2652c04b9b47d66801683d65543e63fe326e290a5126df0b7dd2"
+}

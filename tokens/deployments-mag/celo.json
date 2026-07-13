@@ -1,0 +1,9 @@
+{
+  "network": "celo",
+  "chainId": 42220,
+  "mag": "0xd16dc37ca6DB4F64Aec2ea8B4239A34063Be4BD0",
+  "lzEndpoint": "0x1a44076050125825900e736c501f859c50fE728c",
+  "tokenOpsModule": "0xB38e7427D81f755c65AC6bfc865Bfe9918BA7a9b",
+  "deployer": "0x620684F822da9adF36F41e3554791D889947e25E",
+  "deployedAt": "2026-05-08T00:53:29.025Z"
+}

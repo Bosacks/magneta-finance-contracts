@@ -1,0 +1,11 @@
+{
+  "network": "avalanche",
+  "chainId": "43114",
+  "deployer": "0x620684F822da9adF36F41e3554791D889947e25E",
+  "treasury": "0x68109132Ecf7540A0A983e1Aaa7DebC469d9d68b",
+  "lzEndpoint": "0x1a44076050125825900e736c501f859c50fE728c",
+  "timestamp": "2026-07-01T16:54:33.386Z",
+  "factories": {
+    "MagnetaOFTStandardFactory": "0xc2E91af114FeAEb7ABA46A6045e72B6638A1ffE8"
+  }
+}

@@ -1,0 +1,11 @@
+{
+    "remappings": [
+        "@openzeppelin/=/home/dominique/Projets/magneta-finance-tokens/contracts/solidity/node_modules/@openzeppelin/",
+        "hardhat/=/home/dominique/Projets/magneta-finance-tokens/contracts/solidity/node_modules/hardhat/",
+        "eth-gas-reporter/=/home/dominique/Projets/magneta-finance-tokens/contracts/solidity/node_modules/eth-gas-reporter/"
+    ],
+    "optimizer": {
+        "enabled": true,
+        "runs": 200
+    }
+}

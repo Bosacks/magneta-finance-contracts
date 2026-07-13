@@ -1,0 +1,25 @@
+{
+  "network": "base",
+  "chainId": "8453",
+  "deployer": "0x620684F822da9adF36F41e3554791D889947e25E",
+  "lzEndpoint": "0x1a44076050125825900e736c501f859c50fE728c",
+  "feeVault": "0x68109132Ecf7540A0A983e1Aaa7DebC469d9d68b",
+  "timestamp": "2026-05-02T20:00:00.000Z",
+  "factories": {
+    "MagnetaOFTStandardFactory": "0xb9075096153C370E972fC72B31835acb4B05c6B3",
+    "MagnetaOFTAutoLiquidityFactory": "0xA954791C2d7209cb336E2465Fc3174fD2d98404d"
+  },
+  "createTokenDispatcherV3": "0xf7803051bEC935Cec413B87f50E30737cDb9A79E",
+  "v2OrphanDispatcher": "0xAd0652f4514fe3b5E8C52Dfe6BcD3d11Cd12a96A",
+  "safe": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a",
+  "crossChainCreatorWired": {
+    "stdFactory": "0xbe334d690b3e638450aa657d44c9a6062d839d0d421cb3625e2ce4a1dd8fd42f",
+    "alFactory":  "0x280b6d8e549c6d306ac9cc534d708d73b4a8e28bedaf0bd374d9363ed0d6900c"
+  },
+  "ownershipTransfer": {
+    "stdFactory": "(unchanged — was deployer-owned at time of v3 deploy)",
+    "alFactory":  "(unchanged)",
+    "dispatcher": "0x85341c2f381726e6d7259f7d333c7beae12ffd3951272ec503fd778ba1246bae"
+  },
+  "recoveredFromPartialDeploy": "Base dispatcher transferOwnership retried 2026-05-02 after nonce-too-low race"
+}

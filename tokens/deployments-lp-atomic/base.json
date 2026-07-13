@@ -1,0 +1,9 @@
+{
+  "network": "base",
+  "chainId": 8453,
+  "contract": "MagnetaLpAtomicHelper",
+  "address": "0xd0eBeBC1010a5A98ef1232aCd6FB7E35b1b492e5",
+  "deployer": "0x620684F822da9adF36F41e3554791D889947e25E",
+  "safe": null,
+  "timestamp": "2026-07-01T18:18:33.516Z"
+}

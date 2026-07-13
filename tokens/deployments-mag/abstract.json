@@ -1,0 +1,9 @@
+{
+  "network": "abstract",
+  "chainId": 2741,
+  "mag": "0x9FF21887b355d06fB0A426E34857567b9D8bbD2a",
+  "lzEndpoint": "0x5c6cfF4b7C49805F8295Ff73C204ac83f3bC4AE7",
+  "tokenOpsModule": "0xB4f06F01641eFFb376Cc5dcA90F81fed1C6FA76e",
+  "deployer": "0x620684F822da9adF36F41e3554791D889947e25E",
+  "deployedAt": "2026-05-08T00:48:30.154Z"
+}

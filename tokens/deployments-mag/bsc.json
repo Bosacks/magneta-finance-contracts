@@ -1,0 +1,9 @@
+{
+  "network": "bsc",
+  "chainId": 56,
+  "mag": "0xcdF3e1377Cfcbfe5336D79344DC074433F6854AE",
+  "lzEndpoint": "0x1a44076050125825900e736c501f859c50fE728c",
+  "tokenOpsModule": "0x9F9A3DC819e5229b63b504d7A0FDE93FA436919E",
+  "deployer": "0x620684F822da9adF36F41e3554791D889947e25E",
+  "deployedAt": "2026-05-08T00:47:30.524Z"
+}

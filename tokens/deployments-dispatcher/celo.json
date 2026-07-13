@@ -1,0 +1,24 @@
+{
+  "network": "celo",
+  "chainId": "42220",
+  "deployer": "0x620684F822da9adF36F41e3554791D889947e25E",
+  "treasury": "0x68109132Ecf7540A0A983e1Aaa7DebC469d9d68b",
+  "lzEndpoint": "0x1a44076050125825900e736c501f859c50fE728c",
+  "timestamp": "2026-05-01T00:53:24.981Z",
+  "factories": {
+    "MagnetaOFTStandardFactory": "0xae78a0d6d7E4536ADD1269f16E4fF28f7DB15Cd4",
+    "MagnetaOFTAutoLiquidityFactory": "0xDbFb571F620f1c9C2dBf23aA065F6F1436bf3eE5"
+  },
+  "createTokenDispatcher": "0x56B1F90E863542e0491B0d5DbFD19c2d27529e88",
+  "safe": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a",
+  "crossChainCreatorWired": {
+    "stdFactory": "(complete)",
+    "alFactory": "(complete)"
+  },
+  "ownershipTransfer": {
+    "stdFactory": "0x5c5919eb20603ce7e8dafd4ab9ee1a40a331f01abeab55c2dde11d1f26123ed2",
+    "alFactory": "0x1a9f39a2b1a2b8192b999f61e7e80c05c8aed029fc9da7cb5797a6a502db0647",
+    "dispatcher": "0x7b370e620e7a137ee0a671c3b492b33e34ad01b17d19552c10bc4b0cc87bb5f3"
+  },
+  "recoveredFromPartialDeploy": true
+}

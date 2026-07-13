@@ -1,0 +1,9 @@
+{
+  "network": "avalanche",
+  "chainId": 43114,
+  "contract": "MagnetaLpAtomicHelper",
+  "address": "0x0A82e323f769c7c663B30Bab51570fAD5e982334",
+  "deployer": "0x620684F822da9adF36F41e3554791D889947e25E",
+  "safe": null,
+  "timestamp": "2026-07-01T16:54:26.924Z"
+}

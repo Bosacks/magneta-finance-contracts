@@ -1,0 +1,9 @@
+{
+  "network": "berachain",
+  "chainId": 80094,
+  "mag": "0x9c276D7c7a39F67C152bb8192d83813D9c205384",
+  "lzEndpoint": "0x6F475642a6e85809B1c36Fa62763669b1b48DD5B",
+  "tokenOpsModule": "0xB4f06F01641eFFb376Cc5dcA90F81fed1C6FA76e",
+  "deployer": "0x620684F822da9adF36F41e3554791D889947e25E",
+  "deployedAt": "2026-05-08T00:47:36.871Z"
+}

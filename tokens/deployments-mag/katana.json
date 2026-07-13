@@ -1,0 +1,9 @@
+{
+  "network": "katana",
+  "chainId": 747474,
+  "mag": "0xb9075096153C370E972fC72B31835acb4B05c6B3",
+  "lzEndpoint": "0x6F475642a6e85809B1c36Fa62763669b1b48DD5B",
+  "tokenOpsModule": "0x49C42f71Bd6eca74BC2139854689EFC68e23C5C8",
+  "deployer": "0x620684F822da9adF36F41e3554791D889947e25E",
+  "deployedAt": "2026-05-08T00:48:21.441Z"
+}

@@ -1,0 +1,18 @@
+{
+  "version": "1.0",
+  "chainId": "59144",
+  "createdAt": 1780500000,
+  "meta": {
+    "name": "Magneta 2-DVN config — linea (minimal setDelegate)",
+    "description": "Linea-only override: LZ /deployments + /dvns metadata APIs don't expose Linea mainnet, so the standard generate-2dvn-batch.ts script skips it. On-chain inspection (2026-06-05) confirmed Linea's DEFAULT ULN config is already requiredDVNCount=2 (LayerZero Labs DVN 0x129ee430… + DVN 0x0d56e4ea… ; 10 send confirmations / 120 receive confirmations) for every peer EID — so the security baseline is already met by the default. This batch ONLY runs setDelegate(safe) so the Magneta Safe can override the config later if LZ ever weakens the default. Sign with the Magneta Safe 0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a."
+  },
+  "transactions": [
+    {
+      "to": "0xae78a0d6d7E4536ADD1269f16E4fF28f7DB15Cd4",
+      "value": "0",
+      "data": "0xca5eb5e1000000000000000000000000C4c96aF54cdE078dc993d6948199b0AF8cD6717a",
+      "contractMethod": null,
+      "contractInputsValues": null
+    }
+  ]
+}

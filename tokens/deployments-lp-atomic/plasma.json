@@ -1,0 +1,9 @@
+{
+  "network": "plasma",
+  "chainId": 9745,
+  "contract": "MagnetaLpAtomicHelper",
+  "address": "0xAFAb580a61DfA5E16467F2C213b02Cc5EFfF7257",
+  "deployer": "0x620684F822da9adF36F41e3554791D889947e25E",
+  "safe": null,
+  "timestamp": "2026-07-01T16:52:03.639Z"
+}

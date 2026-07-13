@@ -1,0 +1,32 @@
+{
+  "version": "1.0",
+  "chainId": "84532",
+  "createdAt": 1780500000,
+  "meta": {
+    "name": "Magneta Sprint D #3 wire — baseSepolia (testnet rehearsal)",
+    "description": "Testnet rehearsal of Sprint D #3 redeploy. Sign with stand-in Safe 0x7900F22d8d6b234E87499F1d5b59e868963387EB."
+  },
+  "transactions": [
+    {
+      "to": "0x12aC8360f599e46BEd9fF0c7F649bB573144600A",
+      "value": "0",
+      "data": "0x1dff08b6000000000000000000000000de2424261258ac1b93104421ce1f6304c0c7890d",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x12aC8360f599e46BEd9fF0c7F649bB573144600A",
+      "value": "0",
+      "data": "0x291604e500000000000000000000000054092b83687af324abfa431425306b60db04b8dc",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x54092b83687aF324ABfa431425306b60DB04B8dC",
+      "value": "0",
+      "data": "0x193055ae00000000000000000000000012ac8360f599e46bed9ff0c7f649bb573144600a",
+      "contractMethod": null,
+      "contractInputsValues": null
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "network": "katana",
+  "chainId": 747474,
+  "contract": "MagnetaLpAtomicHelper",
+  "address": "0xb058BecDaCE915aA2c0f6CaB3000117139c42bE7",
+  "deployer": "0x620684F822da9adF36F41e3554791D889947e25E",
+  "safe": null,
+  "timestamp": "2026-07-01T23:03:15.440Z"
+}

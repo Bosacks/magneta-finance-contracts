@@ -1,0 +1,25 @@
+{
+  "network": "arbitrum",
+  "chainId": "42161",
+  "deployer": "0x620684F822da9adF36F41e3554791D889947e25E",
+  "treasury": "0x68109132Ecf7540A0A983e1Aaa7DebC469d9d68b",
+  "lzEndpoint": "0x1a44076050125825900e736c501f859c50fE728c",
+  "timestamp": "2026-05-02T20:37:07.486Z",
+  "factories": {
+    "MagnetaOFTStandardFactory": "0xc1a6e0Adc5070c78b4Da8A4Cd88B1F7eDEe3bccb",
+    "MagnetaOFTAutoLiquidityFactory": "0xa2338eFd7eb2DD56750bFee961b7ffe2CC30D17b"
+  },
+  "feeVault": "0x68109132Ecf7540A0A983e1Aaa7DebC469d9d68b",
+  "createTokenDispatcherV3": "0xc0Bc9150D6d2f64d999072d4263ff87aF0357F4D",
+  "v2OrphanDispatcher": "0x520F7E6B31778bFd70c4F73e034d82aB5189E181",
+  "safe": "0x4AeA3A398Db41b45e146c08131aD27c75b02EC2F",
+  "crossChainCreatorWired": {
+    "stdFactory": "0x856a3a759a4ed2571ca1c9591dea5cf85ed02aebf067a77009cb4cd39c523ed4",
+    "alFactory": "0x782ca6fec85974fa83321eb46b03b8df323f2137478989dfc8c3c5be17270345"
+  },
+  "ownershipTransfer": {
+    "stdFactory": "(unchanged — factories were already Safe-owned post-Sprint 9.6)",
+    "alFactory": "(unchanged)",
+    "dispatcher": "0xebba52f03aac9b1f58a08d198fe8eb1f1e3ea5ddc211755d10366a3f28dc5b95"
+  }
+}

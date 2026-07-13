@@ -1,0 +1,9 @@
+{
+  "network": "flare",
+  "chainId": 14,
+  "contract": "MagnetaLpAtomicHelper",
+  "address": "0x408109ff36c1378E2b49583F77619697dcbcdf0e",
+  "deployer": "0x620684F822da9adF36F41e3554791D889947e25E",
+  "safe": null,
+  "timestamp": "2026-07-01T16:52:27.191Z"
+}

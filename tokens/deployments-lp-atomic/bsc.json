@@ -1,0 +1,9 @@
+{
+  "network": "bsc",
+  "chainId": 56,
+  "contract": "MagnetaLpAtomicHelper",
+  "address": "0x546362fcAb94095fc15Ed328c11D3dc499Ce8222",
+  "deployer": "0x620684F822da9adF36F41e3554791D889947e25E",
+  "safe": null,
+  "timestamp": "2026-07-01T23:25:19.241Z"
+}

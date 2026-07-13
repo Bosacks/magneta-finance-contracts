@@ -1,0 +1,9 @@
+{
+  "network": "unichain",
+  "chainId": 130,
+  "contract": "MagnetaLpAtomicHelper",
+  "address": "0x2f80A84A958686084B727C470f2203073D9F8083",
+  "deployer": "0x620684F822da9adF36F41e3554791D889947e25E",
+  "safe": null,
+  "timestamp": "2026-07-01T16:53:09.942Z"
+}

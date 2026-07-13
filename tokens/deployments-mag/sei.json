@@ -1,0 +1,9 @@
+{
+  "network": "sei",
+  "chainId": 1329,
+  "mag": "0xA71299745bf0D41BCDa78ee94441fE4b4b226417",
+  "lzEndpoint": "0x1a44076050125825900e736c501f859c50fE728c",
+  "tokenOpsModule": "0x4D4AD5B890D3B8882436CB7E5268F1cB95736f92",
+  "deployer": "0x620684F822da9adF36F41e3554791D889947e25E",
+  "deployedAt": "2026-05-08T00:47:04.363Z"
+}

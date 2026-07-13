@@ -1,0 +1,32 @@
+{
+  "version": "1.0",
+  "chainId": "137",
+  "createdAt": 1780500000,
+  "meta": {
+    "name": "Magneta Sprint D #3 wire — polygon",
+    "description": "Sprint D #3 redeploy of MagnetaOFTStandardFactory. Wires the new factory (0x19fd17f4b34E9a14AA63dd15c453d556627D7861) so cross-chain CREATE_TOKEN lands on it AND the new factory auto-registers freshly-minted tokens with TokenOpsModule (0xfB95B039c6Cd2Dfbf94D3e849D16Fc333B27c0C6) so users can MINT/UPDATE/ FREEZE without an extra registerByTokenOwner tx. Sign with Safe 0x4AeA3A398Db41b45e146c08131aD27c75b02EC2F."
+  },
+  "transactions": [
+    {
+      "to": "0x19fd17f4b34E9a14AA63dd15c453d556627D7861",
+      "value": "0",
+      "data": "0x1dff08b6000000000000000000000000fb95b039c6cd2dfbf94d3e849d16fc333b27c0c6",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x19fd17f4b34E9a14AA63dd15c453d556627D7861",
+      "value": "0",
+      "data": "0x291604e5000000000000000000000000e7c9be3b890a3132c3172599b434db5305ba3533",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0xE7c9bE3B890A3132c3172599b434Db5305Ba3533",
+      "value": "0",
+      "data": "0x193055ae00000000000000000000000019fd17f4b34e9a14aa63dd15c453d556627d7861",
+      "contractMethod": null,
+      "contractInputsValues": null
+    }
+  ]
+}

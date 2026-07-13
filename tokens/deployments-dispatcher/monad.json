@@ -1,0 +1,18 @@
+{
+  "network": "monad",
+  "chainId": "143",
+  "deployer": "0x620684F822da9adF36F41e3554791D889947e25E",
+  "treasury": "0x68109132Ecf7540A0A983e1Aaa7DebC469d9d68b",
+  "lzEndpoint": "0x6F475642a6e85809B1c36Fa62763669b1b48DD5B",
+  "timestamp": "2026-05-01T18:58:19.941Z",
+  "factories": {
+    "MagnetaOFTStandardFactory": "0xA0ea39EC7503b4A18018fAC8d34450967c69788A",
+    "MagnetaOFTAutoLiquidityFactory": "0xFc0c499c6a59014EB63c3CDaC7A382d9A2EED6EF"
+  },
+  "createTokenDispatcher": "0xCeC322deD6D48d078db2EfC34135549e0632d3b4",
+  "safe": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a",
+  "crossChainCreatorWired": {
+    "stdFactory": "0x1378721907b766c89e169580163ab74217e69a34317bae2c9a9431749bfc8782",
+    "alFactory": "0xaf653ef0f2da355dcf90881204c5fa83996cd81cc333a6c2289a3c5f605f0543"
+  }
+}

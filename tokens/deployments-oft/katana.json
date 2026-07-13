@@ -1,0 +1,11 @@
+{
+  "network": "katana",
+  "chainId": "747474",
+  "deployer": "0x620684F822da9adF36F41e3554791D889947e25E",
+  "treasury": "0x68109132Ecf7540A0A983e1Aaa7DebC469d9d68b",
+  "lzEndpoint": "0x6F475642a6e85809B1c36Fa62763669b1b48DD5B",
+  "timestamp": "2026-07-01T23:03:23.229Z",
+  "factories": {
+    "MagnetaOFTStandardFactory": "0x30193BC50dDb8cB73bA04Ae6b8Fd44A02ee10D41"
+  }
+}

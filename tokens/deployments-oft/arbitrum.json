@@ -1,0 +1,11 @@
+{
+  "network": "arbitrum",
+  "chainId": "42161",
+  "deployer": "0x620684F822da9adF36F41e3554791D889947e25E",
+  "treasury": "0x68109132Ecf7540A0A983e1Aaa7DebC469d9d68b",
+  "lzEndpoint": "0x1a44076050125825900e736c501f859c50fE728c",
+  "timestamp": "2026-07-01T22:59:29.376Z",
+  "factories": {
+    "MagnetaOFTStandardFactory": "0x36254061c47B20646ac4b0967Fe55eF1BEE942E9"
+  }
+}

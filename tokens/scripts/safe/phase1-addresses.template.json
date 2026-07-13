@@ -1,0 +1,212 @@
+{
+  "_README": [
+    "Phase 1 address table for generate-phase1-batches.ts.",
+    "",
+    "PURPOSE: redeploy MagnetaOFTStandardFactory on each LZ-V2 chain and re-wire it so",
+    "(a) newly-created tokens auto-register on the local TokenOpsModule (the registerToken",
+    "functional fix), and (b) cross-chain CREATE_TOKEN lands on the NEW factory.",
+    "",
+    "HOW TO USE:",
+    "  1. cp phase1-addresses.template.json phase1-addresses.json",
+    "  2. Deploy the new factory per chain (scripts/deploy-oft-factories.ts or redeploy-oft-std-factory.ts).",
+    "     Right after deploy the factory is owned by the DEPLOYER EOA (see deploy-oft-factories.ts).",
+    "  3. Fill 'newStandardFactory' (the address just deployed) and 'tokenOpsModule'",
+    "     (local TokenOpsModule, = gatewayChains.ts tokenOpsModule for that chainId) per chain.",
+    "  4. Decide ownership model per chain via 'factoryOwnedBySafe':",
+    "       false (default) -> factory still owned by deployer EOA. The two factory setters",
+    "                          (setTokenOpsModule, setCrossChainCreator) are emitted as EOA",
+    "                          cast/hardhat commands (NOT in the Safe batch). Only the",
+    "                          dispatcher.setStandardFactory call(s) go in the Safe batch.",
+    "       true            -> you transferred factory ownership to the Safe (factory uses OZ",
+    "                          4.x Ownable, single-step transferOwnership, no acceptOwnership).",
+    "                          All wiring calls go in the Safe batch.",
+    "  5. Run: npx hardhat run scripts/safe/generate-phase1-batches.ts",
+    "     (it reads phase1-addresses.json; falls back to this template if that is absent).",
+    "",
+    "Addresses left blank/zero are SKIPPED (lets you generate a partial set as you fill chains).",
+    "'safe', 'dispatcher', 'dispatcherV3' are pre-filled from deployments-dispatcher[-v3]/<net>.json",
+    "(source of truth). Verify them before signing. Cronos (25) is excluded: no LZ V2."
+  ],
+  "chains": {
+    "1": {
+      "network": "ethereum",
+      "newStandardFactory": "0x0000000000000000000000000000000000000000",
+      "tokenOpsModule": "0x0000000000000000000000000000000000000000",
+      "dispatcher": "0x0000000000000000000000000000000000000000",
+      "dispatcherV3": "0x0000000000000000000000000000000000000000",
+      "safe": "0x0000000000000000000000000000000000000000",
+      "factoryOwnedBySafe": false
+    },
+    "42161": {
+      "network": "arbitrum",
+      "newStandardFactory": "0x0000000000000000000000000000000000000000",
+      "tokenOpsModule": "0x0000000000000000000000000000000000000000",
+      "dispatcher": "0x520F7E6B31778bFd70c4F73e034d82aB5189E181",
+      "dispatcherV3": "0xc0Bc9150D6d2f64d999072d4263ff87aF0357F4D",
+      "safe": "0x4AeA3A398Db41b45e146c08131aD27c75b02EC2F",
+      "factoryOwnedBySafe": false
+    },
+    "137": {
+      "network": "polygon",
+      "newStandardFactory": "0x0000000000000000000000000000000000000000",
+      "tokenOpsModule": "0x0000000000000000000000000000000000000000",
+      "dispatcher": "0xE7c9bE3B890A3132c3172599b434Db5305Ba3533",
+      "dispatcherV3": "0xb9075096153C370E972fC72B31835acb4B05c6B3",
+      "safe": "0x4AeA3A398Db41b45e146c08131aD27c75b02EC2F",
+      "factoryOwnedBySafe": false
+    },
+    "8453": {
+      "network": "base",
+      "newStandardFactory": "0x0000000000000000000000000000000000000000",
+      "tokenOpsModule": "0x0000000000000000000000000000000000000000",
+      "dispatcher": "0xAd0652f4514fe3b5E8C52Dfe6BcD3d11Cd12a96A",
+      "dispatcherV3": "0xf7803051bEC935Cec413B87f50E30737cDb9A79E",
+      "safe": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a",
+      "factoryOwnedBySafe": false
+    },
+    "56": {
+      "network": "bsc",
+      "newStandardFactory": "0x0000000000000000000000000000000000000000",
+      "tokenOpsModule": "0x0000000000000000000000000000000000000000",
+      "dispatcher": "0xDbFb571F620f1c9C2dBf23aA065F6F1436bf3eE5",
+      "dispatcherV3": "0x0000000000000000000000000000000000000000",
+      "safe": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a",
+      "factoryOwnedBySafe": false
+    },
+    "10": {
+      "network": "optimism",
+      "newStandardFactory": "0x0000000000000000000000000000000000000000",
+      "tokenOpsModule": "0x0000000000000000000000000000000000000000",
+      "dispatcher": "0x714d0Ae0Ba1420D046CD2818697E41EF69448Ff0",
+      "dispatcherV3": "0x0000000000000000000000000000000000000000",
+      "safe": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a",
+      "factoryOwnedBySafe": false
+    },
+    "43114": {
+      "network": "avalanche",
+      "newStandardFactory": "0x0000000000000000000000000000000000000000",
+      "tokenOpsModule": "0x0000000000000000000000000000000000000000",
+      "dispatcher": "0x56B1F90E863542e0491B0d5DbFD19c2d27529e88",
+      "dispatcherV3": "0x0000000000000000000000000000000000000000",
+      "safe": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a",
+      "factoryOwnedBySafe": false
+    },
+    "59144": {
+      "network": "linea",
+      "newStandardFactory": "0x0000000000000000000000000000000000000000",
+      "tokenOpsModule": "0x0000000000000000000000000000000000000000",
+      "dispatcher": "0xae78a0d6d7E4536ADD1269f16E4fF28f7DB15Cd4",
+      "dispatcherV3": "0x0000000000000000000000000000000000000000",
+      "safe": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a",
+      "factoryOwnedBySafe": false
+    },
+    "5000": {
+      "network": "mantle",
+      "newStandardFactory": "0x0000000000000000000000000000000000000000",
+      "tokenOpsModule": "0x0000000000000000000000000000000000000000",
+      "dispatcher": "0x0581b673da0730e1adB054fB26d42108f13F62f9",
+      "dispatcherV3": "0x0000000000000000000000000000000000000000",
+      "safe": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a",
+      "factoryOwnedBySafe": false
+    },
+    "100": {
+      "network": "gnosis",
+      "newStandardFactory": "0x0000000000000000000000000000000000000000",
+      "tokenOpsModule": "0x0000000000000000000000000000000000000000",
+      "dispatcher": "0x3B254e69916d0946B55515c1C982d6e1fD7A72AA",
+      "dispatcherV3": "0x0000000000000000000000000000000000000000",
+      "safe": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a",
+      "factoryOwnedBySafe": false
+    },
+    "42220": {
+      "network": "celo",
+      "newStandardFactory": "0x0000000000000000000000000000000000000000",
+      "tokenOpsModule": "0x0000000000000000000000000000000000000000",
+      "dispatcher": "0x56B1F90E863542e0491B0d5DbFD19c2d27529e88",
+      "dispatcherV3": "0x0000000000000000000000000000000000000000",
+      "safe": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a",
+      "factoryOwnedBySafe": false
+    },
+    "14": {
+      "network": "flare",
+      "newStandardFactory": "0x0000000000000000000000000000000000000000",
+      "tokenOpsModule": "0x0000000000000000000000000000000000000000",
+      "dispatcher": "0xDbFb571F620f1c9C2dBf23aA065F6F1436bf3eE5",
+      "dispatcherV3": "0x0000000000000000000000000000000000000000",
+      "safe": "0x40ea2908Ea490d58E62D1Fd3364464D8A857b297",
+      "factoryOwnedBySafe": false
+    },
+    "1329": {
+      "network": "sei",
+      "newStandardFactory": "0x0000000000000000000000000000000000000000",
+      "tokenOpsModule": "0x0000000000000000000000000000000000000000",
+      "dispatcher": "0xA74B3610e4EE6b4DF1bd50a59AF4ED1ff02875B4",
+      "dispatcherV3": "0x0000000000000000000000000000000000000000",
+      "safe": "0x40ea2908Ea490d58E62D1Fd3364464D8A857b297",
+      "factoryOwnedBySafe": false
+    },
+    "130": {
+      "network": "unichain",
+      "newStandardFactory": "0x0000000000000000000000000000000000000000",
+      "tokenOpsModule": "0x0000000000000000000000000000000000000000",
+      "dispatcher": "0x9FF21887b355d06fB0A426E34857567b9D8bbD2a",
+      "dispatcherV3": "0x0000000000000000000000000000000000000000",
+      "safe": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a",
+      "factoryOwnedBySafe": false
+    },
+    "146": {
+      "network": "sonic",
+      "newStandardFactory": "0x0000000000000000000000000000000000000000",
+      "tokenOpsModule": "0x0000000000000000000000000000000000000000",
+      "dispatcher": "0xA0ea39EC7503b4A18018fAC8d34450967c69788A",
+      "dispatcherV3": "0x0000000000000000000000000000000000000000",
+      "safe": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a",
+      "factoryOwnedBySafe": false
+    },
+    "80094": {
+      "network": "berachain",
+      "newStandardFactory": "0x0000000000000000000000000000000000000000",
+      "tokenOpsModule": "0x0000000000000000000000000000000000000000",
+      "dispatcher": "0x4c2E7b9Ac2D146c8e3942b24Bc4Da5fF96Dc4AEf",
+      "dispatcherV3": "0x0000000000000000000000000000000000000000",
+      "safe": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a",
+      "factoryOwnedBySafe": false
+    },
+    "747474": {
+      "network": "katana",
+      "newStandardFactory": "0x0000000000000000000000000000000000000000",
+      "tokenOpsModule": "0x0000000000000000000000000000000000000000",
+      "dispatcher": "0xE7c9bE3B890A3132c3172599b434Db5305Ba3533",
+      "dispatcherV3": "0x0000000000000000000000000000000000000000",
+      "safe": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a",
+      "factoryOwnedBySafe": false
+    },
+    "143": {
+      "network": "monad",
+      "newStandardFactory": "0x0000000000000000000000000000000000000000",
+      "tokenOpsModule": "0x0000000000000000000000000000000000000000",
+      "dispatcher": "0xCeC322deD6D48d078db2EfC34135549e0632d3b4",
+      "dispatcherV3": "0x0000000000000000000000000000000000000000",
+      "safe": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a",
+      "factoryOwnedBySafe": false
+    },
+    "9745": {
+      "network": "plasma",
+      "newStandardFactory": "0x0000000000000000000000000000000000000000",
+      "tokenOpsModule": "0x0000000000000000000000000000000000000000",
+      "dispatcher": "0x0581b673da0730e1adB054fB26d42108f13F62f9",
+      "dispatcherV3": "0x0000000000000000000000000000000000000000",
+      "safe": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a",
+      "factoryOwnedBySafe": false
+    },
+    "2741": {
+      "network": "abstract",
+      "newStandardFactory": "0x0000000000000000000000000000000000000000",
+      "tokenOpsModule": "0x0000000000000000000000000000000000000000",
+      "dispatcher": "0xcF262e4339659231EB335177fCd8D2a20878A777",
+      "dispatcherV3": "0x0000000000000000000000000000000000000000",
+      "safe": "0x40ea2908Ea490d58E62D1Fd3364464D8A857b297",
+      "factoryOwnedBySafe": false
+    }
+  }
+}

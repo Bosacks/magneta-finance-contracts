@@ -1,0 +1,9 @@
+{
+  "network": "optimism",
+  "chainId": 10,
+  "contract": "MagnetaLpAtomicHelper",
+  "address": "0x386d173Fe0702782E876a21bB8DE4e58014dF755",
+  "deployer": "0x620684F822da9adF36F41e3554791D889947e25E",
+  "safe": null,
+  "timestamp": "2026-07-01T14:50:27.367Z"
+}

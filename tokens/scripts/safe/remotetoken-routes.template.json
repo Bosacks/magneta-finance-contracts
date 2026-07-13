@@ -1,0 +1,37 @@
+{
+  "_README": [
+    "Routes table for generate-remotetoken-batches.ts (Sentinelle F22).",
+    "",
+    "HOW TO USE:",
+    "  1. cp remotetoken-routes.template.json remotetoken-routes.json",
+    "  2. Per chain fill: safe, bridge (deployed MagnetaBridgeOApp), and one 'routes'",
+    "     entry per (eid, localToken, remote):",
+    "       eid        = the LZ endpoint id of the OTHER chain on this route",
+    "       localToken = the token's address ON THIS chain",
+    "       remote     = the SAME token's address on chain `eid`",
+    "  3. npx hardhat run scripts/safe/generate-remotetoken-batches.ts",
+    "",
+    "IMPORTANT: set BOTH directions. On the source chain map (dstEid, srcToken ->",
+    "dstToken); on the destination chain map (srcEid, dstToken -> srcToken). The",
+    "bridge reverts every transfer for an unmapped token, so fill this before",
+    "opening bridge liquidity. LZ EIDs: 30101 ETH / 30110 ARB / 30184 BASE / 30109 POLYGON, etc."
+  ],
+  "chains": {
+    "137": {
+      "network": "polygon",
+      "safe": "0x4AeA3A398Db41b45e146c08131aD27c75b02EC2F",
+      "bridge": "",
+      "routes": [
+        { "eid": 30184, "localToken": "", "remote": "" }
+      ]
+    },
+    "8453": {
+      "network": "base",
+      "safe": "0xC4c9...717a",
+      "bridge": "",
+      "routes": [
+        { "eid": 30109, "localToken": "", "remote": "" }
+      ]
+    }
+  }
+}

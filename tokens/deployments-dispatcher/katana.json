@@ -1,0 +1,24 @@
+{
+  "network": "katana",
+  "chainId": "747474",
+  "deployer": "0x620684F822da9adF36F41e3554791D889947e25E",
+  "treasury": "0x68109132Ecf7540A0A983e1Aaa7DebC469d9d68b",
+  "lzEndpoint": "0x6F475642a6e85809B1c36Fa62763669b1b48DD5B",
+  "timestamp": "2026-05-01T00:53:56.361Z",
+  "factories": {
+    "MagnetaOFTStandardFactory": "0xCeC322deD6D48d078db2EfC34135549e0632d3b4",
+    "MagnetaOFTAutoLiquidityFactory": "0xcdF3e1377Cfcbfe5336D79344DC074433F6854AE"
+  },
+  "createTokenDispatcher": "0xE7c9bE3B890A3132c3172599b434Db5305Ba3533",
+  "safe": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a",
+  "crossChainCreatorWired": {
+    "stdFactory": "(complete)",
+    "alFactory": "(complete)"
+  },
+  "ownershipTransfer": {
+    "stdFactory": "0x9808d35af36c625fb61ec60d2cfceff54f23de78bb76728b3c0e060f29cadf89",
+    "alFactory": "0xd554b40fe08cd51e37a93956f0da640efca61b1e30b4e7c3c927a157e29e3210",
+    "dispatcher": "0x732c94d510b37decfa7f923bfa37899b4c19a5048d79be6b9309d2371ee7c175"
+  },
+  "recoveredFromPartialDeploy": true
+}
