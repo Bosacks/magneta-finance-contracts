@@ -26,5 +26,6 @@
     "TaxClaimModule": "0x7BABd0a2da46E13758c8381831fbAa84dF1c2acA",
     "TokenOpsModule": "0x5F157Ad4FC631fA8aDb6cfd6dF7030Ae19C91adC",
     "MagnetaCurveFactory": "0xD91aF46F947a783B68D40137a2526C25d6067927"
-  }
+  },
+  "gnosisSafe": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a"
 }

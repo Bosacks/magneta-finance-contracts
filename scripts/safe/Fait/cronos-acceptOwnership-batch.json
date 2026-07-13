@@ -1,0 +1,42 @@
+{
+  "version": "1.0",
+  "chainId": "25",
+  "createdAt": 1745700000000,
+  "meta": {
+    "name": "Magneta — acceptOwnership batch (Cronos)",
+    "description": "Finalize Ownable2Step transfer for MagnetaPool, MagnetaSwap, MagnetaLending, MagnetaFactory on Cronos (minimal deploy: no LayerZero V2 → Gateway/Bridge/Modules skipped). Bundler is plain Ownable, transferred directly. Execute via in-house execBatch.ts (Safe Wallet UI doesn't support Cronos).",
+    "txBuilderVersion": "1.17.0",
+    "createdFromSafeAddress": "0x40ea2908Ea490d58E62D1Fd3364464D8A857b297",
+    "createdFromOwnerAddress": ""
+  },
+  "transactions": [
+    {
+      "to": "0xF4A2890fA65Add269829Bd6E4517BC84E473315c",
+      "value": "0",
+      "data": null,
+      "contractMethod": { "inputs": [], "name": "acceptOwnership", "payable": false },
+      "contractInputsValues": {}
+    },
+    {
+      "to": "0xDc6BFf741D5a94c26002268b0228212C71F9C726",
+      "value": "0",
+      "data": null,
+      "contractMethod": { "inputs": [], "name": "acceptOwnership", "payable": false },
+      "contractInputsValues": {}
+    },
+    {
+      "to": "0xDa43c95Fb2ccf6bDE904Ece558eDeA6B506641B9",
+      "value": "0",
+      "data": null,
+      "contractMethod": { "inputs": [], "name": "acceptOwnership", "payable": false },
+      "contractInputsValues": {}
+    },
+    {
+      "to": "0x2203FE0F92781d7ECdF626b6aD08A9D2e281EFD0",
+      "value": "0",
+      "data": null,
+      "contractMethod": { "inputs": [], "name": "acceptOwnership", "payable": false },
+      "contractInputsValues": {}
+    }
+  ]
+}

@@ -1,0 +1,81 @@
+{
+  "version": "1.0",
+  "chainId": "2741",
+  "createdAt": 1780500000,
+  "meta": {
+    "name": "Magneta wave \u2014 accept ownership (abstract)",
+    "description": "Second leg of Ownable2Step: Safe 0x40ea2908Ea490d58E62D1Fd3364464D8A857b297 accepts ownership of 10 redeploy-wave contracts on abstract. Run AFTER deployer executes transferOwnership.ts --network abstract. 1-step (no accept needed): MagnetaBridgeOApp."
+  },
+  "transactions": [
+    {
+      "to": "0xDE543DcE15f443717402D17eC8d7D67Eee29bbFA",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0xf7803051bEC935Cec413B87f50E30737cDb9A79E",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0xaC3B726A7582F2B12aE1C7865CBeE93CC0418C8a",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x414dC3f0670227Ab3DDAd8B0A52aF7AdebC4a504",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x749eeB253c7988590651D83bBF005d7b3385E287",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x2999D66Ecb8bA3B2dD2Ed70ac8b1C6B135df6ed4",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x802135E39fb56FAe17d26eC1B02261BF7cf1D426",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0xb5A6802af950BE3e576e1937Ea21FAC7f446FC4D",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x8151c725cd637e1664225Cebf32353258F5daaEc",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x9dCd2033C84cCff501D55256be110ffEBE30F441",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    }
+  ]
+}

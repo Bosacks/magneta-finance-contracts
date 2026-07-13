@@ -1,0 +1,81 @@
+{
+  "version": "1.0",
+  "chainId": "137",
+  "createdAt": 1780500000,
+  "meta": {
+    "name": "Magneta wave \u2014 accept ownership (polygon)",
+    "description": "Second leg of Ownable2Step: Safe 0x4AeA3A398Db41b45e146c08131aD27c75b02EC2F accepts ownership of 10 redeploy-wave contracts on polygon. Run AFTER deployer executes transferOwnership.ts --network polygon. 1-step (no accept needed): MagnetaBridgeOApp."
+  },
+  "transactions": [
+    {
+      "to": "0x7E9C561a21f4Db5501792B05d5ada0e2Cd3883Cd",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x23A722C9cC7053B3c96B34ccb10Bc3bF90b27302",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x19a72f915DF9877F2db50595eaEa65B846a3f931",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x1ab3d782A0129c110ec4aa56A9Fa8D7f15DC1B10",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0xe8A7B4808861B5b14B11F2c80e47bB99Cd93E018",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0xd66d2ca8445ab8FC0118f0b813886bfef22fBdcb",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0xc8da81B694c83DBF70f021575272f33Ac7B9cA4a",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x5031F1FA9c6049497799b970949bC25e920Ba7E4",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0xF4e7d332b5dCf5581bef51713A341386847A09C1",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x46af5D18b802c9329104aBad2850085cDc266403",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    }
+  ]
+}

@@ -1,0 +1,34 @@
+{
+  "version": "1.0",
+  "chainId": "137",
+  "createdAt": 1778718550724,
+  "meta": {
+    "name": "Magneta — Set curve router to Magneta V2 (polygon)",
+    "description": "Switch MagnetaCurveFactory (0x3564406Da6475E02c359eD1d55f747299c477837) router to the freshly deployed MagnetaV2Router02 (0x7402EbE42E374120991aBDaac27F2BC0EfEC4289). After this, NEW curve tokens created via the launchpad will graduate into Magneta-owned pools (Factory 0xdbEfA1fE8A0d3b25B7D3e15e01FD617AE77B4fc8), with 0.05% protocol fee to FeeVault on every swap.",
+    "txBuilderVersion": "1.18.0",
+    "createdFromSafeAddress": "0x4AeA3A398Db41b45e146c08131aD27c75b02EC2F",
+    "createdFromOwnerAddress": "",
+    "checksum": "0x0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "transactions": [
+    {
+      "to": "0x3564406Da6475E02c359eD1d55f747299c477837",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [
+          {
+            "internalType": "address",
+            "name": "_router",
+            "type": "address"
+          }
+        ],
+        "name": "setRouter",
+        "payable": false
+      },
+      "contractInputsValues": {
+        "_router": "0x7402EbE42E374120991aBDaac27F2BC0EfEC4289"
+      }
+    }
+  ]
+}

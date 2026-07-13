@@ -1,0 +1,62 @@
+{
+  "version": "1.0",
+  "chainId": "10",
+  "createdAt": 1778628929756,
+  "meta": {
+    "name": "Magneta — Accept V2 Package ownership (optimism)",
+    "description": "Finalize the Ownable2Step transfer for PromotionPayment (0x414dC3f0670227Ab3DDAd8B0A52aF7AdebC4a504) and MagnetaProxy V2 (0x749eeB253c7988590651D83bBF005d7b3385E287), plus single-step MagnetaBundler V2 (0x2999D66Ecb8bA3B2dD2Ed70ac8b1C6B135df6ed4). Deployed by 0x620684F822da9adF36F41e3554791D889947e25E.",
+    "txBuilderVersion": "1.18.0",
+    "createdFromSafeAddress": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a",
+    "createdFromOwnerAddress": "",
+    "checksum": "0x0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "transactions": [
+    {
+      "to": "0x414dC3f0670227Ab3DDAd8B0A52aF7AdebC4a504",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [],
+        "name": "acceptOwnership",
+        "payable": false
+      },
+      "contractInputsValues": {}
+    },
+    {
+      "to": "0x749eeB253c7988590651D83bBF005d7b3385E287",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [],
+        "name": "acceptOwnership",
+        "payable": false
+      },
+      "contractInputsValues": {}
+    },
+    {
+      "to": "0x414dC3f0670227Ab3DDAd8B0A52aF7AdebC4a504",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [
+          {
+            "internalType": "uint8[]",
+            "name": "codes",
+            "type": "uint8[]"
+          },
+          {
+            "internalType": "uint256[]",
+            "name": "prices",
+            "type": "uint256[]"
+          }
+        ],
+        "name": "setPricesBatch",
+        "payable": false
+      },
+      "contractInputsValues": {
+        "codes": "[1,2,3,4,5,6]",
+        "prices": "[\"10000000000000000\",\"20000000000000000\",\"30000000000000000\",\"40000000000000000\",\"50000000000000000\",\"60000000000000000\"]"
+      }
+    }
+  ]
+}

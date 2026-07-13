@@ -25,5 +25,6 @@
     "SwapModule": "0xb5A6802af950BE3e576e1937Ea21FAC7f446FC4D",
     "TaxClaimModule": "0x9dCd2033C84cCff501D55256be110ffEBE30F441",
     "TokenOpsModule": "0x8151c725cd637e1664225Cebf32353258F5daaEc"
-  }
+  },
+  "gnosisSafe": "0x40ea2908Ea490d58E62D1Fd3364464D8A857b297"
 }

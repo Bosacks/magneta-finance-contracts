@@ -3,6 +3,36 @@
 > Fil chronologique des sessions. Anti-chronologique (plus récent en haut).
 > Voir `~/CLAUDE.md` pour la règle d'édition.
 
+## 2026-07-09 (transfert Safe de la vague TERMINÉ)
+- **20/20 chaînes = 231 contrats de la vague sous multisig 2/2** ✅ (vérifié on-chain owner==Safe, tous)
+- Accepts (step-2) : UI Safe pour ~10 chaînes ; **execBatch.ts** pour berachain/unichain + les 4 INH (flare/sei/abstract/cronos) car UI plante (Safe SDK/Tenderly/Safe Shield mal supportés sur chaînes récentes)
+- Faux positifs UI rencontrés + tranchés on-chain : Tenderly "will fail" (berachain), GS013 = déjà accepté (bsc), Safe Shield "malicious address" = nos propres contrats non-vérifiés (unichain Pool/Swap/Lending)
+- ⚠️ Clé guardian a transité sur la machine (execBatch sur 6 chaînes) → **rotation guardian + nettoyage bash_history recommandés** (les 2 signers du 2/2 étaient temporairement sur la même machine)
+- Reste : (1) rotation clé guardian, (2) vérif source des contrats sur explorers (réduit faux positifs Safe Shield), (3) **cutover frontends** vers la vague durcie (le but de la décision A)
+
+## 2026-07-08 (exécution transfert Safe de la vague)
+- **Step-1 (transferOwnership EOA) exécuté sur les 20 chaînes** — pending=Safe sur les 2-step, BridgeOApp (1-step) transféré direct ; vérifié on-chain
+- Accepts (step-2) faits par user : polygon, arbitrum, optimism = ✅ 12/12 owner=Safe ; 17 chaînes restent en attente d'accept (UI MAIN/LEGACY + execBatch INH)
+- RPC galère : base (in-flight limit/521/timeout sur proxy/llama/publicnode/drpc → **1rpc.io** a fini), gnosis (lent, 3 runs publicnode+gnosischain), monad/cronos direct
+- **⚠️ PIÈGE évité** : `0x4AeA` sur base = Safe DIFFÉRENT (deployer+Relayer, **1/2**), pas ton 2/2 ; base reste sous `0xC4c9` (vrai {deployer+guardian} 2/2). Cf mémoire infra_safe_multisig. Toujours getOwners/getThreshold avant transfert
+- Reste : user finit les 17 accepts, puis vérif finale owner==Safe, puis cutover frontends
+
+## 2026-07-07 — bis (prépa transfert Safe de la vague)
+- Découverte : DEUX écosystèmes distincts — set LIVE (gatewayChains.ts, Tokens+DEX) **déjà Safe-owned** (LEGACY/MAIN/INH), et la vague `deployments/*.json` (EOA, issue de la couche audit-grade Sentinelleai) **non-cutover**. Décision user = **A** (basculer les frontends sur la vague durcie). Cf mémoire project_two_contract_ecosystems
+- Correction : mon 1er audit "0/20 transféré" ne concernait QUE la vague ; le live EST sécurisé Safe
+- Carte Safe dérivée de la vérité terrain (owner des contrats live) + vérifiée : LEGACY/MAIN/INH tous 2/2 avec code ; monad MAIN OK (proxy gas-quirk, lu via rpc.monad.xyz)
+- Prépa (rien d'irréversible exécuté) : `gnosisSafe` peuplé dans les 20 deployments/*.json ; `transferOwnership.ts` corrigé (+MagnetaCurveFactory, manquait) ; DRY_RUN OK 3 groupes (BridgeOApp=Ownable 1-step, reste 2-step) ; 20 batches `scripts/safe/wave-accept/<chain>-accept-batch.json` (211 acceptOwnership, cronos re-généré via proxy car direct RPC choke)
+- Reste : exécution transferOwnership (EOA) + accept batches (Safe) par chaîne, un par un + vérif — en attente go user
+
+## 2026-07-07
+- Audit on-chain pré-Safe (20 chaînes × 12 contrats, lu 3×: moi + 4 agents Sonnet + RPC public tiers) : **ownership 100% deployer EOA, 0 transféré au Safe, aucun pendingOwner** — le vrai transfert Safe reste entièrement à faire (les "Safe" passés = batches addPauser Gateway/Swap)
+- Constat : guardian pauser câblé seulement sur Gateway+Swap (deployAll/configureOnly n'ajoutaient que ces 2) → trou sur Pool/Lending/Factory/Bundler/BridgeOApp sur les 20 chaînes
+- Nouveau `scripts/deploy/wirePauserGap.ts` (idempotent, préflight owner==signer, DRY_RUN, retry nonce) : addPauser(guardian) sur les 5 contrats manquants, via deployer EOA AVANT transfert Safe (sinon = batch multisig)
+- Exécuté : **20/20 chaînes complètes** (guardian pauser sur tous les pausables présents : Pool/Lending/Factory/Bundler/BridgeOApp + Gateway/Swap préexistants), vérifié on-chain indépendamment ; berachain = 4 cibles (pas de Bundler)
+- cronos manquait de gas → `scripts/deploy/topUpCronosViaLifi.ts` : bridge 5 POL→6,35 CRO via LI.FI (Relay, ~6s), puis re-run idempotent = 5/5 ✓
+- Notes RPC : monad/cronos via RPC direct (proxy = gas-limit quirk) ; base throttle "in-flight delegated" → proxy ; bsc/ava/gnosis/celo default RPC échouait getSigners → proxy
+- Prochaine étape : scripts/batches transfert ownership deployer→Safe (transferOwnership.ts existe) — le vrai transfert Safe reste 0/20 à faire
+
 ## 2026-07-05
 - Durcissement staking/ (MasterChef, StakingRewards, StakingFactory) : Ownable→Ownable2Step + Pausable multi-pauser (pattern MagnetaFactory), whenNotPaused sur entrées seulement (deposit/stake/createStakingPool), sorties jamais bloquées
 - 45 tests staking créés (0 avant) : 42+3 fichiers, pause/rôles/2-step ; suite complète 410 verts, zéro régression

@@ -1,0 +1,26 @@
+{
+  "version": "1.0",
+  "chainId": "137",
+  "createdAt": 1778500001000,
+  "meta": {
+    "name": "Magneta — Bundler rescueETH (polygon)",
+    "description": "Withdraw accumulated atomicVolumeBrush service fees from MagnetaBundler to the Safe. Re-run whenever a meaningful balance has accumulated.",
+    "txBuilderVersion": "1.18.0",
+    "createdFromSafeAddress": "0x4AeA3A398Db41b45e146c08131aD27c75b02EC2F",
+    "createdFromOwnerAddress": "",
+    "checksum": "0x0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "transactions": [
+    {
+      "to": "0x3f5BF77ba60949c4C5B9653159b0A050593B04a8",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [],
+        "name": "rescueETH",
+        "payable": false
+      },
+      "contractInputsValues": {}
+    }
+  ]
+}

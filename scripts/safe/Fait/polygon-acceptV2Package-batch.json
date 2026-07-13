@@ -1,0 +1,37 @@
+{
+  "version": "1.0",
+  "chainId": "137",
+  "createdAt": 1778603250250,
+  "meta": {
+    "name": "Magneta — Accept V2 Package ownership (polygon)",
+    "description": "Finalize the Ownable2Step transfer for PromotionPayment (0x2FaC13e2707475E6Ea034b92Ffc855333668c4Ea) and MagnetaProxy V2 (0x0ff3D7a1ff7b4E53CA693D7A774E71f129520315). MagnetaBundler V2 (0xD6B5aa64cd22556C1Fe2f476BbE1538190d69B24) uses single-step Ownable and is already owned by this Safe.",
+    "txBuilderVersion": "1.18.0",
+    "createdFromSafeAddress": "0x4AeA3A398Db41b45e146c08131aD27c75b02EC2F",
+    "createdFromOwnerAddress": "",
+    "checksum": "0x0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "transactions": [
+    {
+      "to": "0x2FaC13e2707475E6Ea034b92Ffc855333668c4Ea",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [],
+        "name": "acceptOwnership",
+        "payable": false
+      },
+      "contractInputsValues": {}
+    },
+    {
+      "to": "0x0ff3D7a1ff7b4E53CA693D7A774E71f129520315",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [],
+        "name": "acceptOwnership",
+        "payable": false
+      },
+      "contractInputsValues": {}
+    }
+  ]
+}

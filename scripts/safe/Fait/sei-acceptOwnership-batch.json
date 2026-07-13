@@ -1,0 +1,49 @@
+{
+  "version": "1.0",
+  "chainId": "1329",
+  "createdAt": 1745711400000,
+  "meta": {
+    "name": "Magneta — acceptOwnership batch (Sei retroactive)",
+    "description": "Retroactive migration of Sei contracts from deployer EOA to Safe in-house 0x40ea...b297. Finalize Ownable2Step transfer for MagnetaPool, MagnetaSwap, MagnetaLending, MagnetaFactory, MagnetaGateway. The 6 other Ownable contracts already transferred direct. Execute via in-house execBatch.ts.",
+    "txBuilderVersion": "1.17.0",
+    "createdFromSafeAddress": "0x40ea2908Ea490d58E62D1Fd3364464D8A857b297",
+    "createdFromOwnerAddress": ""
+  },
+  "transactions": [
+    {
+      "to": "0xBeb7bB26Efe2c9c8571c83590625d5249755ad27",
+      "value": "0",
+      "data": null,
+      "contractMethod": { "inputs": [], "name": "acceptOwnership", "payable": false },
+      "contractInputsValues": {}
+    },
+    {
+      "to": "0x3f5BF77ba60949c4C5B9653159b0A050593B04a8",
+      "value": "0",
+      "data": null,
+      "contractMethod": { "inputs": [], "name": "acceptOwnership", "payable": false },
+      "contractInputsValues": {}
+    },
+    {
+      "to": "0x3c21016E57e7A29333f38d200EC8945bfc6BA537",
+      "value": "0",
+      "data": null,
+      "contractMethod": { "inputs": [], "name": "acceptOwnership", "payable": false },
+      "contractInputsValues": {}
+    },
+    {
+      "to": "0xB4f06F01641eFFb376Cc5dcA90F81fed1C6FA76e",
+      "value": "0",
+      "data": null,
+      "contractMethod": { "inputs": [], "name": "acceptOwnership", "payable": false },
+      "contractInputsValues": {}
+    },
+    {
+      "to": "0xDe1752E266C3978240014DFc616dd34EbF9cDF31",
+      "value": "0",
+      "data": null,
+      "contractMethod": { "inputs": [], "name": "acceptOwnership", "payable": false },
+      "contractInputsValues": {}
+    }
+  ]
+}

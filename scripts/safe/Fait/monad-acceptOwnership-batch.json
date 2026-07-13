@@ -1,0 +1,69 @@
+{
+  "version": "1.0",
+  "chainId": "143",
+  "createdAt": 1745605800000,
+  "meta": {
+    "name": "Magneta — acceptOwnership batch (Monad)",
+    "description": "Finalize Ownable2Step transfer for MagnetaPool, MagnetaSwap, MagnetaLending, MagnetaFactory, MagnetaGateway on Monad. After this batch, the Safe fully owns all 11 Magneta contracts on Monad.",
+    "txBuilderVersion": "1.17.0",
+    "createdFromSafeAddress": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a",
+    "createdFromOwnerAddress": ""
+  },
+  "transactions": [
+    {
+      "to": "0xDc6BFf741D5a94c26002268b0228212C71F9C726",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [],
+        "name": "acceptOwnership",
+        "payable": false
+      },
+      "contractInputsValues": {}
+    },
+    {
+      "to": "0xDa43c95Fb2ccf6bDE904Ece558eDeA6B506641B9",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [],
+        "name": "acceptOwnership",
+        "payable": false
+      },
+      "contractInputsValues": {}
+    },
+    {
+      "to": "0x2203FE0F92781d7ECdF626b6aD08A9D2e281EFD0",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [],
+        "name": "acceptOwnership",
+        "payable": false
+      },
+      "contractInputsValues": {}
+    },
+    {
+      "to": "0xBeb7bB26Efe2c9c8571c83590625d5249755ad27",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [],
+        "name": "acceptOwnership",
+        "payable": false
+      },
+      "contractInputsValues": {}
+    },
+    {
+      "to": "0x3c21016E57e7A29333f38d200EC8945bfc6BA537",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [],
+        "name": "acceptOwnership",
+        "payable": false
+      },
+      "contractInputsValues": {}
+    }
+  ]
+}

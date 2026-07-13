@@ -1,0 +1,32 @@
+{
+  "version": "1.0",
+  "chainId": "137",
+  "createdAt": 1780500000,
+  "meta": {
+    "name": "Magneta Layer 1 ownership migration — polygon",
+    "description": "Sentinelle config-drift scanner finding remediation 2026-06-08. Completes the Ownable2Step second leg for polygon: Safe accepts ownership of Gateway (0x7b1A44FA3928d61E04e8C04E6798DEe1c3d5f66C), LPModule (0x864Eed1d5DF4b8457bfb42aBee1468127D315539), and TokenOpsModule (0xfB95B039c6Cd2Dfbf94D3e849D16Fc333B27c0C6). Eliminates single-key risk on polygon's Layer 1 ops (LP / MINT / FREEZE) — they were previously deployer-EOA-owned out of step with the other 17 mainnet chains. Sign with Safe 0x4AeA3A398Db41b45e146c08131aD27c75b02EC2F."
+  },
+  "transactions": [
+    {
+      "to": "0x7b1A44FA3928d61E04e8C04E6798DEe1c3d5f66C",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x864Eed1d5DF4b8457bfb42aBee1468127D315539",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0xfB95B039c6Cd2Dfbf94D3e849D16Fc333B27c0C6",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    }
+  ]
+}

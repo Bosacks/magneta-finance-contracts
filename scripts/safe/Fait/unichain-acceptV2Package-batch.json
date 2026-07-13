@@ -1,0 +1,62 @@
+{
+  "version": "1.0",
+  "chainId": "130",
+  "createdAt": 1778626840193,
+  "meta": {
+    "name": "Magneta — Accept V2 Package ownership (unichain)",
+    "description": "Finalize the Ownable2Step transfer for PromotionPayment (0xf7803051bEC935Cec413B87f50E30737cDb9A79E) and MagnetaProxy V2 (0xaC3B726A7582F2B12aE1C7865CBeE93CC0418C8a), plus single-step MagnetaBundler V2 (0x414dC3f0670227Ab3DDAd8B0A52aF7AdebC4a504). Deployed by 0x620684F822da9adF36F41e3554791D889947e25E.",
+    "txBuilderVersion": "1.18.0",
+    "createdFromSafeAddress": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a",
+    "createdFromOwnerAddress": "",
+    "checksum": "0x0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "transactions": [
+    {
+      "to": "0xf7803051bEC935Cec413B87f50E30737cDb9A79E",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [],
+        "name": "acceptOwnership",
+        "payable": false
+      },
+      "contractInputsValues": {}
+    },
+    {
+      "to": "0xaC3B726A7582F2B12aE1C7865CBeE93CC0418C8a",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [],
+        "name": "acceptOwnership",
+        "payable": false
+      },
+      "contractInputsValues": {}
+    },
+    {
+      "to": "0xf7803051bEC935Cec413B87f50E30737cDb9A79E",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [
+          {
+            "internalType": "uint8[]",
+            "name": "codes",
+            "type": "uint8[]"
+          },
+          {
+            "internalType": "uint256[]",
+            "name": "prices",
+            "type": "uint256[]"
+          }
+        ],
+        "name": "setPricesBatch",
+        "payable": false
+      },
+      "contractInputsValues": {
+        "codes": "[1,2,3,4,5,6]",
+        "prices": "[\"10000000000000000\",\"20000000000000000\",\"30000000000000000\",\"40000000000000000\",\"50000000000000000\",\"60000000000000000\"]"
+      }
+    }
+  ]
+}

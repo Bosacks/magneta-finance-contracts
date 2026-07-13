@@ -1,0 +1,32 @@
+{
+  "version": "1.0",
+  "chainId": "8453",
+  "createdAt": 1780500000,
+  "meta": {
+    "name": "Magneta Layer 1 ownership migration — base",
+    "description": "Sentinelle config-drift scanner finding remediation 2026-06-08. Completes the Ownable2Step second leg for base: Safe accepts ownership of Gateway (0x852976d4c837824e53357E84e851ce0C5A1092ff), LPModule (0x9003cEe70616B07e184FB4bC39a54A4694FC1642), and TokenOpsModule (0xb234B37211f2c5653501FA42936b0729c49a0eB7). Eliminates single-key risk on base's Layer 1 ops (LP / MINT / FREEZE) — they were previously deployer-EOA-owned out of step with the other 17 mainnet chains. Sign with Safe 0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a."
+  },
+  "transactions": [
+    {
+      "to": "0x852976d4c837824e53357E84e851ce0C5A1092ff",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x9003cEe70616B07e184FB4bC39a54A4694FC1642",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0xb234B37211f2c5653501FA42936b0729c49a0eB7",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    }
+  ]
+}

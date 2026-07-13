@@ -1,0 +1,31 @@
+{
+  "version": "1.0",
+  "chainId": "59144",
+  "createdAt": 1745692900000,
+  "meta": {
+    "name": "Magneta — whitelist USDC + WETH on MagnetaSwap (Linea)",
+    "description": "Whitelist Circle native USDC (0x176211...e1ff) and WETH Linea (0xe5d7c2a4...f34f) on MagnetaSwap Linea (0xDc6BFf74...C726). Both are required for swap routing: WETH is the universal pair on PancakeSwap V2 Linea, USDC is the canonical 6-decimal stable.",
+    "txBuilderVersion": "1.17.0",
+    "createdFromSafeAddress": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a",
+    "createdFromOwnerAddress": ""
+  },
+  "transactions": [
+    {
+      "to": "0xDc6BFf741D5a94c26002268b0228212C71F9C726",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [
+          { "internalType": "address[]", "name": "tokens", "type": "address[]" },
+          { "internalType": "bool", "name": "whitelisted", "type": "bool" }
+        ],
+        "name": "whitelistTokenBatch",
+        "payable": false
+      },
+      "contractInputsValues": {
+        "tokens": "[\"0x176211869cA2b568f2A7D4EE941E073a821EE1ff\",\"0xe5D7C2a44FfDDf6b295A15c148167daaAf5Cf34f\"]",
+        "whitelisted": "true"
+      }
+    }
+  ]
+}

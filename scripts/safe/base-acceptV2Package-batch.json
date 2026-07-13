@@ -1,0 +1,46 @@
+{
+  "version": "1.0",
+  "chainId": "8453",
+  "createdAt": 1778677500000,
+  "meta": {
+    "name": "Magneta — Accept V2 Package ownership (base)",
+    "description": "Finalize the Ownable2Step transfer for PromotionPayment (0x41c71d95a948267742a524887A501da283898Cf4) and MagnetaProxy V2 (0xdABE66dc68479943789C4d4C35eEdd6dD6466384), plus initial setPricesBatch. MagnetaBundler V2 (0x7BABd0a2da46E13758c8381831fbAa84dF1c2acA) is single-step Ownable, already owned by this Safe.",
+    "txBuilderVersion": "1.18.0",
+    "createdFromSafeAddress": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a",
+    "createdFromOwnerAddress": "",
+    "checksum": "0x0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "transactions": [
+    {
+      "to": "0x41c71d95a948267742a524887A501da283898Cf4",
+      "value": "0",
+      "data": null,
+      "contractMethod": { "inputs": [], "name": "acceptOwnership", "payable": false },
+      "contractInputsValues": {}
+    },
+    {
+      "to": "0xdABE66dc68479943789C4d4C35eEdd6dD6466384",
+      "value": "0",
+      "data": null,
+      "contractMethod": { "inputs": [], "name": "acceptOwnership", "payable": false },
+      "contractInputsValues": {}
+    },
+    {
+      "to": "0x41c71d95a948267742a524887A501da283898Cf4",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [
+          { "internalType": "uint8[]", "name": "codes", "type": "uint8[]" },
+          { "internalType": "uint256[]", "name": "prices", "type": "uint256[]" }
+        ],
+        "name": "setPricesBatch",
+        "payable": false
+      },
+      "contractInputsValues": {
+        "codes": "[1,2,3,4,5,6]",
+        "prices": "[10000000000000000,20000000000000000,30000000000000000,40000000000000000,50000000000000000,60000000000000000]"
+      }
+    }
+  ]
+}

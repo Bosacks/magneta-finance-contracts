@@ -21,5 +21,6 @@
     "MagnetaGateway": "0x781fe150a73266359288C1B36947A7A5B151814d",
     "MagnetaBridgeOApp": "0x37dfBE103ec62b95CAed3e9C4F3dD22cD53B02B2",
     "TokenOpsModule": "0xcC8A21D13F048f7279f40335bc8759e10513B015"
-  }
+  },
+  "gnosisSafe": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a"
 }

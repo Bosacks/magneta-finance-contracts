@@ -1,0 +1,28 @@
+{
+  "version": "1.0",
+  "chainId": "8453",
+  "createdAt": 1777754353817,
+  "meta": {
+    "name": "Magneta Sprint 9.7 — Dispatcher v3 wire (base)",
+    "description": "peer wires from base to siblings.",
+    "txBuilderVersion": "1.17.0",
+    "createdFromSafeAddress": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a",
+    "createdFromOwnerAddress": ""
+  },
+  "transactions": [
+    {
+      "to": "0xf7803051bEC935Cec413B87f50E30737cDb9A79E",
+      "value": "0",
+      "data": "0x3400288b000000000000000000000000000000000000000000000000000000000000759d000000000000000000000000b9075096153c370e972fc72b31835acb4b05c6b3",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0xf7803051bEC935Cec413B87f50E30737cDb9A79E",
+      "value": "0",
+      "data": "0x3400288b000000000000000000000000000000000000000000000000000000000000759e000000000000000000000000c0bc9150d6d2f64d999072d4263ff87af0357f4d",
+      "contractMethod": null,
+      "contractInputsValues": null
+    }
+  ]
+}

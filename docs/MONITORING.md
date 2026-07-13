@@ -5,11 +5,20 @@
 2. Pause all affected contracts in < 2 minutes after detection.
 3. Know who to page, and what they should do.
 
+## Runbooks (setup guides)
+
+| Concern | Runbook | Status |
+|---------|---------|--------|
+| Site uptime (tokens / app / scope) | [BETTERSTACK_SETUP.md](./BETTERSTACK_SETUP.md) | Ready to apply |
+| On-chain contract events (Arbitrum) | [TENDERLY_ALERTS.md](./TENDERLY_ALERTS.md) | Ready to apply |
+
+Both funnel alerts to the same Discord `#alerts` webhook + `info@magneta.finance`.
+
 ## Monitoring stack
 
 ### Tier 1 — real-time alerting (mandatory before mainnet)
 
-**Tenderly Web3 Actions** (or **OpenZeppelin Defender Sentinel**):
+**Tenderly Web3 Actions** — see [TENDERLY_ALERTS.md](./TENDERLY_ALERTS.md) for the concrete 16-rule setup on Arbitrum.
 - One monitor per deployed contract per chain.
 - Alert triggers:
   - Any `pause()` / `unpause()` event (verify source = guardian/Safe).
@@ -17,7 +26,9 @@
   - Any transfer > 10% of pool reserves in a single tx.
   - Failed `latestRoundData` → Chainlink feed stale.
   - Reserve mismatch: `token0.balanceOf(pool) - reserve0 > 1%`.
-- Alert channels: Slack `#magneta-alerts`, PagerDuty on-call, email fallback.
+- Alert channels: Discord `#alerts`, email, (PagerDuty when on-call team grows).
+
+**Site uptime** — see [BETTERSTACK_SETUP.md](./BETTERSTACK_SETUP.md) for HTTPS + SSL monitoring on the 3 public sites (tokens, app, scope).
 
 **Forta bots** (free tier):
 - Subscribe to: `flash-loan-attack-detector`, `large-price-impact`, `anomalous-token-transfers`.

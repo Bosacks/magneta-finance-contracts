@@ -1,0 +1,61 @@
+{
+  "version": "1.0",
+  "chainId": "84532",
+  "createdAt": 1779050907167,
+  "meta": {
+    "name": "Magneta — OFT setup batch (baseSepolia)",
+    "description": "Sprint 3 wiring: accept ownership of MagnetaOFTStandardFactory + MagnetaOFTAutoLiquidityFactory (Ownable2Step) and register TokenCreationModule with the Gateway under OpType.CREATE_TOKEN. After this batch, users can call Gateway.executeOperation(CREATE_TOKEN, ...) or sendFanOut to deploy OFT tokens cross-chain.",
+    "txBuilderVersion": "1.17.0",
+    "createdFromSafeAddress": "0x7900F22d8d6b234E87499F1d5b59e868963387EB",
+    "createdFromOwnerAddress": ""
+  },
+  "transactions": [
+    {
+      "to": "0x8b36B40C5a874aEF50A30CFdF1DB03733028b2AF",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [],
+        "name": "acceptOwnership",
+        "payable": false
+      },
+      "contractInputsValues": {}
+    },
+    {
+      "to": "0x584A41c2cC772b88cCd7D43db51Bf020cc1A0658",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [],
+        "name": "acceptOwnership",
+        "payable": false
+      },
+      "contractInputsValues": {}
+    },
+    {
+      "to": "0x14fe8c8D80C7420842B9313314F7b24dc4b3DceF",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [
+          {
+            "internalType": "uint8",
+            "name": "op",
+            "type": "uint8"
+          },
+          {
+            "internalType": "address",
+            "name": "module",
+            "type": "address"
+          }
+        ],
+        "name": "setModule",
+        "payable": false
+      },
+      "contractInputsValues": {
+        "op": "13",
+        "module": "0x6E9baecBBB425E293432c8f005Fe1c4A53937AD1"
+      }
+    }
+  ]
+}

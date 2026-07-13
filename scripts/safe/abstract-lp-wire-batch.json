@@ -1,0 +1,39 @@
+{
+  "version": "1.0",
+  "chainId": "2741",
+  "createdAt": 1780500000,
+  "meta": {
+    "name": "Magneta LP unlock — abstract",
+    "description": "Sprint LP-unlock for abstract. Wires the freshly-deployed LPModule (0x352a3dc814fa53Ba9b94aABb15B3b92399Fdd9f2) as the Gateway's handler for the 4 LP ops (CREATE_LP=0, REMOVE_LP=1, BURN_LP=2, CREATE_LP_AND_BUY=3). LPModule was deployed against router 0xad1eCa41E6F772bE3cb5A48A6141f9bcc1AF9F7c. Sign with the Safe that owns Gateway 0x3f5BF77ba60949c4C5B9653159b0A050593B04a8."
+  },
+  "transactions": [
+    {
+      "to": "0x3f5BF77ba60949c4C5B9653159b0A050593B04a8",
+      "value": "0",
+      "data": "0x879c5fa20000000000000000000000000000000000000000000000000000000000000000000000000000000000000000352a3dc814fa53ba9b94aabb15b3b92399fdd9f2",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x3f5BF77ba60949c4C5B9653159b0A050593B04a8",
+      "value": "0",
+      "data": "0x879c5fa20000000000000000000000000000000000000000000000000000000000000001000000000000000000000000352a3dc814fa53ba9b94aabb15b3b92399fdd9f2",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x3f5BF77ba60949c4C5B9653159b0A050593B04a8",
+      "value": "0",
+      "data": "0x879c5fa20000000000000000000000000000000000000000000000000000000000000002000000000000000000000000352a3dc814fa53ba9b94aabb15b3b92399fdd9f2",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x3f5BF77ba60949c4C5B9653159b0A050593B04a8",
+      "value": "0",
+      "data": "0x879c5fa20000000000000000000000000000000000000000000000000000000000000003000000000000000000000000352a3dc814fa53ba9b94aabb15b3b92399fdd9f2",
+      "contractMethod": null,
+      "contractInputsValues": null
+    }
+  ]
+}

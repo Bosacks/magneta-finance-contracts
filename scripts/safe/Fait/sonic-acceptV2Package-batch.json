@@ -1,0 +1,62 @@
+{
+  "version": "1.0",
+  "chainId": "146",
+  "createdAt": 1778627160338,
+  "meta": {
+    "name": "Magneta — Accept V2 Package ownership (sonic)",
+    "description": "Finalize the Ownable2Step transfer for PromotionPayment (0x802135E39fb56FAe17d26eC1B02261BF7cf1D426) and MagnetaProxy V2 (0xb5A6802af950BE3e576e1937Ea21FAC7f446FC4D), plus single-step MagnetaBundler V2 (0x9dCd2033C84cCff501D55256be110ffEBE30F441). Deployed by 0x620684F822da9adF36F41e3554791D889947e25E.",
+    "txBuilderVersion": "1.18.0",
+    "createdFromSafeAddress": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a",
+    "createdFromOwnerAddress": "",
+    "checksum": "0x0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "transactions": [
+    {
+      "to": "0x802135E39fb56FAe17d26eC1B02261BF7cf1D426",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [],
+        "name": "acceptOwnership",
+        "payable": false
+      },
+      "contractInputsValues": {}
+    },
+    {
+      "to": "0xb5A6802af950BE3e576e1937Ea21FAC7f446FC4D",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [],
+        "name": "acceptOwnership",
+        "payable": false
+      },
+      "contractInputsValues": {}
+    },
+    {
+      "to": "0x802135E39fb56FAe17d26eC1B02261BF7cf1D426",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [
+          {
+            "internalType": "uint8[]",
+            "name": "codes",
+            "type": "uint8[]"
+          },
+          {
+            "internalType": "uint256[]",
+            "name": "prices",
+            "type": "uint256[]"
+          }
+        ],
+        "name": "setPricesBatch",
+        "payable": false
+      },
+      "contractInputsValues": {
+        "codes": "[1,2,3,4,5,6]",
+        "prices": "[\"240000000000000000000\",\"480000000000000000000\",\"720000000000000000000\",\"960000000000000000000\",\"1200000000000000000000\",\"1440000000000000000000\"]"
+      }
+    }
+  ]
+}

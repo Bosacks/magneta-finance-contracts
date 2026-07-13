@@ -1,0 +1,88 @@
+{
+  "version": "1.0",
+  "chainId": "100",
+  "createdAt": 1780500000,
+  "meta": {
+    "name": "Magneta wave \u2014 accept ownership (gnosis)",
+    "description": "Second leg of Ownable2Step: Safe 0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a accepts ownership of 11 redeploy-wave contracts on gnosis. Run AFTER deployer executes transferOwnership.ts --network gnosis. 1-step (no accept needed): MagnetaBridgeOApp."
+  },
+  "transactions": [
+    {
+      "to": "0x120d95128cCa12993654EFBcF5E2EbD04D1ac0Fc",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x819845da6d9657C0b86257b1D871167063F0E5e7",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0xf2520455DA8b967994F9b3bDf274f57b64f502AC",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x2f80A84A958686084B727C470f2203073D9F8083",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x6659644CbAfcF9DaFbacE6Dd01A552595a43a1b1",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x38B28C3c9D3D5894980D1B97fe26faa3d0C8953C",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x386d173Fe0702782E876a21bB8DE4e58014dF755",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x408109ff36c1378E2b49583F77619697dcbcdf0e",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x1750E8d4FbF8D47b1Cf95554100BfC085E42090A",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x5B7c12A4685b45e40326F42123128f05E756E76D",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0xCeBf85B5AD944A4531d942579da85DFd8f37b425",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    }
+  ]
+}

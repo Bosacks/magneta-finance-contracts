@@ -1,0 +1,26 @@
+{
+  "version": "1.0",
+  "chainId": "137",
+  "createdAt": 1778520000000,
+  "meta": {
+    "name": "Magneta — Accept MagnetaProxy ownership (polygon)",
+    "description": "Finalize the Ownable2Step transfer of MagnetaProxy (DEX swap fee collector, 0x0e09fd3f...) from deployer to this Safe. Required before fee/recipient changes can be made via Safe.",
+    "txBuilderVersion": "1.18.0",
+    "createdFromSafeAddress": "0x4AeA3A398Db41b45e146c08131aD27c75b02EC2F",
+    "createdFromOwnerAddress": "",
+    "checksum": "0x0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "transactions": [
+    {
+      "to": "0x0e09fd3f18B66F2750A0Aa0B8bB6365fcE5f6B60",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [],
+        "name": "acceptOwnership",
+        "payable": false
+      },
+      "contractInputsValues": {}
+    }
+  ]
+}

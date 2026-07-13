@@ -1,0 +1,62 @@
+{
+  "version": "1.0",
+  "chainId": "14",
+  "createdAt": 1778627179325,
+  "meta": {
+    "name": "Magneta — Accept V2 Package ownership (flare)",
+    "description": "Finalize the Ownable2Step transfer for PromotionPayment (0xe16F1A17e6dAB2d7b7Ba628a9165279314A34e29) and MagnetaProxy V2 (0xBcfEcCE7AfC5C9f4b5B1C67671D2CCbf1c8d6124), plus single-step MagnetaBundler V2 (0x802135E39fb56FAe17d26eC1B02261BF7cf1D426). Deployed by 0x620684F822da9adF36F41e3554791D889947e25E.",
+    "txBuilderVersion": "1.18.0",
+    "createdFromSafeAddress": "0x40ea2908Ea490d58E62D1Fd3364464D8A857b297",
+    "createdFromOwnerAddress": "",
+    "checksum": "0x0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "transactions": [
+    {
+      "to": "0xe16F1A17e6dAB2d7b7Ba628a9165279314A34e29",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [],
+        "name": "acceptOwnership",
+        "payable": false
+      },
+      "contractInputsValues": {}
+    },
+    {
+      "to": "0xBcfEcCE7AfC5C9f4b5B1C67671D2CCbf1c8d6124",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [],
+        "name": "acceptOwnership",
+        "payable": false
+      },
+      "contractInputsValues": {}
+    },
+    {
+      "to": "0xe16F1A17e6dAB2d7b7Ba628a9165279314A34e29",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [
+          {
+            "internalType": "uint8[]",
+            "name": "codes",
+            "type": "uint8[]"
+          },
+          {
+            "internalType": "uint256[]",
+            "name": "prices",
+            "type": "uint256[]"
+          }
+        ],
+        "name": "setPricesBatch",
+        "payable": false
+      },
+      "contractInputsValues": {
+        "codes": "[1,2,3,4,5,6]",
+        "prices": "[\"3400000000000000000000\",\"6800000000000000000000\",\"10200000000000000000000\",\"13600000000000000000000\",\"17000000000000000000000\",\"20400000000000000000000\"]"
+      }
+    }
+  ]
+}

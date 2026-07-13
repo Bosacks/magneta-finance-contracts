@@ -1,0 +1,32 @@
+{
+  "version": "1.0",
+  "chainId": "137",
+  "createdAt": 1778657000000,
+  "meta": {
+    "name": "Magneta — Set PromotionPayment prices to match UI (polygon)",
+    "description": "Calibrate priceByCode on PromotionPayment (0x2FaC13e2707475E6Ea034b92Ffc855333668c4Ea) to match PROMOTION_FEES[POLYGON] in the Tokens frontend: 1h=200, 2h=400, 3h=600, 4h=800, 5h=1000, 6h=1200 POL. Without this batch the contract floor stays at deploy-script defaults (0.1, 0.2, 0.3, 0.6, n/a, n/a, 1.2, 2.4) which is way below the UI-displayed prices — anyone calling the contract directly would underpay.",
+    "txBuilderVersion": "1.18.0",
+    "createdFromSafeAddress": "0x4AeA3A398Db41b45e146c08131aD27c75b02EC2F",
+    "createdFromOwnerAddress": "",
+    "checksum": "0x0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "transactions": [
+    {
+      "to": "0x2FaC13e2707475E6Ea034b92Ffc855333668c4Ea",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [
+          { "internalType": "uint8[]", "name": "codes", "type": "uint8[]" },
+          { "internalType": "uint256[]", "name": "prices", "type": "uint256[]" }
+        ],
+        "name": "setPricesBatch",
+        "payable": false
+      },
+      "contractInputsValues": {
+        "codes": "[1,2,3,4,5,6]",
+        "prices": "[200000000000000000000,400000000000000000000,600000000000000000000,800000000000000000000,1000000000000000000000,1200000000000000000000]"
+      }
+    }
+  ]
+}

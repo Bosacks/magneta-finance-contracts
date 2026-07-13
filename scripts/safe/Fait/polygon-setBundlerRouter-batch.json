@@ -1,0 +1,34 @@
+{
+  "version": "1.0",
+  "chainId": "137",
+  "createdAt": 1778500000000,
+  "meta": {
+    "name": "Magneta — Fix MagnetaBundler router (polygon)",
+    "description": "MagnetaBundler.router was set to MagnetaSwap (0xDa43c95F...) which lacks UniswapV2Router02 ABI. atomicVolumeBrush reverts on router.WETH() call. Switching to official QuickSwap V2 router.",
+    "txBuilderVersion": "1.18.0",
+    "createdFromSafeAddress": "0x4AeA3A398Db41b45e146c08131aD27c75b02EC2F",
+    "createdFromOwnerAddress": "",
+    "checksum": "0x0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "transactions": [
+    {
+      "to": "0x3f5BF77ba60949c4C5B9653159b0A050593B04a8",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [
+          {
+            "internalType": "address",
+            "name": "_router",
+            "type": "address"
+          }
+        ],
+        "name": "setRouter",
+        "payable": false
+      },
+      "contractInputsValues": {
+        "_router": "0xa5E0829CaCEd8fFDD4De3c43696c57F7D7A678ff"
+      }
+    }
+  ]
+}

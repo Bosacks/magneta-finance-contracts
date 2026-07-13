@@ -1,0 +1,31 @@
+{
+  "version": "1.0",
+  "chainId": "100",
+  "createdAt": 1748358000000,
+  "meta": {
+    "name": "Magneta — XChainLpReceiver rescueNative (Gnosis dust)",
+    "description": "Owner Safe rescues the leftover native (0.218329650718261229 xDAI) stuck in MagnetaXChainLpReceiver (0xeca6092e37E9d0692C21294473aDD604D9331fA9) back to the deployer wallet.",
+    "txBuilderVersion": "1.17.0",
+    "createdFromSafeAddress": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a",
+    "createdFromOwnerAddress": ""
+  },
+  "transactions": [
+    {
+      "to": "0xeca6092e37E9d0692C21294473aDD604D9331fA9",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [
+          { "internalType": "address payable", "name": "to", "type": "address" },
+          { "internalType": "uint256", "name": "amount", "type": "uint256" }
+        ],
+        "name": "rescueNative",
+        "payable": false
+      },
+      "contractInputsValues": {
+        "to": "0x620684F822da9adF36F41e3554791D889947e25E",
+        "amount": "218329650718261229"
+      }
+    }
+  ]
+}

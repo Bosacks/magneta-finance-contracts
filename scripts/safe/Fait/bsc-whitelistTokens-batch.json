@@ -1,0 +1,31 @@
+{
+  "version": "1.0",
+  "chainId": "56",
+  "createdAt": 1745613600000,
+  "meta": {
+    "name": "Magneta — whitelist USDC + WBNB on MagnetaSwap (BSC)",
+    "description": "Whitelist Wormhole USDC (0xB04906e9...c2b3) and WBNB (0xbb4CdB9C...c095c) on MagnetaSwap BSC (0xDc6BFf74...C726). Both tokens are required for swap routing: WBNB is the universal pair on PancakeSwap V2, USDC is the canonical 6-decimal stable.",
+    "txBuilderVersion": "1.17.0",
+    "createdFromSafeAddress": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a",
+    "createdFromOwnerAddress": ""
+  },
+  "transactions": [
+    {
+      "to": "0xDc6BFf741D5a94c26002268b0228212C71F9C726",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [
+          { "internalType": "address[]", "name": "tokens", "type": "address[]" },
+          { "internalType": "bool", "name": "whitelisted", "type": "bool" }
+        ],
+        "name": "whitelistTokenBatch",
+        "payable": false
+      },
+      "contractInputsValues": {
+        "tokens": "[\"0xB04906e95AB5D797aDA81508115611fee694c2b3\",\"0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c\"]",
+        "whitelisted": "true"
+      }
+    }
+  ]
+}

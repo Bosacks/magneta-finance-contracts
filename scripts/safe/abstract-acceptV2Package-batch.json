@@ -1,0 +1,62 @@
+{
+  "version": "1.0",
+  "chainId": "2741",
+  "createdAt": 1778627209879,
+  "meta": {
+    "name": "Magneta — Accept V2 Package ownership (abstract)",
+    "description": "Finalize the Ownable2Step transfer for PromotionPayment (0x10f12c67789310B66358713450232179646e3FB1) and MagnetaProxy V2 (0x3e931050389Daf7cBC408bF8099FcF6859c01f8E) (MagnetaBundler skipped — no V2 router on this chain). Deployed by 0x620684F822da9adF36F41e3554791D889947e25E.",
+    "txBuilderVersion": "1.18.0",
+    "createdFromSafeAddress": "0x40ea2908Ea490d58E62D1Fd3364464D8A857b297",
+    "createdFromOwnerAddress": "",
+    "checksum": "0x0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "transactions": [
+    {
+      "to": "0x10f12c67789310B66358713450232179646e3FB1",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [],
+        "name": "acceptOwnership",
+        "payable": false
+      },
+      "contractInputsValues": {}
+    },
+    {
+      "to": "0x3e931050389Daf7cBC408bF8099FcF6859c01f8E",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [],
+        "name": "acceptOwnership",
+        "payable": false
+      },
+      "contractInputsValues": {}
+    },
+    {
+      "to": "0x10f12c67789310B66358713450232179646e3FB1",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [
+          {
+            "internalType": "uint8[]",
+            "name": "codes",
+            "type": "uint8[]"
+          },
+          {
+            "internalType": "uint256[]",
+            "name": "prices",
+            "type": "uint256[]"
+          }
+        ],
+        "name": "setPricesBatch",
+        "payable": false
+      },
+      "contractInputsValues": {
+        "codes": "[1,2,3,4,5,6]",
+        "prices": "[\"10000000000000000\",\"20000000000000000\",\"30000000000000000\",\"40000000000000000\",\"50000000000000000\",\"60000000000000000\"]"
+      }
+    }
+  ]
+}

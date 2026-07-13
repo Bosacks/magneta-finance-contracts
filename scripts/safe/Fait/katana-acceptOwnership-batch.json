@@ -1,0 +1,69 @@
+{
+  "version": "1.0",
+  "chainId": "747474",
+  "createdAt": 1745515200000,
+  "meta": {
+    "name": "Magneta — acceptOwnership batch (Katana)",
+    "description": "Finalize Ownable2Step transfer for MagnetaPool, MagnetaSwap, MagnetaLending, MagnetaFactory, MagnetaGateway on Katana. After this batch, the Safe fully owns all 11 Magneta contracts on Katana.",
+    "txBuilderVersion": "1.17.0",
+    "createdFromSafeAddress": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a",
+    "createdFromOwnerAddress": ""
+  },
+  "transactions": [
+    {
+      "to": "0xDe1752E266C3978240014DFc616dd34EbF9cDF31",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [],
+        "name": "acceptOwnership",
+        "payable": false
+      },
+      "contractInputsValues": {}
+    },
+    {
+      "to": "0x9F9A3DC819e5229b63b504d7A0FDE93FA436919E",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [],
+        "name": "acceptOwnership",
+        "payable": false
+      },
+      "contractInputsValues": {}
+    },
+    {
+      "to": "0xB38e7427D81f755c65AC6bfc865Bfe9918BA7a9b",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [],
+        "name": "acceptOwnership",
+        "payable": false
+      },
+      "contractInputsValues": {}
+    },
+    {
+      "to": "0x134855A6702c0AF9FBF1b8F4bB576Bef651eF895",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [],
+        "name": "acceptOwnership",
+        "payable": false
+      },
+      "contractInputsValues": {}
+    },
+    {
+      "to": "0x4D4AD5B890D3B8882436CB7E5268F1cB95736f92",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [],
+        "name": "acceptOwnership",
+        "payable": false
+      },
+      "contractInputsValues": {}
+    }
+  ]
+}
