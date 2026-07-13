@@ -22,6 +22,13 @@ export function opKind(op: OpTypeT): 'value' | 'command' {
     case OpType.UNFREEZE_ACCOUNT:
     case OpType.AUTO_FREEZE:
     case OpType.REVOKE_PERMISSION:
+    // V1.1 atomic LP ops are command-only — no Magneta markup since the
+    // user is moving their own LP between routers / re-staking fees.
+    case OpType.POOL_FEE_COMPOUND:
+    case OpType.MIGRATE_LP:
+    // CREATE_TOKEN has its own dispatcher; treat as a command op for the
+    // generic fee path.
+    case OpType.CREATE_TOKEN:
       return 'command';
   }
 }

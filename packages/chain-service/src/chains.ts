@@ -11,7 +11,8 @@ import type { ChainInfo, ChainId } from './types';
 export const CHAINS: Record<string, ChainInfo> = {
   abstract: {
     id: 2741, kind: 'evm', name: 'Abstract', shortName: 'abstract',
-    nativeSymbol: 'ETH', gatewayLive: false, lzEid: 30305,
+    nativeSymbol: 'ETH', gatewayLive: true, lzEid: 30324,
+    usdc: '0x84A71ccD554Cc1b02749b35d22F684CC8ec987e1',
     explorer: 'https://abscan.org',
   },
   aptos: {
@@ -21,7 +22,8 @@ export const CHAINS: Record<string, ChainInfo> = {
   },
   arbitrum: {
     id: 42161, kind: 'evm', name: 'Arbitrum One', shortName: 'arb',
-    nativeSymbol: 'ETH', gatewayLive: false, lzEid: 30110, cctpDomain: 3,
+    nativeSymbol: 'ETH', gatewayLive: true, lzEid: 30110, cctpDomain: 3,
+    gatewayAddress: '0x714d0Ae0Ba1420D046CD2818697E41EF69448Ff0',
     defaultRouter: '0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506',
     usdc: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831',
     explorer: 'https://arbiscan.io',
@@ -41,13 +43,20 @@ export const CHAINS: Record<string, ChainInfo> = {
   },
   berachain: {
     id: 80094, kind: 'evm', name: 'Berachain', shortName: 'bera',
-    nativeSymbol: 'BERA', gatewayLive: false, lzEid: 30291,
+    nativeSymbol: 'BERA', gatewayLive: true, lzEid: 30362,
+    usdc: '0x549943e04f40284185054145c6E4e9568C1D3241',
     explorer: 'https://berascan.com',
+  },
+  cronos: {
+    id: 25, kind: 'evm', name: 'Cronos', shortName: 'cro',
+    nativeSymbol: 'CRO', gatewayLive: false, lzEid: 30040,
+    usdc: '0xc21223249CA28397B4B6541dfFaEcC539BfF0c59',
+    explorer: 'https://cronoscan.com',
   },
   bsc: {
     id: 56, kind: 'evm', name: 'BNB Smart Chain', shortName: 'bsc',
-    nativeSymbol: 'BNB', gatewayLive: false, lzEid: 30102,
-    usdc: '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d',
+    nativeSymbol: 'BNB', gatewayLive: true, lzEid: 30102,
+    usdc: '0xB04906e95AB5D797aDA81508115611fee694c2b3',
     explorer: 'https://bscscan.com',
   },
   celo: {
@@ -81,7 +90,8 @@ export const CHAINS: Record<string, ChainInfo> = {
   },
   linea: {
     id: 59144, kind: 'evm', name: 'Linea', shortName: 'linea',
-    nativeSymbol: 'ETH', gatewayLive: false, lzEid: 30183,
+    nativeSymbol: 'ETH', gatewayLive: true, lzEid: 30183,
+    usdc: '0x176211869cA2b568f2A7D4EE941E073a821EE1ff',
     explorer: 'https://lineascan.build',
   },
   mantle: {

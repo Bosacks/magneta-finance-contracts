@@ -73,6 +73,39 @@ export const MagnetaGatewayAbi = [
   },
   {
     type: 'function',
+    name: 'sendCrossChainValueOp',
+    stateMutability: 'payable',
+    inputs: [
+      { name: 'dstEid', type: 'uint32' },
+      { name: 'op', type: 'uint8' },
+      { name: 'moduleParams', type: 'bytes' },
+      { name: 'usdcAmount', type: 'uint256' },
+      { name: 'lzOptions', type: 'bytes' },
+    ],
+    outputs: [{ name: 'guid', type: 'bytes32' }],
+  },
+  {
+    type: 'function',
+    name: 'sendFanOutValueOp',
+    stateMutability: 'payable',
+    inputs: [
+      { name: 'dstEids', type: 'uint32[]' },
+      { name: 'op', type: 'uint8' },
+      { name: 'moduleParamsPerChain', type: 'bytes[]' },
+      { name: 'usdcAmountsPerChain', type: 'uint256[]' },
+      { name: 'lzOptions', type: 'bytes' },
+    ],
+    outputs: [{ name: 'guids', type: 'bytes32[]' }],
+  },
+  {
+    type: 'function',
+    name: 'fulfillValueOp',
+    stateMutability: 'nonpayable',
+    inputs: [{ name: 'guid', type: 'bytes32' }],
+    outputs: [],
+  },
+  {
+    type: 'function',
     name: 'moduleFor',
     stateMutability: 'view',
     inputs: [{ name: 'op', type: 'uint8' }],
@@ -182,6 +215,20 @@ export const SwapOutParamsType = {
   ],
 } as const;
 
+export const CrossChainLPParamsType = {
+  type: 'tuple',
+  components: [
+    { name: 'token', type: 'address' },
+    { name: 'usdcTotal', type: 'uint256' },
+    { name: 'tokenShareBps', type: 'uint16' },
+    { name: 'amountTokenMin', type: 'uint256' },
+    { name: 'amountNativeMin', type: 'uint256' },
+    { name: 'lpAmountTokenMin', type: 'uint256' },
+    { name: 'lpAmountNativeMin', type: 'uint256' },
+    { name: 'deadline', type: 'uint256' },
+  ],
+} as const;
+
 export const ClaimTaxParamsType = {
   type: 'tuple',
   components: [
@@ -189,5 +236,27 @@ export const ClaimTaxParamsType = {
     { name: 'amountOutMin', type: 'uint256' },
     { name: 'deadline', type: 'uint256' },
     { name: 'bridgeToTreasury', type: 'bool' },
+  ],
+} as const;
+
+// V1.1 atomic LP ops — mirror LPAtomicModule.CompoundParams / MigrateParams.
+export const PoolFeeCompoundParamsType = {
+  type: 'tuple',
+  components: [
+    { name: 'pair',     type: 'address' },
+    { name: 'router',   type: 'address' },
+    { name: 'lpAmount', type: 'uint256' },
+    { name: 'deadline', type: 'uint256' },
+  ],
+} as const;
+
+export const MigrateLpParamsType = {
+  type: 'tuple',
+  components: [
+    { name: 'srcPair',   type: 'address' },
+    { name: 'srcRouter', type: 'address' },
+    { name: 'dstRouter', type: 'address' },
+    { name: 'lpAmount',  type: 'uint256' },
+    { name: 'deadline',  type: 'uint256' },
   ],
 } as const;

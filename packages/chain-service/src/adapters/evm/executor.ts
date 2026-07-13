@@ -14,6 +14,9 @@ import {
   SwapLocalParamsType,
   SwapOutParamsType,
   ClaimTaxParamsType,
+  PoolFeeCompoundParamsType,
+  MigrateLpParamsType,
+  CrossChainLPParamsType,
 } from './abi';
 
 /**
@@ -115,7 +118,19 @@ export function encodeModuleParams(op: OpType, params: unknown): Hex {
       return prefixWithOp(op, enc([SwapOutParamsType], [params]));
     case OpType.CLAIM_TAX_FEES:
       return enc([ClaimTaxParamsType], [params]);
+    // V1.1 atomic LP — handled by LPAtomicModule. Same 1-byte OpType prefix
+    // pattern as the other multi-op modules.
+    case OpType.POOL_FEE_COMPOUND:
+      return prefixWithOp(op, enc([PoolFeeCompoundParamsType], [params]));
+    case OpType.MIGRATE_LP:
+      return prefixWithOp(op, enc([MigrateLpParamsType], [params]));
+    case OpType.CREATE_TOKEN:
+      throw new Error('CREATE_TOKEN encodes through the dedicated dispatcher, not this generic encoder');
   }
+}
+
+export function encodeCrossChainLPParams(params: unknown): Hex {
+  return prefixWithOp(OpType.CREATE_LP, enc([CrossChainLPParamsType], [params]));
 }
 
 function prefixWithOp(op: OpType, encoded: Hex): Hex {

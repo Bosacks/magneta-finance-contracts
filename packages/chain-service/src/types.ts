@@ -66,6 +66,11 @@ export enum OpType {
   // Swap
   SWAP_LOCAL = 11,
   SWAP_OUT = 12,
+  // Multi-chain token creation via Gateway.sendFanOut
+  CREATE_TOKEN = 13,
+  // V1.1 atomic LP — handled by LPAtomicModule via MagnetaLpAtomicHelper.
+  POOL_FEE_COMPOUND = 14,
+  MIGRATE_LP = 15,
 }
 
 /** Per-op classification used by the fee calculator (value-based vs flat). */

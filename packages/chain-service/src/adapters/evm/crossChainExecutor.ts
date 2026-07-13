@@ -22,6 +22,17 @@ export interface CrossChainExecParams {
   lzOptions?: Hex;
 }
 
+export interface CrossChainValueExecParams {
+  wallet: WalletAdapter;
+  srcChain: ChainId;
+  dstChain: ChainId;
+  op: OpType;
+  moduleParams: unknown;
+  usdcAmount: bigint;
+  nativeValue: bigint;
+  lzOptions?: Hex;
+}
+
 export interface FanOutExecParams {
   wallet: WalletAdapter;
   srcChain: ChainId;
@@ -69,6 +80,44 @@ export async function execEvmCrossChain(args: CrossChainExecParams): Promise<OpR
 }
 
 /**
+ * Send a cross-chain VALUE op: bridge USDC via CCTP + dispatch on destination.
+ * Uses MagnetaGateway.sendCrossChainValueOp() which burns USDC via CCTP and
+ * sends an LZ message. The destination gateway stores a pending op until the
+ * CCTP tokens arrive, then anyone can call fulfillValueOp().
+ */
+export async function execEvmCrossChainValue(args: CrossChainValueExecParams): Promise<OpResult> {
+  const src = requireChain(args.srcChain);
+  const dst = requireChain(args.dstChain);
+  if (src.kind !== 'evm') throw new Error(`Cross-chain source must be EVM, got ${src.kind}`);
+  if (dst.kind !== 'evm') throw new Error(`Cross-chain EVM dest required, got ${dst.kind}`);
+  if (!src.gatewayAddress) throw new Error(`No gateway on ${src.name}`);
+  if (!dst.lzEid) throw new Error(`No LZ endpoint for ${dst.name}`);
+
+  const innerParams = encodeModuleParams(args.op, args.moduleParams);
+  const lzOptions = args.lzOptions ?? DEFAULT_LZ_OPTIONS;
+
+  const calldata = encodeFunctionData({
+    abi: MagnetaGatewayAbi,
+    functionName: 'sendCrossChainValueOp',
+    args: [dst.lzEid, args.op as number, innerParams, args.usdcAmount, lzOptions],
+  });
+
+  const tx: PreparedTx = {
+    to: src.gatewayAddress,
+    data: calldata,
+    value: args.nativeValue,
+  };
+  const txHash = await args.wallet.sendRaw(tx);
+
+  return {
+    srcChain: src.id,
+    dstChain: dst.id,
+    op: args.op,
+    srcTxHash: txHash,
+  };
+}
+
+/**
  * Fan-out: broadcast an op to multiple destination chains in one tx.
  * Uses MagnetaGateway.sendFanOut() which sends N LZ messages.
  */
@@ -93,6 +142,55 @@ export async function execEvmFanOut(args: FanOutExecParams): Promise<OpResult> {
     abi: MagnetaGatewayAbi,
     functionName: 'sendFanOut',
     args: [dstEids, args.op as number, encodedParams, lzOptions],
+  });
+
+  const tx: PreparedTx = {
+    to: src.gatewayAddress,
+    data: calldata,
+    value: args.nativeValue,
+  };
+  const txHash = await args.wallet.sendRaw(tx);
+
+  return {
+    srcChain: src.id,
+    dstChain: args.dstChains[0],
+    op: args.op,
+    srcTxHash: txHash,
+  };
+}
+
+export interface FanOutValueExecParams {
+  wallet: WalletAdapter;
+  srcChain: ChainId;
+  dstChains: ChainId[];
+  op: OpType;
+  moduleParamsPerChain: unknown[];
+  usdcAmountsPerChain: bigint[];
+  nativeValue: bigint;
+  lzOptions?: Hex;
+}
+
+export async function execEvmFanOutValue(args: FanOutValueExecParams): Promise<OpResult> {
+  const src = requireChain(args.srcChain);
+  if (src.kind !== 'evm') throw new Error(`Fan-out source must be EVM`);
+  if (!src.gatewayAddress) throw new Error(`No gateway on ${src.name}`);
+
+  const dstEids: number[] = [];
+  const encodedParams: Hex[] = [];
+
+  for (let i = 0; i < args.dstChains.length; i++) {
+    const dst = requireChain(args.dstChains[i]);
+    if (!dst.lzEid) throw new Error(`No LZ endpoint for ${dst.name}`);
+    dstEids.push(dst.lzEid);
+    encodedParams.push(encodeModuleParams(args.op, args.moduleParamsPerChain[i]));
+  }
+
+  const lzOptions = args.lzOptions ?? DEFAULT_LZ_OPTIONS;
+
+  const calldata = encodeFunctionData({
+    abi: MagnetaGatewayAbi,
+    functionName: 'sendFanOutValueOp',
+    args: [dstEids, args.op as number, encodedParams, args.usdcAmountsPerChain, lzOptions],
   });
 
   const tx: PreparedTx = {

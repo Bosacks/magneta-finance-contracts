@@ -5,8 +5,9 @@ import { NotSupportedYetError } from '../adapters/WalletAdapter';
 import { buildPlan } from '../routing/plan';
 import { quoteFee, type FeeInputs } from '../fees';
 import { requireChain } from '../chains';
-import { execEvm } from '../adapters/evm/executor';
-import { execEvmCrossChain, execEvmFanOut } from '../adapters/evm/crossChainExecutor';
+import { execEvm, encodeCrossChainLPParams } from '../adapters/evm/executor';
+import { execEvmCrossChain, execEvmCrossChainValue, execEvmFanOut, execEvmFanOutValue } from '../adapters/evm/crossChainExecutor';
+import { opKind } from '../fees';
 
 /**
  * High-level SDK entrypoint. Every op accepts a `dstChain` explicitly; the
@@ -104,6 +105,115 @@ export async function claimTaxFees(args: ClaimTaxArgs): Promise<OpResult> {
   return dispatch(OpType.CLAIM_TAX_FEES, args);
 }
 
+// ─── Cross-chain LP from USDC (CCTP value op) ───────────────────────
+
+export interface CreateLpFromUsdcArgs {
+  wallet: WalletAdapter;
+  dstChain: ChainId;
+  token: string;
+  usdcTotal: bigint;
+  /** Basis points for token side, e.g. 5000 = 50%. */
+  tokenShareBps: number;
+  amountTokenMin: bigint;
+  amountNativeMin: bigint;
+  lpAmountTokenMin: bigint;
+  lpAmountNativeMin: bigint;
+  deadline: number;
+}
+
+export async function createLpFromUsdc(args: CreateLpFromUsdcArgs): Promise<OpResult> {
+  const src = requireChain(args.wallet.chain);
+  const dst = requireChain(args.dstChain);
+
+  if (src.kind !== 'evm' || dst.kind !== 'evm') {
+    throw new NotSupportedYetError(src.kind !== 'evm' ? src.id : dst.id, OpType.CREATE_LP);
+  }
+  if (!src.gatewayLive || !dst.gatewayLive) {
+    throw new NotSupportedYetError(!src.gatewayLive ? src.id : dst.id, OpType.CREATE_LP);
+  }
+  if (src.cctpDomain === undefined || dst.cctpDomain === undefined) {
+    throw new Error('CCTP not available on source or destination chain');
+  }
+
+  const moduleParams = encodeCrossChainLPParams({
+    token: args.token,
+    usdcTotal: args.usdcTotal,
+    tokenShareBps: args.tokenShareBps,
+    amountTokenMin: args.amountTokenMin,
+    amountNativeMin: args.amountNativeMin,
+    lpAmountTokenMin: args.lpAmountTokenMin,
+    lpAmountNativeMin: args.lpAmountNativeMin,
+    deadline: BigInt(args.deadline),
+  });
+
+  return execEvmCrossChainValue({
+    wallet: args.wallet,
+    srcChain: src.id,
+    dstChain: dst.id,
+    op: OpType.CREATE_LP,
+    moduleParams,
+    usdcAmount: args.usdcTotal,
+    nativeValue: 0n,
+  });
+}
+
+// ─── Fan-out LP from USDC across multiple chains ─────────────────────
+
+export interface CreateLpFromUsdcFanOutArgs {
+  wallet: WalletAdapter;
+  dstChains: ChainId[];
+  /** Per-chain LP config builder. */
+  buildParams: (dstChain: ChainId) => {
+    token: string;
+    usdcAmount: bigint;
+    tokenShareBps: number;
+    amountTokenMin: bigint;
+    amountNativeMin: bigint;
+    lpAmountTokenMin: bigint;
+    lpAmountNativeMin: bigint;
+    deadline: number;
+  };
+  /** Total native value to cover LZ fees across all chains. */
+  totalNativeValue: bigint;
+}
+
+export async function createLpFromUsdcFanOut(args: CreateLpFromUsdcFanOutArgs): Promise<OpResult> {
+  const src = requireChain(args.wallet.chain);
+  if (src.kind !== 'evm') throw new NotSupportedYetError(src.id, OpType.CREATE_LP);
+  if (src.cctpDomain === undefined) throw new Error('CCTP not available on source chain');
+
+  const moduleParamsPerChain: unknown[] = [];
+  const usdcAmountsPerChain: bigint[] = [];
+
+  for (const dstChain of args.dstChains) {
+    const dst = requireChain(dstChain);
+    if (dst.cctpDomain === undefined) throw new Error(`CCTP not available on ${dst.name}`);
+
+    const p = args.buildParams(dstChain);
+    moduleParamsPerChain.push({
+      token: p.token,
+      usdcTotal: p.usdcAmount,
+      tokenShareBps: p.tokenShareBps,
+      amountTokenMin: p.amountTokenMin,
+      amountNativeMin: p.amountNativeMin,
+      lpAmountTokenMin: p.lpAmountTokenMin,
+      lpAmountNativeMin: p.lpAmountNativeMin,
+      deadline: BigInt(p.deadline),
+    });
+    usdcAmountsPerChain.push(p.usdcAmount);
+  }
+
+  return execEvmFanOutValue({
+    wallet: args.wallet,
+    srcChain: src.id,
+    dstChains: args.dstChains,
+    op: OpType.CREATE_LP,
+    moduleParamsPerChain,
+    usdcAmountsPerChain,
+    nativeValue: args.totalNativeValue,
+  });
+}
+
 // ─── Fan-out: broadcast an op to multiple chains ───────────────────────
 
 export interface FanOutArgs {
@@ -163,8 +273,24 @@ async function dispatch(op: OpType, args: OpBaseArgs): Promise<OpResult> {
     return execEvm({ wallet: args.wallet, dstChain: dst.id, op, moduleParams, nativeValue });
   }
 
-  // Cross-chain EVM → EVM: send via source Gateway's sendCrossChainOp.
+  // Cross-chain EVM → EVM: command ops use LZ-only, value ops use CCTP+LZ.
   if (src.kind === 'evm' && dst.kind === 'evm' && dst.lzEid) {
+    const kind = opKind(op);
+    const hasCctp = src.cctpDomain !== undefined && dst.cctpDomain !== undefined;
+    const isValueOp = kind === 'value' && args.valueUsdc6d && args.valueUsdc6d > 0n;
+
+    if (isValueOp && hasCctp) {
+      return execEvmCrossChainValue({
+        wallet: args.wallet,
+        srcChain: src.id,
+        dstChain: dst.id,
+        op,
+        moduleParams,
+        usdcAmount: args.valueUsdc6d!,
+        nativeValue,
+      });
+    }
+
     return execEvmCrossChain({
       wallet: args.wallet,
       srcChain: src.id,
@@ -264,7 +390,70 @@ function buildEvmParams(op: OpType, args: OpBaseArgs): { moduleParams: unknown; 
     }
     case OpType.CREATE_LP_AND_BUY:
       throw new Error('CREATE_LP_AND_BUY arg mapper not yet wired — supply lp/buy tuple explicitly');
+
+    case OpType.CREATE_TOKEN:
+      throw new Error('CREATE_TOKEN uses its own dispatcher, not buildEvmParams');
+
+    case OpType.POOL_FEE_COMPOUND: {
+      const r = a as unknown as PoolFeeCompoundArgs;
+      return {
+        moduleParams: {
+          pair:     r.pair,
+          router:   r.router,
+          lpAmount: r.lpAmount,
+          deadline: BigInt(args.deadline),
+        },
+        nativeValue: 0n,
+      };
+    }
+
+    case OpType.MIGRATE_LP: {
+      const r = a as unknown as MigrateLpArgs;
+      return {
+        moduleParams: {
+          srcPair:   r.srcPair,
+          srcRouter: r.srcRouter,
+          dstRouter: r.dstRouter,
+          lpAmount:  r.lpAmount,
+          deadline:  BigInt(args.deadline),
+        },
+        nativeValue: 0n,
+      };
+    }
   }
+}
+
+// ─── V1.1 atomic LP ops (handled by LPAtomicModule + helper) ────────────
+
+export interface PoolFeeCompoundArgs extends OpBaseArgs {
+  /** UniV2 pair address on `dstChain`. */
+  pair:     string;
+  /** UniV2 router for that pair. */
+  router:   string;
+  /** LP amount to compound (the helper pulls this via safeTransferFrom). */
+  lpAmount: bigint;
+  // `deadline` (unix seconds) inherited from OpBaseArgs.
+}
+
+export interface MigrateLpArgs extends OpBaseArgs {
+  srcPair:   string;
+  srcRouter: string;
+  dstRouter: string;
+  lpAmount:  bigint;
+  // `deadline` (unix seconds) inherited from OpBaseArgs.
+}
+
+/** Single-chain or cross-chain compound: 1 user signature, executed atomically
+ *  on `dstChain` by LPAtomicModule via MagnetaLpAtomicHelper. */
+export async function poolFeeCompound(args: PoolFeeCompoundArgs): Promise<OpResult> {
+  return dispatch(OpType.POOL_FEE_COMPOUND, args);
+}
+
+/** Single-chain or cross-chain migrate (LP → other router on same chain).
+ *  Cross-DEX same-chain only; cross-chain migration would require bridging
+ *  the underlying tokens (out of scope for V1.1). */
+export async function migrateLp(args: MigrateLpArgs): Promise<OpResult> {
+  return dispatch(OpType.MIGRATE_LP, args);
 }
 
 export function quoteOp(inputs: FeeInputs) {
