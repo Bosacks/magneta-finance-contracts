@@ -1,0 +1,19 @@
+{
+  "version": "1.0",
+  "chainId": "43114",
+  "createdAt": 1784569264607,
+  "meta": {
+    "name": "MagnetaServiceFee \u2014 accept ownership (avalanche)",
+    "description": "Second leg of Ownable2Step: Safe 0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a accepts ownership of MagnetaServiceFee 0x16825089018Af2D7C0ABC64d7a87eea8b1E5c0E7 on avalanche. Run AFTER deployServiceFee.ts (transferOwnership already done by deployer). Fees are OFF (opFee=0) until a later setOpFee.",
+    "txBuilderVersion": "1.16.5"
+  },
+  "transactions": [
+    {
+      "to": "0x16825089018Af2D7C0ABC64d7a87eea8b1E5c0E7",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    }
+  ]
+}

@@ -3,6 +3,13 @@
 > Fil chronologique des sessions. Anti-chronologique (plus récent en haut).
 > Voir `~/CLAUDE.md` pour la règle d'édition.
 
+## 2026-07-20 — Chantier A : MagnetaServiceFee déployé (20 chaînes)
+- Runbook du redeploy native-fee : `docs/native-fee-redeploy-runbook-2026-07-20.md` (scope A léger vs B lourd Gateway-cascade)
+- Découverte : le skim on-chain est DANS le Gateway (immuable, pas proxy) → chantier B = redeploy Gateway + cascade modules + pauser→Safe→cutover (différé, attend frontend Ch3 + rotation guardian)
+- **Chantier A EXÉCUTÉ** : nouveau `scripts/deploy/deployServiceFee.ts`, MagnetaServiceFee déployé sur les **20 chaînes** (deployer 0x6206…7e25E financé par owner), vérifié on-chain 20/20 (code+feeVault+pendingOwner=Safe), frais OFF (opFee=0)
+- 5 échecs RPC transitoires (drpc rate-limit) retentés avec RPC publics → 20/20 ; fix script : retry read-back pendingOwner (latence séquenceur Base)
+- Batches accept Ownable2Step générés : `scripts/safe/servicefee-accept/` (14 sous 0xC4c9, 2 sous 0x4AeA, 4 sous 0x40ea) — RESTE : owner accepte via Safe, puis setOpFee par op + réconciliation Terminal/listener
+
 ## 2026-07-13 — Centralisation des contrats
 - Mergé `feat/native-service-fee` + `fix/cronos-verify-config` → main, pushé
 - Committé le backlog : sources AMM V2 (`uniswap/`, `imports/` — déployées mainnet, jamais versionnées), chain-service (CREATE_TOKEN, LP atomique, createLpFromUsdc, messaging tracker), archives vague Safe (batches → `Fait/`, gnosisSafe dans les 20 deployments)
