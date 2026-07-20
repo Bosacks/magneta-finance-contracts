@@ -107,3 +107,76 @@ cutover (frontend re-point) is the reversible safety valve; the contracts themse
    confirmed ready (cutover needs it)?
 3. Guardian rotation before B's Safe transfers — do it first?
 4. Pilot chain for B (one cheap chain, full deploy→cutover, verify end-to-end before the other 19)?
+
+---
+
+# APPENDIX — Plan B detail (Gateway skim redeploy) + Ch3 gate
+
+_Added 2026-07-20 after (1) executing Workstream A, (2) verifying the Ch3 frontend._
+
+## B.0 — Ch3 frontend readiness: NOT READY (verified 2026-07-20). B IS GATED ON IT.
+
+The native-fee FRONTEND has not been started (only scaffolding: `lib/constants/serviceFee.ts`
+types/ABI, `app/api/service-fee/verify/route.ts`, listener indexing `magneta-listener/src/feesIndexer.ts`,
+and the Terminal reconciliation dashboard in `magneta-finance-MagnetaTerminal`). Missing:
+1. No `usePayFee` hook / no UI call to `MagnetaServiceFee.payFee(opId)` for the 5 off-chain ops.
+2. No frontend caller of `/api/service-fee/verify` (dead from the UI).
+3. `MAGNETA_SERVICE_FEE_<chainId>` env vars unset (verify route fails closed) — the 20 addresses
+   just deployed (Workstream A) are recorded in `deployments/*.json` but not wired to any frontend.
+4. Off-chain op UIs still gated by the legacy `PaymentService`/`TaskQueuePanel` lump-sum flow — must be
+   replaced/bridged to the per-op contract.
+5. On-chain `opServiceFeeNative`: zero frontend presence — no ABI field, no `value` headroom added in
+   `gatewaySdk.ts`/`lpHeadless.ts`. **This is why B must wait**: if B redeploys the Gateway with the skim
+   AND someone sets `opServiceFeeNative>0`, live on-chain ops that don't add headroom to `msg.value`
+   would REVERT. Safe only while fees stay 0 — but then B delivers no value until the frontend ships.
+6. Repo ambiguity: reconciliation lives in `magneta-finance-MagnetaTerminal`, NOT `Terminal-final` —
+   confirm which Terminal is live before wiring.
+
+**Recommendation: DO NOT execute B until the Ch3 frontend is built.** B now would only mint new,
+unused, fee-off contracts and a cutover with nothing to point at.
+
+## B.1 — Scoped redeploy inventory (verified — NOT a full wave)
+
+Only the contracts changed since the 07-03 wave, plus their forced cascade:
+- **MagnetaGateway** (skim) — redeploy (immutable).
+- **LPModule**, **TokenOpsModule** — redeploy (bind to Gateway; `TokenOpsModule.gateway` is `immutable`).
+- **MagnetaFactory** (gate fix), **MagnetaCurveFactory/Pool** (fund-lock), **MagnetaProxy** (pause) — redeploy.
+- **KEEP (unchanged, no Gateway ref — verified: MagnetaPool/Swap/Lending have no `gateway` reference):**
+  MagnetaPool, MagnetaSwap, MagnetaLending, MagnetaBundler, MagnetaBridgeOApp. **Do NOT redeploy these**
+  — MagnetaPool/Lending hold state/liquidity; a redeploy would orphan it. (The 07-03 wave Pool is not
+  cutover — `gatewayChains.ts` doesn't reference it, 0 matches — so it likely holds no frontend liquidity
+  today, but keep the rule regardless.)
+
+There is NO built-in "redeploy only Gateway+modules" mode in `deployAll.ts` (it deploys the full set,
+gated only by chain-capability flags). So B needs EITHER a new scoped script that deploys only the 6
+changed contracts and re-points the Gateway's module map, OR careful use of the existing scripts with
+the unchanged contracts' addresses pinned. **Write `scripts/deploy/redeployGatewayWave.ts`** (scoped),
+DRY_RUN per chain.
+
+## B.2 — Per-chain sequence (one chain at a time, verify each on-chain)
+
+1. Deploy new Gateway (same constructor args: endpoint, delegate, feeVault) + new LPModule/TokenOpsModule
+   + new Factory/CurveFactory/Proxy. Record addresses (do NOT overwrite the kept contracts' entries).
+2. `configureOnly.ts` — `gateway.setModule(op, newModule)`, `setUsdc`, `addPauser(guardian)`. Re-point the
+   kept Pool/Swap/Bundler at the new Gateway IF they hold a settable gateway ref (verify; they had none in
+   source, so likely nothing to do).
+3. Verify on-chain: `moduleFor(op)`==new modules; `TokenOpsModule.gateway()`==new Gateway;
+   `opServiceFeeNative`==0 (fees off).
+4. `wirePauserGap.ts` — pauser on all new pausables.
+5. `transferOwnership.ts` (EOA→Safe) + generate accept batch (mirror `scripts/safe/servicefee-accept/`);
+   owner accepts; verify `owner()==Safe`.
+6. Cutover: update `gatewayChains.ts` (Tokens) + DEX maps to the new Gateway/module/Factory addresses;
+   redeploy the 2 frontends; smoke-test. KEEP old addresses until each chain is verified + smoke-tested.
+7. Enable fees LAST: `setOpServiceFeeNative[op]` via Safe, only after the frontend adds `value` headroom.
+
+## B.3 — Tooling (reuse) & gas
+- Reuse: `configureOnly.ts`, `wirePauserGap.ts`, `transferOwnership.ts`, the wave-accept batch generator.
+- New: `redeployGatewayWave.ts` (scoped deploy of the 6 changed contracts), DRY_RUN support.
+- Gas: 6 contracts × ~20 chains — small (the full 06-30 wave was est. $20-40; this is less). Re-measure
+  per chain in pre-flight; deployer `0x6206…7e25E` is funded (Workstream A left balances; top-up thin L2s).
+
+## B.4 — Prerequisites before executing B
+1. **Ch3 frontend built** (B.0) — hard gate.
+2. Guardian: history purge done 2026-07-20 (no rotation — key never externally exposed).
+3. `redeployGatewayWave.ts` written + DRY_RUN clean per chain.
+4. Confirm live Terminal repo (MagnetaTerminal vs Terminal-final).
