@@ -1,10 +1,10 @@
 {
   "version": "1.0",
   "chainId": "5000",
-  "createdAt": 1784654932940,
+  "createdAt": 1784656207945,
   "meta": {
     "name": "B accept ownership (mantle)",
-    "description": "Safe 0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a accepts ownership of the 6 new workstream-B contracts on mantle (run AFTER transferOwnership by deployer).",
+    "description": "Safe 0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a accepts ownership of the 8 new workstream-B contracts on mantle (Gateway+4modules+Factory+CurveFactory+Proxy where present). Run AFTER deployer transferOwnership.",
     "txBuilderVersion": "1.16.5"
   },
   "transactions": [
@@ -45,6 +45,20 @@
     },
     {
       "to": "0x017C97E41d1d8d4400aA3F224F17Df62B2e6cDd1",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x3c190e4a588DA6395e8B7b5618DF3345B18aE1E2",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x6684Ff6Ed1E7b1c5AB014a6dc6A86122d0695000",
       "value": "0",
       "data": "0x79ba5097",
       "contractMethod": null,

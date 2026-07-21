@@ -1,10 +1,10 @@
 {
   "version": "1.0",
   "chainId": "80094",
-  "createdAt": 1784654932940,
+  "createdAt": 1784656207945,
   "meta": {
     "name": "B accept ownership (berachain)",
-    "description": "Safe 0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a accepts ownership of the 3 new workstream-B contracts on berachain (run AFTER transferOwnership by deployer).",
+    "description": "Safe 0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a accepts ownership of the 3 new workstream-B contracts on berachain (Gateway+4modules+Factory+CurveFactory+Proxy where present). Run AFTER deployer transferOwnership.",
     "txBuilderVersion": "1.16.5"
   },
   "transactions": [

@@ -27,7 +27,9 @@
     "SwapModule": "0x852976d4c837824e53357E84e851ce0C5A1092ff",
     "TaxClaimModule": "0x916a9135c4eED07372D2F621C99FF3420cB3b4D3",
     "TokenOpsModule": "0xb234B37211f2c5653501FA42936b0729c49a0eB7",
-    "MagnetaFactory": "0x19fde0325407Bc9976CB6b28c9d88F638e43224D"
+    "MagnetaFactory": "0x19fde0325407Bc9976CB6b28c9d88F638e43224D",
+    "MagnetaCurveFactory": "0x3E562722b0EB66FE5178b932f7B504D216bA3486",
+    "MagnetaProxy": "0x898910BbEA69c2c851f348D5Ce859DFaA9956915"
   },
   "postDeploy": {
     "safe": [

@@ -1,10 +1,10 @@
 {
   "version": "1.0",
   "chainId": "2741",
-  "createdAt": 1784654932940,
+  "createdAt": 1784656207945,
   "meta": {
     "name": "B accept ownership (abstract)",
-    "description": "Safe 0x40ea2908Ea490d58E62D1Fd3364464D8A857b297 accepts ownership of the 6 new workstream-B contracts on abstract (run AFTER transferOwnership by deployer).",
+    "description": "Safe 0x40ea2908Ea490d58E62D1Fd3364464D8A857b297 accepts ownership of the 8 new workstream-B contracts on abstract (Gateway+4modules+Factory+CurveFactory+Proxy where present). Run AFTER deployer transferOwnership.",
     "txBuilderVersion": "1.16.5"
   },
   "transactions": [
@@ -45,6 +45,20 @@
     },
     {
       "to": "0xd261e479A62D82f2A9AA28B3711f76243dbb5031",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0xe1956ACCa5F37B159C7876BD7421388D0a3FFE72",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x914205606071d3F7fF747a9310311E374918b9Dd",
       "value": "0",
       "data": "0x79ba5097",
       "contractMethod": null,

@@ -1,10 +1,10 @@
 {
   "version": "1.0",
   "chainId": "130",
-  "createdAt": 1784654932940,
+  "createdAt": 1784656207945,
   "meta": {
     "name": "B accept ownership (unichain)",
-    "description": "Safe 0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a accepts ownership of the 6 new workstream-B contracts on unichain (run AFTER transferOwnership by deployer).",
+    "description": "Safe 0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a accepts ownership of the 8 new workstream-B contracts on unichain (Gateway+4modules+Factory+CurveFactory+Proxy where present). Run AFTER deployer transferOwnership.",
     "txBuilderVersion": "1.16.5"
   },
   "transactions": [
@@ -45,6 +45,20 @@
     },
     {
       "to": "0x916a9135c4eED07372D2F621C99FF3420cB3b4D3",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0xB4c1c72b2da7eC1750E2b298aE106E2eb0cE7629",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0xee81151946E8531d82b11097C5674aE0e2fB28dd",
       "value": "0",
       "data": "0x79ba5097",
       "contractMethod": null,

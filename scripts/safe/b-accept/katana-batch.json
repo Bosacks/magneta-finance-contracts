@@ -1,10 +1,10 @@
 {
   "version": "1.0",
   "chainId": "747474",
-  "createdAt": 1784654932940,
+  "createdAt": 1784656207945,
   "meta": {
     "name": "B accept ownership (katana)",
-    "description": "Safe 0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a accepts ownership of the 6 new workstream-B contracts on katana (run AFTER transferOwnership by deployer).",
+    "description": "Safe 0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a accepts ownership of the 8 new workstream-B contracts on katana (Gateway+4modules+Factory+CurveFactory+Proxy where present). Run AFTER deployer transferOwnership.",
     "txBuilderVersion": "1.16.5"
   },
   "transactions": [
@@ -45,6 +45,20 @@
     },
     {
       "to": "0xe1956ACCa5F37B159C7876BD7421388D0a3FFE72",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x6e80af319d6619F3119499A7dA9Ff0187ca8E580",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0xBcB9692EC199a5419Cf6a489F0F4BbaEBbbC1353",
       "value": "0",
       "data": "0x79ba5097",
       "contractMethod": null,

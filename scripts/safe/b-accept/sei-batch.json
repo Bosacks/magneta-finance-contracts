@@ -1,10 +1,10 @@
 {
   "version": "1.0",
   "chainId": "1329",
-  "createdAt": 1784654932940,
+  "createdAt": 1784656207945,
   "meta": {
     "name": "B accept ownership (sei)",
-    "description": "Safe 0x40ea2908Ea490d58E62D1Fd3364464D8A857b297 accepts ownership of the 6 new workstream-B contracts on sei (run AFTER transferOwnership by deployer).",
+    "description": "Safe 0x40ea2908Ea490d58E62D1Fd3364464D8A857b297 accepts ownership of the 8 new workstream-B contracts on sei (Gateway+4modules+Factory+CurveFactory+Proxy where present). Run AFTER deployer transferOwnership.",
     "txBuilderVersion": "1.16.5"
   },
   "transactions": [
@@ -45,6 +45,20 @@
     },
     {
       "to": "0x16C442aB2DB685d409738D978a859f0cE4f4A235",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x37c1ef2836b58f475fe989587e47f851794cF3ce",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x30c7e9D79e03A7725bcE631737dA2CF79a4d83bf",
       "value": "0",
       "data": "0x79ba5097",
       "contractMethod": null,

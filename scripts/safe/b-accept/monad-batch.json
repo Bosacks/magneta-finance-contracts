@@ -1,10 +1,10 @@
 {
   "version": "1.0",
   "chainId": "143",
-  "createdAt": 1784654932940,
+  "createdAt": 1784656207945,
   "meta": {
     "name": "B accept ownership (monad)",
-    "description": "Safe 0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a accepts ownership of the 6 new workstream-B contracts on monad (run AFTER transferOwnership by deployer).",
+    "description": "Safe 0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a accepts ownership of the 8 new workstream-B contracts on monad (Gateway+4modules+Factory+CurveFactory+Proxy where present). Run AFTER deployer transferOwnership.",
     "txBuilderVersion": "1.16.5"
   },
   "transactions": [
@@ -45,6 +45,20 @@
     },
     {
       "to": "0x15bcb18e94F58eC1950c9e514c0f0EAAA04F7452",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x44Fe5F70cdC0135A2E7f2532fab4Eb9db89Cf00f",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x7fd77D025aCAb16e7f49700DAAe09E6e245850cf",
       "value": "0",
       "data": "0x79ba5097",
       "contractMethod": null,

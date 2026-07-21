@@ -1,10 +1,10 @@
 {
   "version": "1.0",
   "chainId": "8453",
-  "createdAt": 1784654932940,
+  "createdAt": 1784656207945,
   "meta": {
     "name": "B accept ownership (base)",
-    "description": "Safe 0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a accepts ownership of the 6 new workstream-B contracts on base (run AFTER transferOwnership by deployer).",
+    "description": "Safe 0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a accepts ownership of the 7 new workstream-B contracts on base (Gateway+4modules+Factory+CurveFactory+Proxy where present). Run AFTER deployer transferOwnership.",
     "txBuilderVersion": "1.16.5"
   },
   "transactions": [
@@ -45,6 +45,13 @@
     },
     {
       "to": "0xd66d2ca8445ab8FC0118f0b813886bfef22fBdcb",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0xd1D7207d42bA003Eef971a57C5C7ad5d057fAd60",
       "value": "0",
       "data": "0x79ba5097",
       "contractMethod": null,

@@ -1,10 +1,10 @@
 {
   "version": "1.0",
   "chainId": "42161",
-  "createdAt": 1784654932940,
+  "createdAt": 1784656207945,
   "meta": {
     "name": "B accept ownership (arbitrum)",
-    "description": "Safe 0x4AeA3A398Db41b45e146c08131aD27c75b02EC2F accepts ownership of the 6 new workstream-B contracts on arbitrum (run AFTER transferOwnership by deployer).",
+    "description": "Safe 0x4AeA3A398Db41b45e146c08131aD27c75b02EC2F accepts ownership of the 8 new workstream-B contracts on arbitrum (Gateway+4modules+Factory+CurveFactory+Proxy where present). Run AFTER deployer transferOwnership.",
     "txBuilderVersion": "1.16.5"
   },
   "transactions": [
@@ -45,6 +45,20 @@
     },
     {
       "to": "0xd5c52fCcECf9aF4E210706Ec7082276bea344B56",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x7D954069F39dCa4dB31387ccc18878bfB3763D67",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x4015d96b166Fd7fC66353a6334ef3FF5587134fe",
       "value": "0",
       "data": "0x79ba5097",
       "contractMethod": null,

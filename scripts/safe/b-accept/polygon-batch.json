@@ -1,10 +1,10 @@
 {
   "version": "1.0",
   "chainId": "137",
-  "createdAt": 1784654932940,
+  "createdAt": 1784656207945,
   "meta": {
     "name": "B accept ownership (polygon)",
-    "description": "Safe 0x4AeA3A398Db41b45e146c08131aD27c75b02EC2F accepts ownership of the 6 new workstream-B contracts on polygon (run AFTER transferOwnership by deployer).",
+    "description": "Safe 0x4AeA3A398Db41b45e146c08131aD27c75b02EC2F accepts ownership of the 8 new workstream-B contracts on polygon (Gateway+4modules+Factory+CurveFactory+Proxy where present). Run AFTER deployer transferOwnership.",
     "txBuilderVersion": "1.16.5"
   },
   "transactions": [
@@ -45,6 +45,20 @@
     },
     {
       "to": "0x8991a715DA89b21d1CF5715886258cF7AafBBa49",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x72933e337CF207B56eC6ecDCb82131089e5e896b",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x5312CAD395376e1Ba0a520Cd9d5FF111BE767D4c",
       "value": "0",
       "data": "0x79ba5097",
       "contractMethod": null,

@@ -1,10 +1,10 @@
 {
   "version": "1.0",
   "chainId": "25",
-  "createdAt": 1784654932940,
+  "createdAt": 1784656207945,
   "meta": {
     "name": "B accept ownership (cronos)",
-    "description": "Safe 0x40ea2908Ea490d58E62D1Fd3364464D8A857b297 accepts ownership of the 6 new workstream-B contracts on cronos (run AFTER transferOwnership by deployer).",
+    "description": "Safe 0x40ea2908Ea490d58E62D1Fd3364464D8A857b297 accepts ownership of the 8 new workstream-B contracts on cronos (Gateway+4modules+Factory+CurveFactory+Proxy where present). Run AFTER deployer transferOwnership.",
     "txBuilderVersion": "1.16.5"
   },
   "transactions": [
@@ -45,6 +45,20 @@
     },
     {
       "to": "0xE4dF73f8beAcA39993b45913048378C0afAFaa90",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x4D54D8680f8258f42b2611Cf572372Ef9348F141",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x87bF8944429bec5B97Df08986A4b3B78470b8c7F",
       "value": "0",
       "data": "0x79ba5097",
       "contractMethod": null,
