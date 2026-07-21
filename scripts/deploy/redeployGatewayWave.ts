@@ -70,38 +70,57 @@ async function main() {
     return;
   }
 
-  const c: Record<string, string> = {};
+  const outDir = path.join(REPO, "deployments-b");
+  fs.mkdirSync(outDir, { recursive: true });
+  const outPath = path.join(outDir, `${network.name}.json`);
 
-  const Gateway = await ethers.getContractFactory("MagnetaGateway", mgr);
-  const gateway = await Gateway.deploy(ethers.getAddress(cfg.lzEndpoint), deployer.address, FEE_VAULT);
-  await gateway.waitForDeployment();
-  c.MagnetaGateway = await gateway.getAddress();
-  console.log(`  MagnetaGateway ${c.MagnetaGateway}`);
-  await (await gateway.setRequiredDVNCount(2)).wait();
+  // Resume-safe: load any prior checkpoint (RPC flakiness on a 20-chain run is
+  // a given — a re-run skips already-deployed contracts instead of orphaning
+  // new ones). Deploy addresses are checkpointed to disk after EACH deploy.
+  const c: Record<string, string> = fs.existsSync(outPath)
+    ? (JSON.parse(fs.readFileSync(outPath, "utf8")).contracts ?? {})
+    : {};
+  const save = () => fs.writeFileSync(outPath, JSON.stringify({
+    network: network.name, chainId: String(chainId), deployer: deployer.address,
+    feeVault: FEE_VAULT, pauseGuardian: PAUSE_GUARDIAN, gnosisSafe: live.gnosisSafe,
+    keptFromLive: { MagnetaPool: keptPool, MagnetaSwap: keptSwap, MagnetaLending: kept.MagnetaLending, MagnetaBundler: kept.MagnetaBundler, MagnetaBridgeOApp: kept.MagnetaBridgeOApp },
+    timestamp: new Date().toISOString(), chainConfig: cfg, contracts: c,
+    postDeploy: { safe: [`keptSwap.setFeeExempt(<LPModule>, true)`], separateScripts: ["deployMagnetaProxy.ts", "deployCurveLaunchpad.ts", "configPeers.ts"] },
+  }, null, 2) + "\n");
+
+  if (!c.MagnetaGateway) {
+    const Gateway = await ethers.getContractFactory("MagnetaGateway", mgr);
+    const gw = await Gateway.deploy(ethers.getAddress(cfg.lzEndpoint), deployer.address, FEE_VAULT);
+    await gw.waitForDeployment(); c.MagnetaGateway = await gw.getAddress(); save();
+    console.log(`  MagnetaGateway ${c.MagnetaGateway}`);
+  } else console.log(`  MagnetaGateway ${c.MagnetaGateway} (resumed)`);
+  const gateway = await ethers.getContractAt("MagnetaGateway", c.MagnetaGateway, mgr);
+  // Read-back retry: a just-deployed contract's code lags on some L2 sequencers
+  // (Base) — eth_call returns 0x (BAD_DATA) for a few seconds after deploy.
+  const readRetry = async <T>(fn: () => Promise<T>, label: string): Promise<T> => {
+    for (let i = 1; i <= 8; i++) {
+      try { return await fn(); }
+      catch (e) { if (i === 8) throw e; console.log(`  ${label} read lagging (${i}/8), waiting 5s…`); await new Promise((r) => setTimeout(r, 5000)); }
+    }
+    throw new Error("unreachable");
+  };
+  if ((await readRetry(() => gateway.requiredDVNCount(), "requiredDVNCount")) < 2n) { await (await gateway.setRequiredDVNCount(2)).wait(); }
   console.log(`  ✓ requiredDVNCount = 2`);
 
   if (deployModules) {
-    const LPMod = await ethers.getContractFactory("LPModule", mgr);
-    const lp = await LPMod.deploy(c.MagnetaGateway, cfg.defaultRouter!, cfg.usdc!, keptSwap);
-    await lp.waitForDeployment(); c.LPModule = await lp.getAddress(); console.log(`  LPModule ${c.LPModule}`);
-
-    const SwapMod = await ethers.getContractFactory("SwapModule", mgr);
-    const sm = await SwapMod.deploy(c.MagnetaGateway, cfg.defaultRouter!, cfg.usdc!);
-    await sm.waitForDeployment(); c.SwapModule = await sm.getAddress(); console.log(`  SwapModule ${c.SwapModule}`);
-
-    const TaxMod = await ethers.getContractFactory("TaxClaimModule", mgr);
-    const tx = await TaxMod.deploy(c.MagnetaGateway, cfg.defaultRouter!, cfg.usdc!);
-    await tx.waitForDeployment(); c.TaxClaimModule = await tx.getAddress(); console.log(`  TaxClaimModule ${c.TaxClaimModule}`);
+    if (!c.LPModule) { const F = await ethers.getContractFactory("LPModule", mgr); const x = await F.deploy(c.MagnetaGateway, cfg.defaultRouter!, cfg.usdc!, keptSwap); await x.waitForDeployment(); c.LPModule = await x.getAddress(); save(); }
+    console.log(`  LPModule ${c.LPModule}`);
+    if (!c.SwapModule) { const F = await ethers.getContractFactory("SwapModule", mgr); const x = await F.deploy(c.MagnetaGateway, cfg.defaultRouter!, cfg.usdc!); await x.waitForDeployment(); c.SwapModule = await x.getAddress(); save(); }
+    console.log(`  SwapModule ${c.SwapModule}`);
+    if (!c.TaxClaimModule) { const F = await ethers.getContractFactory("TaxClaimModule", mgr); const x = await F.deploy(c.MagnetaGateway, cfg.defaultRouter!, cfg.usdc!); await x.waitForDeployment(); c.TaxClaimModule = await x.getAddress(); save(); }
+    console.log(`  TaxClaimModule ${c.TaxClaimModule}`);
   }
   if (deployTokenOps) {
-    const TokMod = await ethers.getContractFactory("TokenOpsModule", mgr);
-    const to = await TokMod.deploy(c.MagnetaGateway, cfg.usdc!);
-    await to.waitForDeployment(); c.TokenOpsModule = await to.getAddress(); console.log(`  TokenOpsModule ${c.TokenOpsModule}`);
+    if (!c.TokenOpsModule) { const F = await ethers.getContractFactory("TokenOpsModule", mgr); const x = await F.deploy(c.MagnetaGateway, cfg.usdc!); await x.waitForDeployment(); c.TokenOpsModule = await x.getAddress(); save(); }
+    console.log(`  TokenOpsModule ${c.TokenOpsModule}`);
   }
-
-  const Factory = await ethers.getContractFactory("MagnetaFactory", mgr);
-  const factory = await Factory.deploy(keptPool, deployer.address);
-  await factory.waitForDeployment(); c.MagnetaFactory = await factory.getAddress(); console.log(`  MagnetaFactory ${c.MagnetaFactory}`);
+  if (!c.MagnetaFactory) { const F = await ethers.getContractFactory("MagnetaFactory", mgr); const x = await F.deploy(keptPool, deployer.address); await x.waitForDeployment(); c.MagnetaFactory = await x.getAddress(); save(); }
+  console.log(`  MagnetaFactory ${c.MagnetaFactory}`);
 
   // ── wire the new Gateway (mirror deployAll setModule map) ──
   const moduleMap: [number, string | undefined][] = [
@@ -111,27 +130,23 @@ async function main() {
     [12, c.SwapModule], [16, c.TokenOpsModule],
   ];
   let reg = 0;
-  for (const [op, mod] of moduleMap) { if (!mod) continue; await (await gateway.setModule(op, mod)).wait(); reg++; }
-  console.log(`  ✓ ${reg} modules registered on Gateway`);
-  if (cfg.usdc) { await (await gateway.setUsdc(cfg.usdc)).wait(); console.log(`  ✓ USDC set`); }
-  await (await gateway.addPauser(PAUSE_GUARDIAN)).wait(); console.log(`  ✓ pauser (guardian)`);
-  if (RELAYER_PAUSER) { await (await gateway.addPauser(RELAYER_PAUSER)).wait(); console.log(`  ✓ pauser (relayer)`); }
+  for (const [op, mod] of moduleMap) {
+    if (!mod) continue;
+    const cur = (await gateway.moduleFor(op)) as string;
+    if (cur.toLowerCase() !== mod.toLowerCase()) { await (await gateway.setModule(op, mod)).wait(); reg++; }
+  }
+  console.log(`  ✓ modules registered on Gateway (${reg} set this run)`);
+  if (cfg.usdc && (await gateway.usdc()).toLowerCase() !== cfg.usdc.toLowerCase()) { await (await gateway.setUsdc(cfg.usdc)).wait(); }
+  console.log(`  ✓ USDC set`);
+  if (!(await gateway.isPauser(PAUSE_GUARDIAN))) { await (await gateway.addPauser(PAUSE_GUARDIAN)).wait(); }
+  console.log(`  ✓ pauser (guardian)`);
+  if (RELAYER_PAUSER && !(await gateway.isPauser(RELAYER_PAUSER))) { await (await gateway.addPauser(RELAYER_PAUSER)).wait(); }
 
-  // NOTE: keptSwap.setFeeExempt(c.LPModule, true) is required but MagnetaSwap is
-  // Safe-owned — do NOT call from the deployer. Emit it as a Safe batch instead.
-  console.log(`  ⚠ TODO (Safe): keptSwap ${keptSwap} setFeeExempt(${c.LPModule}, true)`);
-
-  const outDir = path.join(REPO, "deployments-b");
-  fs.mkdirSync(outDir, { recursive: true });
-  const outPath = path.join(outDir, `${network.name}.json`);
-  fs.writeFileSync(outPath, JSON.stringify({
-    network: network.name, chainId: String(chainId), deployer: deployer.address,
-    feeVault: FEE_VAULT, pauseGuardian: PAUSE_GUARDIAN, gnosisSafe: live.gnosisSafe,
-    keptFromLive: { MagnetaPool: keptPool, MagnetaSwap: keptSwap, MagnetaLending: kept.MagnetaLending, MagnetaBundler: kept.MagnetaBundler, MagnetaBridgeOApp: kept.MagnetaBridgeOApp },
-    timestamp: new Date().toISOString(), chainConfig: cfg, contracts: c,
-    postDeploy: { safe: [`keptSwap.setFeeExempt(${c.LPModule}, true)`], separateScripts: ["deployMagnetaProxy.ts", "deployCurveLaunchpad.ts", "configPeers.ts"] },
-  }, null, 2) + "\n");
+  save();
+  // keptSwap.setFeeExempt(c.LPModule, true) is required but MagnetaSwap is
+  // Safe-owned — do NOT call from the deployer. Emitted as a Safe batch separately.
   console.log(`\n  scoped set -> ${outPath}`);
+  console.log(`  ⚠ Safe TODO: keptSwap ${keptSwap} setFeeExempt(${c.LPModule ?? "-"}, true)`);
   console.log(`  NEXT: proxy + curve + configPeers (mesh) + Safe setFeeExempt, then pauser/transfer/accept, then CUTOVER.`);
 }
 

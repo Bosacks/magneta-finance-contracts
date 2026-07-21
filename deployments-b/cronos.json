@@ -1,0 +1,42 @@
+{
+  "network": "cronos",
+  "chainId": "25",
+  "deployer": "0x620684F822da9adF36F41e3554791D889947e25E",
+  "feeVault": "0x68109132Ecf7540A0A983e1Aaa7DebC469d9d68b",
+  "pauseGuardian": "0x92F440Bc1f1FaBD6D3e6256491631E07857F4260",
+  "gnosisSafe": "0x40ea2908Ea490d58E62D1Fd3364464D8A857b297",
+  "keptFromLive": {
+    "MagnetaPool": "0xaC3B726A7582F2B12aE1C7865CBeE93CC0418C8a",
+    "MagnetaSwap": "0x414dC3f0670227Ab3DDAd8B0A52aF7AdebC4a504",
+    "MagnetaLending": "0x749eeB253c7988590651D83bBF005d7b3385E287",
+    "MagnetaBundler": "0xe16F1A17e6dAB2d7b7Ba628a9165279314A34e29",
+    "MagnetaBridgeOApp": "0x802135E39fb56FAe17d26eC1B02261BF7cf1D426"
+  },
+  "timestamp": "2026-07-21T16:36:31.775Z",
+  "chainConfig": {
+    "lzEndpoint": "0x3A73033C0b1407574C76BdBAc67f126f6b4a9AA9",
+    "lzEid": 30359,
+    "cctpDomain": null,
+    "usdc": "0xc21223249CA28397B4B6541dfFaEcC539BfF0c59",
+    "defaultRouter": "0x145863Eb42Cf62847A6Ca784e6416C1682b1b2Ae",
+    "router": "uniV2"
+  },
+  "contracts": {
+    "MagnetaGateway": "0xA55eA9A4311E3F2a1bbeb215b989aE55Fc59096E",
+    "LPModule": "0xa15cBac4Ce28d96cfDcAdB2aC6b32A71DFCA682f",
+    "SwapModule": "0xd261e479A62D82f2A9AA28B3711f76243dbb5031",
+    "TaxClaimModule": "0xf9e08d33ef992e8077c4d16c68AB82ebaC20c798",
+    "TokenOpsModule": "0x7A665bd99e0fF8786324Cfa825B6c6597497B2d1",
+    "MagnetaFactory": "0xE4dF73f8beAcA39993b45913048378C0afAFaa90"
+  },
+  "postDeploy": {
+    "safe": [
+      "keptSwap.setFeeExempt(<LPModule>, true)"
+    ],
+    "separateScripts": [
+      "deployMagnetaProxy.ts",
+      "deployCurveLaunchpad.ts",
+      "configPeers.ts"
+    ]
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "network": "berachain",
+  "chainId": "80094",
+  "deployer": "0x620684F822da9adF36F41e3554791D889947e25E",
+  "feeVault": "0x68109132Ecf7540A0A983e1Aaa7DebC469d9d68b",
+  "pauseGuardian": "0x92F440Bc1f1FaBD6D3e6256491631E07857F4260",
+  "gnosisSafe": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a",
+  "keptFromLive": {
+    "MagnetaPool": "0x3e931050389Daf7cBC408bF8099FcF6859c01f8E",
+    "MagnetaSwap": "0xb9075096153C370E972fC72B31835acb4B05c6B3",
+    "MagnetaLending": "0xA954791C2d7209cb336E2465Fc3174fD2d98404d",
+    "MagnetaBridgeOApp": "0x37dfBE103ec62b95CAed3e9C4F3dD22cD53B02B2"
+  },
+  "timestamp": "2026-07-21T16:31:02.625Z",
+  "chainConfig": {
+    "lzEndpoint": "0x6F475642a6e85809B1c36Fa62763669b1b48DD5B",
+    "lzEid": 30362,
+    "cctpDomain": null,
+    "usdc": "0x549943e04f40284185054145c6E4e9568C1D3241",
+    "defaultRouter": null,
+    "router": null
+  },
+  "contracts": {
+    "MagnetaGateway": "0x767Bee1D6FB2A4313eA93e0dD486E0D80240ac01",
+    "TokenOpsModule": "0x7402EbE42E374120991aBDaac27F2BC0EfEC4289",
+    "MagnetaFactory": "0xDD7ff2F326356c147d6EF2D05CBc3F9D3297eAFF"
+  },
+  "postDeploy": {
+    "safe": [
+      "keptSwap.setFeeExempt(<LPModule>, true)"
+    ],
+    "separateScripts": [
+      "deployMagnetaProxy.ts",
+      "deployCurveLaunchpad.ts",
+      "configPeers.ts"
+    ]
+  }
+}
