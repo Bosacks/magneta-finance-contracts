@@ -180,3 +180,43 @@ DRY_RUN per chain.
 2. Guardian: history purge done 2026-07-20 (no rotation — key never externally exposed).
 3. `redeployGatewayWave.ts` written + DRY_RUN clean per chain.
 4. Confirm live Terminal repo (MagnetaTerminal vs Terminal-final).
+
+---
+
+# APPENDIX 2 — B execution plan, costed (prep done 2026-07-20)
+
+Prep completed (no mainnet tx): skim frontend built + tsc-clean (Tokens + DEX),
+`scripts/deploy/redeployGatewayWave.ts` written + DRY_RUN OK (base full, berachain minimal).
+
+## Confirmed scoped inventory
+- **REDEPLOY (8)**: MagnetaGateway (OApp, skim), LPModule, SwapModule, TaxClaimModule,
+  TokenOpsModule (ALL FOUR bind `immutable gateway` → forced), MagnetaFactory, MagnetaProxy,
+  MagnetaCurveFactory.
+- **KEEP (5)**: MagnetaPool, MagnetaSwap, MagnetaLending, MagnetaBundler, MagnetaBridgeOApp
+  (new LPModule/Factory reference kept Swap/Pool). Kept contracts hold state/liquidity — never redeploy.
+
+## Execution order (per chain, one at a time)
+1. `redeployGatewayWave.ts` → Gateway + 4 modules + Factory → `deployments-b/<chain>.json`.
+2. `deployMagnetaProxy.ts` + `deployCurveLaunchpad.ts` (the other 2 of the 8).
+3. **Safe tx**: kept `MagnetaSwap.setFeeExempt(newLPModule, true)` (Swap is Safe-owned — deployer can't).
+4. `configPeers.ts` on this chain → setPeer to the 19 others (do while deployer still owns the Gateway).
+5. `wirePauserGap.ts` → pauser on new pausables.
+6. `transferOwnership.ts` (8 new contracts EOA→Safe) + accept batch (UI or execBatch for 4 in-house).
+7. **CUTOVER**: `gatewayChains.ts` (Tokens) + `v2Constants.ts`/bridge maps (DEX) → new addresses;
+   redeploy the 2 frontends; smoke-test swap/LP/create-token on this chain.
+8. Enable fees LAST (Safe `setOpServiceFeeNative[op]`), only after the on-chain-skim frontend is live
+   (already built — the headroom is defensive/0n until then).
+
+## Cost / scale (rough)
+- Deployer txs ≈ **~47/chain** (6-8 deploys + setRequiredDVNCount + 14 setModule + setUsdc + pauser +
+  proxy/curve config + **19 setPeer**) × 20 ≈ **~940 txs**.
+- Safe txs ≈ setFeeExempt(20) + transferOwnership(~160) + accept(~160) ≈ **~340** (4 in-house via execBatch).
+- Gas: tiny per tx; the 06-30 wave was ~$20-40, this is bigger (peers) → estimate **~$50-100 total**.
+- Wall-clock: multi-hour, one chain at a time with on-chain verification + a frontend redeploy at cutover.
+
+## Ordering safety
+- Peers BEFORE Safe transfer (setPeer is OApp-owner-only = deployer).
+- CUTOVER is the reversible valve — keep the OLD live addresses until each chain's new set is smoke-tested.
+- The 20-chain mesh is only fully connected once ALL chains have both deployed AND peered — cross-chain
+  ops between a cutover chain and a not-yet-cutover chain must be considered (stage cross-chain last, or
+  cutover same-chain ops first and cross-chain once the mesh is complete).
