@@ -1,0 +1,19 @@
+{
+  "version": "1.0",
+  "chainId": "137",
+  "createdAt": 1784654932940,
+  "meta": {
+    "name": "B setFeeExempt (polygon)",
+    "description": "Kept MagnetaSwap 0x23A722C9cC7053B3c96B34ccb10Bc3bF90b27302 marks new LPModule 0xDCC7b13Bab93dC00895E5b5042B156D529077A1D fee-exempt (workstream B). Safe 0x4AeA3A398Db41b45e146c08131aD27c75b02EC2F.",
+    "txBuilderVersion": "1.16.5"
+  },
+  "transactions": [
+    {
+      "to": "0x23A722C9cC7053B3c96B34ccb10Bc3bF90b27302",
+      "value": "0",
+      "data": "0x8ebfc796000000000000000000000000dcc7b13bab93dc00895e5b5042b156d529077a1d0000000000000000000000000000000000000000000000000000000000000001",
+      "contractMethod": null,
+      "contractInputsValues": null
+    }
+  ]
+}

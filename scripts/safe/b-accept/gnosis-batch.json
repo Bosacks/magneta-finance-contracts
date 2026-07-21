@@ -1,0 +1,54 @@
+{
+  "version": "1.0",
+  "chainId": "100",
+  "createdAt": 1784654932940,
+  "meta": {
+    "name": "B accept ownership (gnosis)",
+    "description": "Safe 0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a accepts ownership of the 6 new workstream-B contracts on gnosis (run AFTER transferOwnership by deployer).",
+    "txBuilderVersion": "1.16.5"
+  },
+  "transactions": [
+    {
+      "to": "0x9003cEe70616B07e184FB4bC39a54A4694FC1642",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x017C97E41d1d8d4400aA3F224F17Df62B2e6cDd1",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x1cc1440f25Fdc209D79293d17B3A25e839d53720",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x8D06cAa132EeAEc67e67f1298fa9F4F9E79FeC57",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0xF02B69E65A8d9A93Eb9474484dd8b1B87f06b76B",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x8979C99F796Ac7edC9B4b7c2077428C4cb257731",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    }
+  ]
+}

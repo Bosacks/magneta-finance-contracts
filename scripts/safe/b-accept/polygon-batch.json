@@ -1,0 +1,54 @@
+{
+  "version": "1.0",
+  "chainId": "137",
+  "createdAt": 1784654932940,
+  "meta": {
+    "name": "B accept ownership (polygon)",
+    "description": "Safe 0x4AeA3A398Db41b45e146c08131aD27c75b02EC2F accepts ownership of the 6 new workstream-B contracts on polygon (run AFTER transferOwnership by deployer).",
+    "txBuilderVersion": "1.16.5"
+  },
+  "transactions": [
+    {
+      "to": "0xaaA090Ff8fE3AA8DF390Da0A8108510F90ceCae7",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0xDCC7b13Bab93dC00895E5b5042B156D529077A1D",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x7574400Db388dDcC16481757dFAF655e44E1B222",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x36B3E2367E826b36e074654472e69fac1E17A8E6",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x97613bA8671d3E767dab022F9Efa5Da7e4f3c186",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x8991a715DA89b21d1CF5715886258cF7AafBBa49",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    }
+  ]
+}

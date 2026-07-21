@@ -1,0 +1,19 @@
+{
+  "version": "1.0",
+  "chainId": "25",
+  "createdAt": 1784654932940,
+  "meta": {
+    "name": "B setFeeExempt (cronos)",
+    "description": "Kept MagnetaSwap 0x414dC3f0670227Ab3DDAd8B0A52aF7AdebC4a504 marks new LPModule 0xa15cBac4Ce28d96cfDcAdB2aC6b32A71DFCA682f fee-exempt (workstream B). Safe 0x40ea2908Ea490d58E62D1Fd3364464D8A857b297.",
+    "txBuilderVersion": "1.16.5"
+  },
+  "transactions": [
+    {
+      "to": "0x414dC3f0670227Ab3DDAd8B0A52aF7AdebC4a504",
+      "value": "0",
+      "data": "0x8ebfc796000000000000000000000000a15cbac4ce28d96cfdcadb2ac6b32a71dfca682f0000000000000000000000000000000000000000000000000000000000000001",
+      "contractMethod": null,
+      "contractInputsValues": null
+    }
+  ]
+}

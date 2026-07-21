@@ -1,0 +1,33 @@
+{
+  "version": "1.0",
+  "chainId": "80094",
+  "createdAt": 1784654932940,
+  "meta": {
+    "name": "B accept ownership (berachain)",
+    "description": "Safe 0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a accepts ownership of the 3 new workstream-B contracts on berachain (run AFTER transferOwnership by deployer).",
+    "txBuilderVersion": "1.16.5"
+  },
+  "transactions": [
+    {
+      "to": "0x767Bee1D6FB2A4313eA93e0dD486E0D80240ac01",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x7402EbE42E374120991aBDaac27F2BC0EfEC4289",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0xDD7ff2F326356c147d6EF2D05CBc3F9D3297eAFF",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    }
+  ]
+}

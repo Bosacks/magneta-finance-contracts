@@ -1,0 +1,54 @@
+{
+  "version": "1.0",
+  "chainId": "10",
+  "createdAt": 1784654932940,
+  "meta": {
+    "name": "B accept ownership (optimism)",
+    "description": "Safe 0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a accepts ownership of the 6 new workstream-B contracts on optimism (run AFTER transferOwnership by deployer).",
+    "txBuilderVersion": "1.16.5"
+  },
+  "transactions": [
+    {
+      "to": "0x55A292f91C123505E705Cf7b78d9FDc12Ed678C6",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x916a9135c4eED07372D2F621C99FF3420cB3b4D3",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x9Cba1BBeE6478F423AE7e74B66921786be0Da867",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x345c0ae050382eE451B78220c5923653a88a78c6",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0xb234B37211f2c5653501FA42936b0729c49a0eB7",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x19fde0325407Bc9976CB6b28c9d88F638e43224D",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    }
+  ]
+}

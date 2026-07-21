@@ -1,0 +1,54 @@
+{
+  "version": "1.0",
+  "chainId": "8453",
+  "createdAt": 1784654932940,
+  "meta": {
+    "name": "B accept ownership (base)",
+    "description": "Safe 0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a accepts ownership of the 6 new workstream-B contracts on base (run AFTER transferOwnership by deployer).",
+    "txBuilderVersion": "1.16.5"
+  },
+  "transactions": [
+    {
+      "to": "0x0eC57cEdb3156B892aFB1aa00941CC7e58A961b6",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0xf6158A0e1DC2F39E0a1EE1eBe6289341b62202db",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x87722f17954c9948ef96076De34B9e0a6D645889",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x7E9C561a21f4Db5501792B05d5ada0e2Cd3883Cd",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0xe8A7B4808861B5b14B11F2c80e47bB99Cd93E018",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0xd66d2ca8445ab8FC0118f0b813886bfef22fBdcb",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    }
+  ]
+}

@@ -1,0 +1,54 @@
+{
+  "version": "1.0",
+  "chainId": "5000",
+  "createdAt": 1784654932940,
+  "meta": {
+    "name": "B accept ownership (mantle)",
+    "description": "Safe 0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a accepts ownership of the 6 new workstream-B contracts on mantle (run AFTER transferOwnership by deployer).",
+    "txBuilderVersion": "1.16.5"
+  },
+  "transactions": [
+    {
+      "to": "0xf683eceBB7F042fD9884C8922e979E8CE4DE1df2",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x4d10B9e8e49Bb3315186BFE7A8E8D9f5cb0B0d7e",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x9003cEe70616B07e184FB4bC39a54A4694FC1642",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0xc7E3fD8e44484af3595BA7C2e930582364d25C3B",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x0a1592792186ED1f1361C6307CF78505c91Fa93B",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x017C97E41d1d8d4400aA3F224F17Df62B2e6cDd1",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    }
+  ]
+}

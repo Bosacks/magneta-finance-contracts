@@ -1,0 +1,19 @@
+{
+  "version": "1.0",
+  "chainId": "42220",
+  "createdAt": 1784654932940,
+  "meta": {
+    "name": "B setFeeExempt (celo)",
+    "description": "Kept MagnetaSwap 0x520F7E6B31778bFd70c4F73e034d82aB5189E181 marks new LPModule 0x55A292f91C123505E705Cf7b78d9FDc12Ed678C6 fee-exempt (workstream B). Safe 0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a.",
+    "txBuilderVersion": "1.16.5"
+  },
+  "transactions": [
+    {
+      "to": "0x520F7E6B31778bFd70c4F73e034d82aB5189E181",
+      "value": "0",
+      "data": "0x8ebfc79600000000000000000000000055a292f91c123505e705cf7b78d9fdc12ed678c60000000000000000000000000000000000000000000000000000000000000001",
+      "contractMethod": null,
+      "contractInputsValues": null
+    }
+  ]
+}

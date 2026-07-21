@@ -1,0 +1,54 @@
+{
+  "version": "1.0",
+  "chainId": "42161",
+  "createdAt": 1784654932940,
+  "meta": {
+    "name": "B accept ownership (arbitrum)",
+    "description": "Safe 0x4AeA3A398Db41b45e146c08131aD27c75b02EC2F accepts ownership of the 6 new workstream-B contracts on arbitrum (run AFTER transferOwnership by deployer).",
+    "txBuilderVersion": "1.16.5"
+  },
+  "transactions": [
+    {
+      "to": "0x7fd77D025aCAb16e7f49700DAAe09E6e245850cf",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0xc6822EdDabd6179478BA6F0ca89B7e1D77b93dC2",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0xac26D783C7C9b9d84A7225a5551d1228c9cB69E2",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x98ee3A2bfC79055F296B3d971AAE1eDab4e3f25D",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0xEE235FC1cA1a3719eb4D6919C04eD0CCf8C56f17",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0xd5c52fCcECf9aF4E210706Ec7082276bea344B56",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    }
+  ]
+}
