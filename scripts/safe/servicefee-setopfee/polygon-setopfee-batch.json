@@ -1,0 +1,54 @@
+{
+  "version": "1.0",
+  "chainId": "137",
+  "createdAt": 0,
+  "meta": {
+    "name": "MagnetaServiceFee setOpFee (polygon)",
+    "description": "Safe 0x4AeA3A398Db41b45e146c08131aD27c75b02EC2F sets maxOpFee=200 then the 5 off-chain op fees (USD-pegged via BUNDLE_FEE_BY_CHAIN x op weight) on 0x27635d8b4664Adf896Cd7a0E9E54b52138cb7cdC. Native units.",
+    "txBuilderVersion": "1.16.5"
+  },
+  "transactions": [
+    {
+      "to": "0x27635d8b4664Adf896Cd7a0E9E54b52138cb7cdC",
+      "value": "0",
+      "data": "0x50a3325900000000000000000000000000000000000000000000000ad78ebc5ac6200000",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x27635d8b4664Adf896Cd7a0E9E54b52138cb7cdC",
+      "value": "0",
+      "data": "0xdd03646015c8cae14be5e3448d9aa34f33e005e8e1dea467f58a0b97b503c55ab38afe900000000000000000000000000000000000000000000000001bc16d674ec80000",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x27635d8b4664Adf896Cd7a0E9E54b52138cb7cdC",
+      "value": "0",
+      "data": "0xdd0364601065f951195d52b84d8367fc8d7627f23e659a87dbe93975fa692637705655ec0000000000000000000000000000000000000000000000003782dace9d900000",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x27635d8b4664Adf896Cd7a0E9E54b52138cb7cdC",
+      "value": "0",
+      "data": "0xdd036460274536be60e5560c5e540f94bbcbf5dbc8265d6e40f86f04baa4c484dfe14e4c0000000000000000000000000000000000000000000000003782dace9d900000",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x27635d8b4664Adf896Cd7a0E9E54b52138cb7cdC",
+      "value": "0",
+      "data": "0xdd036460dafe49ad665265028a7a80b2a126c2dac988b60dbaa06ab5d69dab15b575b0330000000000000000000000000000000000000000000000008ac7230489e80000",
+      "contractMethod": null,
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x27635d8b4664Adf896Cd7a0E9E54b52138cb7cdC",
+      "value": "0",
+      "data": "0xdd036460b7fd1c8ae2ea468361190ae6c8558830b7298daa7d88e27edc6f1472aa0480a80000000000000000000000000000000000000000000000008ac7230489e80000",
+      "contractMethod": null,
+      "contractInputsValues": null
+    }
+  ]
+}
