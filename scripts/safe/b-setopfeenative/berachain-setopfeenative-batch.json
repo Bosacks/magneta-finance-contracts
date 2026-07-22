@@ -1,0 +1,68 @@
+{
+ "version": "1.0",
+ "chainId": "80094",
+ "createdAt": 0,
+ "meta": {
+  "name": "Gateway B setOpServiceFeeNative (berachain)",
+  "description": "Safe 0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a sets maxOpServiceFeeNative=50xU then 7 on-chain op fees (USD-pegged unit U from BUNDLE_FEE_BY_CHAIN, same units as chantier A) on Gateway 0x767Bee1D6FB2A4313eA93e0dD486E0D80240ac01. Weights: LP create 2.5U, LP remove/burn 1U, mint/claim 1U, admin ops 0.5U.",
+  "txBuilderVersion": "1.16.5"
+ },
+ "transactions": [
+  {
+   "to": "0x767Bee1D6FB2A4313eA93e0dD486E0D80240ac01",
+   "value": "0",
+   "data": "0x34457b95000000000000000000000000000000000000000000000001158e460913d00000",
+   "contractMethod": null,
+   "contractInputsValues": null
+  },
+  {
+   "to": "0x767Bee1D6FB2A4313eA93e0dD486E0D80240ac01",
+   "value": "0",
+   "data": "0xf6de4f180000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000058d15e176280000",
+   "contractMethod": null,
+   "contractInputsValues": null
+  },
+  {
+   "to": "0x767Bee1D6FB2A4313eA93e0dD486E0D80240ac01",
+   "value": "0",
+   "data": "0xf6de4f18000000000000000000000000000000000000000000000000000000000000000500000000000000000000000000000000000000000000000002c68af0bb140000",
+   "contractMethod": null,
+   "contractInputsValues": null
+  },
+  {
+   "to": "0x767Bee1D6FB2A4313eA93e0dD486E0D80240ac01",
+   "value": "0",
+   "data": "0xf6de4f18000000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000002c68af0bb140000",
+   "contractMethod": null,
+   "contractInputsValues": null
+  },
+  {
+   "to": "0x767Bee1D6FB2A4313eA93e0dD486E0D80240ac01",
+   "value": "0",
+   "data": "0xf6de4f18000000000000000000000000000000000000000000000000000000000000000700000000000000000000000000000000000000000000000002c68af0bb140000",
+   "contractMethod": null,
+   "contractInputsValues": null
+  },
+  {
+   "to": "0x767Bee1D6FB2A4313eA93e0dD486E0D80240ac01",
+   "value": "0",
+   "data": "0xf6de4f18000000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000002c68af0bb140000",
+   "contractMethod": null,
+   "contractInputsValues": null
+  },
+  {
+   "to": "0x767Bee1D6FB2A4313eA93e0dD486E0D80240ac01",
+   "value": "0",
+   "data": "0xf6de4f18000000000000000000000000000000000000000000000000000000000000000900000000000000000000000000000000000000000000000002c68af0bb140000",
+   "contractMethod": null,
+   "contractInputsValues": null
+  },
+  {
+   "to": "0x767Bee1D6FB2A4313eA93e0dD486E0D80240ac01",
+   "value": "0",
+   "data": "0xf6de4f18000000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000058d15e176280000",
+   "contractMethod": null,
+   "contractInputsValues": null
+  }
+ ]
+}
