@@ -1,0 +1,19 @@
+{
+  "version": "1.0",
+  "chainId": "8453",
+  "createdAt": 1784725493504,
+  "meta": {
+    "name": "B accept base MagnetaProxy",
+    "description": "Safe 0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a accepts ownership of MagnetaProxy 0x87B6c972A34b825c68870AaDdf2129aE9C75c9d8 on base (deployed after the main base accept batch).",
+    "txBuilderVersion": "1.16.5"
+  },
+  "transactions": [
+    {
+      "to": "0x87B6c972A34b825c68870AaDdf2129aE9C75c9d8",
+      "value": "0",
+      "data": "0x79ba5097",
+      "contractMethod": null,
+      "contractInputsValues": null
+    }
+  ]
+}
