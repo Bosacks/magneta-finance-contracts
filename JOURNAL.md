@@ -3,6 +3,14 @@
 > Fil chronologique des sessions. Anti-chronologique (plus récent en haut).
 > Voir `~/CLAUDE.md` pour la règle d'édition.
 
+## 2026-07-22 — 14:16 — Chantier B TERMINÉ : cutover frontends + frais on-chain actifs 20/20
+- Cutover Tokens (`765a9557`) + DEX (`4aa9365`) déployés prod → couche B (Gateway skim durci), smoke tests verts (bundles + on-chain owner=Safe + HTTP 200)
+- Batches `scripts/safe/b-setopfeenative/` (20 chaînes) : setMax=50×U + 11 frais d'op (poids : LP create 2.5U, remove/burn/mint/claim 1U, admin 0.5U) — unités U identiques au chantier A
+- Batches exécutés (16 Safe UI + 4 in-house execBatch) ; frais vérifiés on-chain 20/20 conformes
+- Ops sans headroom frontend laissées à 0 (SWAP_*, CREATE_TOKEN, atomiques) — sinon revert
+- Fix .env : SEI_MAINNET_RPC_URL dédupliqué → publicnode (drpc 500)
+- Reste (indépendant) : CSP enforce, Dependabot (Tokens 9, DEX 15), gate /lending DEX, révocation secrets
+
 ## 2026-07-20 — Chantier A : MagnetaServiceFee déployé (20 chaînes)
 - Runbook du redeploy native-fee : `docs/native-fee-redeploy-runbook-2026-07-20.md` (scope A léger vs B lourd Gateway-cascade)
 - Découverte : le skim on-chain est DANS le Gateway (immuable, pas proxy) → chantier B = redeploy Gateway + cascade modules + pauser→Safe→cutover (différé, attend frontend Ch3 + rotation guardian)
