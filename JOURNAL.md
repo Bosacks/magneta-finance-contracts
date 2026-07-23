@@ -13,6 +13,12 @@
 - Suite même jour : CSP collector `/api/csp-report` + report-uri déployé (enforce après collecte) ; Dependabot Tokens 9/9 + DEX 15/15 corrigés (pins) ; /lending gaté Coming Soon ; purge clés bash_history local+VPS
 - Vérif source explorers B : `scripts/deploy/verifyB.ts`, **19/20 chaînes / 152 contrats vérifiés** (Etherscan V2 + Blockscout flare ; katana/plasma/abstract basculés V2 dans hardhat.config) ; cronos = Cloudflare bloque l'API → vérif via UI si voulu
 
+## 2026-07-23 — Cronos : vérif source complète → 20/20 chaînes
+- API keyed Cronos Explorer (clé CRONOSCAN_API_KEY .env) : route réelle `/mainnet/api/v1/contract/verifySourceCode` **multipart** (contractAddress/name/compilerVersion/constructorArguments/compilerType/contract[]=@build-info-input)
+- PIÈGE : leur backend échoue sur l'input standard-json complet (110 sources) → **élaguer au graphe d'imports** ; 7/8 Pass-Verified
+- MagnetaFactory : build à part (runs=1 + revertStrings=strip, squeeze 24KB) que leur pipeline ne reproduit pas → vérifié via **Sourcify exact_match** (creation+runtime, chain 25)
+- Bilan : source des contrats B publiquement vérifiée sur les 20 chaînes (155/155)
+
 ## 2026-07-20 — Chantier A : MagnetaServiceFee déployé (20 chaînes)
 - Runbook du redeploy native-fee : `docs/native-fee-redeploy-runbook-2026-07-20.md` (scope A léger vs B lourd Gateway-cascade)
 - Découverte : le skim on-chain est DANS le Gateway (immuable, pas proxy) → chantier B = redeploy Gateway + cascade modules + pauser→Safe→cutover (différé, attend frontend Ch3 + rotation guardian)
