@@ -175,10 +175,10 @@ const config: HardhatUserConfig = {
       flare: ROUTESCAN_KEY,
       pulsechain: ROUTESCAN_KEY,
       dexalot: ROUTESCAN_KEY,
-      katana: ROUTESCAN_KEY,
-      plasma: ROUTESCAN_KEY,
+      katana: ETHERSCAN_KEY,
+      plasma: ETHERSCAN_KEY,
       // Unique verifiers
-      abstract: process.env.ABSTRACT_VERIFY_KEY || "",
+      abstract: process.env.ABSTRACT_VERIFY_KEY || ETHERSCAN_KEY,
       hyperliquid: process.env.HYPERLIQUID_VERIFY_KEY || "",
     },
     customChains: [
@@ -209,18 +209,18 @@ const config: HardhatUserConfig = {
       { network: "lineaSepolia",     chainId: 59141,    urls: ETHERSCAN_V2(59141,    "https://sepolia.lineascan.build") },
 
       // Routescan
-      { network: "flare",      chainId: 14,     urls: ROUTESCAN(14,     "https://flarescan.com") },
+      { network: "flare",      chainId: 14,     urls: { apiURL: "https://flare-explorer.flare.network/api", browserURL: "https://flare-explorer.flare.network" } },
       { network: "pulsechain", chainId: 369,    urls: ROUTESCAN(369,    "https://scan.pulsechain.com") },
       { network: "dexalot",    chainId: 432204, urls: ROUTESCAN(432204, "https://subnets.avax.network/dexalot") },
-      { network: "katana",     chainId: 747474, urls: ROUTESCAN(747474, "https://katanascan.com") },
-      { network: "plasma",     chainId: 9745,   urls: ROUTESCAN(9745,   "https://plasmascan.to") },
+      { network: "katana",     chainId: 747474, urls: ETHERSCAN_V2(747474, "https://katanascan.com") },
+      { network: "plasma",     chainId: 9745,   urls: ETHERSCAN_V2(9745,   "https://plasmascan.to") },
 
       // Unique verifiers
       {
         network: "abstract",
         chainId: 2741,
         urls: {
-          apiURL: "https://api.abscan.org/api",
+          apiURL: "https://api.etherscan.io/v2/api?chainid=2741",
           browserURL: "https://abscan.org",
         },
       },
