@@ -10,6 +10,8 @@
 - Ops sans headroom frontend laissées à 0 (SWAP_*, CREATE_TOKEN, atomiques) — sinon revert
 - Fix .env : SEI_MAINNET_RPC_URL dédupliqué → publicnode (drpc 500)
 - Reste (indépendant) : CSP enforce, Dependabot (Tokens 9, DEX 15), gate /lending DEX, révocation secrets
+- Suite même jour : CSP collector `/api/csp-report` + report-uri déployé (enforce après collecte) ; Dependabot Tokens 9/9 + DEX 15/15 corrigés (pins) ; /lending gaté Coming Soon ; purge clés bash_history local+VPS
+- Vérif source explorers B : `scripts/deploy/verifyB.ts`, **19/20 chaînes / 152 contrats vérifiés** (Etherscan V2 + Blockscout flare ; katana/plasma/abstract basculés V2 dans hardhat.config) ; cronos = Cloudflare bloque l'API → vérif via UI si voulu
 
 ## 2026-07-20 — Chantier A : MagnetaServiceFee déployé (20 chaînes)
 - Runbook du redeploy native-fee : `docs/native-fee-redeploy-runbook-2026-07-20.md` (scope A léger vs B lourd Gateway-cascade)
