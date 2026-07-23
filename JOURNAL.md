@@ -18,6 +18,9 @@
 - PIÈGE : leur backend échoue sur l'input standard-json complet (110 sources) → **élaguer au graphe d'imports** ; 7/8 Pass-Verified
 - MagnetaFactory : build à part (runs=1 + revertStrings=strip, squeeze 24KB) que leur pipeline ne reproduit pas → vérifié via **Sourcify exact_match** (creation+runtime, chain 25)
 - Bilan : source des contrats B publiquement vérifiée sur les 20 chaînes (155/155)
+- **Listener VPS re-pointé sur la couche B** (155 champs deployments/ VPS ← deployments-b) — le monitoring/indexation frais suivait encore l'ancien set
+- Remise en état listener (dégradé depuis des mois, préexistant) : RPC directs par chaîne (base=mainnet.base.org, polygon=quiknode, avax=officiel, bsc=rpc-bsc.48.club, sei=sei-apis, katana/cronos=officiels, plasma=plasma.drpc.org) — publicnode bloque les getLogs multi-adresses, drpc free les timeout, le proxy 4003 rejette les batches ethers (bug à fixer) ; checkpoints figés depuis mai avancés au tip (ère pré-B sans valeur) → 20/20 chaînes vertes, reste tip-race sei intermittente
+- Recommandation : clé dRPC payante = fix durable sei + robustesse globale ; fix batch-400 du rpc-proxy à faire
 
 ## 2026-07-20 — Chantier A : MagnetaServiceFee déployé (20 chaînes)
 - Runbook du redeploy native-fee : `docs/native-fee-redeploy-runbook-2026-07-20.md` (scope A léger vs B lourd Gateway-cascade)
