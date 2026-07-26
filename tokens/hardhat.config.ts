@@ -30,6 +30,22 @@ const config: HardhatUserConfig = {
                     evmVersion: "shanghai",
                 },
             },
+            // OpenZeppelin 5.6 raised ERC20Permit/EIP712 to ^0.8.24, so any
+            // contract pulling in permit needs this profile. evmVersion stays
+            // on shanghai deliberately: 0.8.24 defaults to cancun, whose
+            // TSTORE/MCOPY opcodes are not available on every one of the 20
+            // supported chains.
+            {
+                version: "0.8.24",
+                settings: {
+                    optimizer: {
+                        enabled: true,
+                        runs: 1,
+                    },
+                    viaIR: true,
+                    evmVersion: "cancun",
+                },
+            },
         ],
         overrides: {
             // Legacy contracts keep runs=200 for cheaper runtime gas — they

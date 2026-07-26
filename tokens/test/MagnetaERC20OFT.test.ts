@@ -10,6 +10,21 @@ import {
 } from "../typechain-types";
 
 /**
+ * MagnetaOFTStandardFactory no longer contains `new MagnetaERC20OFT(...)` —
+ * the creation code lives in MagnetaOFTTokenDeployer so the factory stays
+ * under EIP-170. Every factory therefore needs its deployer wired once before
+ * it can create anything.
+ */
+async function wireTokenDeployer(factory: any) {
+    const Deployer = await ethers.getContractFactory("MagnetaOFTTokenDeployer");
+    const deployer = await Deployer.deploy(await factory.getAddress());
+    await deployer.waitForDeployment();
+    await factory.setTokenDeployer(await deployer.getAddress());
+    return deployer;
+}
+
+
+/**
  * Sprint 1 tests — verify the new OFT-compatible token templates behave
  * identically to the legacy ones for local features (mint, blacklist, tax,
  * pause, revoke flags, AutoLiquidity tax). Real cross-chain end-to-end is
@@ -656,6 +671,7 @@ describe("MagnetaOFTStandardFactory — Standard OFT template", function () {
         const FactoryC = await ethers.getContractFactory("MagnetaOFTStandardFactory");
         factory = await FactoryC.deploy(treasury.address, lzEndpoint);
         await factory.waitForDeployment();
+        await wireTokenDeployer(factory);
     });
 
     it("rejects deployment with zero LZ endpoint", async function () {

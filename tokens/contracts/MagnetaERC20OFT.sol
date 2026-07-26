@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.20;
+pragma solidity 0.8.24;
 
 import { OFT } from "@layerzerolabs/oft-evm/contracts/OFT.sol";
 import { ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import { ERC20Burnable } from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Burnable.sol";
 import { ERC20Pausable } from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Pausable.sol";
+import { MagnetaERC20Permit } from "./MagnetaERC20Permit.sol";
 import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 
 /// @title MagnetaERC20OFT
@@ -19,7 +20,7 @@ import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 ///         This is a deliberate departure from the legacy Ownable2Step pattern
 ///         because LZ peer wiring in a 19-chain mesh would otherwise require
 ///         342 acceptOwnership calls per token launch.
-contract MagnetaERC20OFT is OFT, ERC20Burnable, ERC20Pausable {
+contract MagnetaERC20OFT is OFT, ERC20Burnable, ERC20Pausable, MagnetaERC20Permit {
     // ─── Revoke flags (one-way switches) ────────────────────────────────────
 
     bool public revokeUpdateEnabled;
@@ -144,6 +145,7 @@ contract MagnetaERC20OFT is OFT, ERC20Burnable, ERC20Pausable {
     )
         OFT(name_, symbol_, _lzEndpoint, initialOwner)
         Ownable(initialOwner)
+        MagnetaERC20Permit(name_)
     {
         if (totalSupply_ > 0) {
             _mint(initialOwner, totalSupply_);

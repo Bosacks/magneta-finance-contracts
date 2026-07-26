@@ -1,9 +1,27 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.20;
+pragma solidity 0.8.24;
 
-import "./MagnetaERC20OFT.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+
+/// @dev Declared inline rather than imported from MagnetaOFTTokenDeployer.sol
+///      on purpose: importing that file would drag MagnetaERC20OFT's creation
+///      code back into this factory's bytecode, which is the exact weight the
+///      split exists to remove.
+interface IMagnetaOFTTokenDeployer {
+    function deployToken(
+        string memory name_,
+        string memory symbol_,
+        string memory tokenURI_,
+        uint256 totalSupply_,
+        address initialOwner,
+        bool revokeUpdate,
+        bool revokeFreeze,
+        bool revokeMint,
+        address lzEndpoint,
+        address tokenOpsModule
+    ) external returns (address);
+}
 
 /**
  * @title MagnetaOFTStandardFactory
@@ -54,6 +72,16 @@ contract MagnetaOFTStandardFactory is Ownable, ReentrancyGuard {
     ///         the Magneta-managed flow.
     address internal tokenOpsModule;
 
+    /// @notice Contract that actually runs `new MagnetaERC20OFT(...)`.
+    ///         See MagnetaOFTTokenDeployer for why the deployment lives
+    ///         outside this factory. Wired once after both contracts exist
+    ///         (they reference each other), then frozen: re-pointing it would
+    ///         let a swapped-in deployer issue a different token behind the
+    ///         same factory address the frontend trusts.
+    address public tokenDeployer;
+
+    event TokenDeployerSet(address indexed deployer);
+
     // Per-creator + global token registries removed entirely. Off-chain
     // consumers MUST index TokenCreated events (`indexed creator`) from
     // this factory's deployment block onward. Storing the arrays on-chain
@@ -81,6 +109,8 @@ contract MagnetaOFTStandardFactory is Ownable, ReentrancyGuard {
     error RefundFailed();
     error WithdrawFailed();
     error NoFees();
+    error DeployerAlreadySet();
+    error DeployerNotSet();
 
     constructor(address _treasury, address _lzEndpoint) Ownable(msg.sender) {
         if (_treasury == address(0) || _lzEndpoint == address(0)) revert ZeroAddress();
@@ -106,6 +136,17 @@ contract MagnetaOFTStandardFactory is Ownable, ReentrancyGuard {
         tokenOpsModule = _module;
     }
 
+    /// @notice Wire the MagnetaOFTTokenDeployer. Settable exactly once —
+    ///         the frontend trusts this factory address, so an owner able to
+    ///         swap the deployer later could silently change what users
+    ///         actually receive when they pay the create fee.
+    function setTokenDeployer(address _deployer) external onlyOwner {
+        if (_deployer == address(0)) revert ZeroAddress();
+        if (tokenDeployer != address(0)) revert DeployerAlreadySet();
+        tokenDeployer = _deployer;
+        emit TokenDeployerSet(_deployer);
+    }
+
     /// @dev Common deploy + register helper used by both the public paid
     ///      entry and the cross-chain entry. Inlined-by-optimizer in practice
     ///      but reads as a single intent in source.
@@ -120,7 +161,12 @@ contract MagnetaOFTStandardFactory is Ownable, ReentrancyGuard {
         bool revokeMint,
         string memory tokenType
     ) private returns (address tokenAddress) {
-        MagnetaERC20OFT token = new MagnetaERC20OFT(
+        // Deployment is delegated so this factory does not carry
+        // MagnetaERC20OFT's creation code (see MagnetaOFTTokenDeployer).
+        address deployer_ = tokenDeployer;
+        if (deployer_ == address(0)) revert DeployerNotSet();
+
+        tokenAddress = IMagnetaOFTTokenDeployer(deployer_).deployToken(
             name,
             symbol,
             tokenURI,
@@ -132,7 +178,6 @@ contract MagnetaOFTStandardFactory is Ownable, ReentrancyGuard {
             lzEndpoint,
             tokenOpsModule
         );
-        tokenAddress = address(token);
 
         emit TokenCreated(tokenAddress, creatorAddr, tokenType, name, symbol);
 

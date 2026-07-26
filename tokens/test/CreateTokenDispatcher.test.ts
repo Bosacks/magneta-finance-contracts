@@ -8,6 +8,21 @@ import {
 } from "../typechain-types";
 
 /**
+ * MagnetaOFTStandardFactory no longer contains `new MagnetaERC20OFT(...)` —
+ * the creation code lives in MagnetaOFTTokenDeployer so the factory stays
+ * under EIP-170. Every factory therefore needs its deployer wired once before
+ * it can create anything.
+ */
+async function wireTokenDeployer(factory: any) {
+    const Deployer = await ethers.getContractFactory("MagnetaOFTTokenDeployer");
+    const deployer = await Deployer.deploy(await factory.getAddress());
+    await deployer.waitForDeployment();
+    await factory.setTokenDeployer(await deployer.getAddress());
+    return deployer;
+}
+
+
+/**
  * Sprint 9.6 — Tests for CreateTokenDispatcher.
  *
  * Validates:
@@ -50,6 +65,7 @@ describe("CreateTokenDispatcher", function () {
         const Std = await ethers.getContractFactory("MagnetaOFTStandardFactory");
         stdFactory = await Std.deploy(owner.address, endpoint);
         await stdFactory.waitForDeployment();
+        await wireTokenDeployer(stdFactory);
 
         const Al = await ethers.getContractFactory("MagnetaOFTAutoLiquidityFactory");
         alFactory = await Al.deploy(owner.address, endpoint);
@@ -79,6 +95,7 @@ describe("CreateTokenDispatcher", function () {
             const Std = await ethers.getContractFactory("MagnetaOFTStandardFactory");
             const newStd = await Std.deploy(owner.address, endpoint);
             await newStd.waitForDeployment();
+            await wireTokenDeployer(newStd);
             const newAddr = await newStd.getAddress();
 
             await expect(dispatcher.connect(owner).setStandardFactory(newAddr))

@@ -8,6 +8,21 @@ import {
 } from "../typechain-types";
 
 /**
+ * MagnetaOFTStandardFactory no longer contains `new MagnetaERC20OFT(...)` —
+ * the creation code lives in MagnetaOFTTokenDeployer so the factory stays
+ * under EIP-170. Every factory therefore needs its deployer wired once before
+ * it can create anything.
+ */
+async function wireTokenDeployer(factory: any) {
+    const Deployer = await ethers.getContractFactory("MagnetaOFTTokenDeployer");
+    const deployer = await Deployer.deploy(await factory.getAddress());
+    await deployer.waitForDeployment();
+    await factory.setTokenDeployer(await deployer.getAddress());
+    return deployer;
+}
+
+
+/**
  * Sprint 9.7 — Tests for CreateTokenDispatcherV3.
  *
  * Adds `createTokenAtomic` on top of the v2 surface. Tests focus on:
@@ -70,6 +85,7 @@ describe("CreateTokenDispatcherV3", function () {
         const Std = await ethers.getContractFactory("MagnetaOFTStandardFactory");
         stdFactory = await Std.deploy(owner.address, endpoint);
         await stdFactory.waitForDeployment();
+        await wireTokenDeployer(stdFactory);
 
         const Al = await ethers.getContractFactory("MagnetaOFTAutoLiquidityFactory");
         alFactory = await Al.deploy(owner.address, endpoint);
