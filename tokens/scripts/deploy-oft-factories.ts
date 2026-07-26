@@ -28,6 +28,7 @@ import { ethers, network, run } from "hardhat";
 import * as fs from "fs";
 import * as path from "path";
 import { CHAIN_CONFIG } from "./chainConfig";
+import { verifyOnDeploy } from "./lib/verifyOnDeploy";
 
 interface OFTDeployment {
   network: string;
@@ -77,6 +78,12 @@ async function main() {
   const stdAddr = await stdFactory.getAddress();
   console.log(`  → ${stdAddr}`);
 
+  // Verify NOW, while the artifacts that produced this transaction are still
+  // the ones on disk. Doing it in a later pass means reproducing the exact
+  // dependency tree — see verifyOnDeploy's docstring for how that went last
+  // time. Non-fatal: the contract is deployed either way.
+  await verifyOnDeploy("MagnetaOFTStandardFactory", stdAddr, [cfg.treasury, cfg.lzEndpoint]);
+
   // ─── Persist ────────────────────────────────────────────────────────────
   const result: OFTDeployment = {
     network: network.name,
@@ -104,8 +111,7 @@ async function main() {
   console.log(`   pnpm hardhat run scripts/deploy/deployTokenCreation.ts --network ${network.name}`);
   console.log("2. After all chains deployed, sign Safe batch:");
   console.log(`   safe/<chain>-OFTSetup-batch.json`);
-  console.log("3. Verify contract on Etherscan:");
-  console.log(`   pnpm hardhat verify --network ${network.name} ${stdAddr} ${cfg.treasury} ${cfg.lzEndpoint}`);
+  console.log("3. Explorer verification ran automatically above — check its line.");
 }
 
 main().catch((err) => {

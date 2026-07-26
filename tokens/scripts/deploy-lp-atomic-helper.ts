@@ -32,6 +32,7 @@
 import { ethers, network, run } from "hardhat";
 import * as fs from "fs";
 import * as path from "path";
+import { verifyOnDeploy } from "./lib/verifyOnDeploy";
 
 interface HelperDeployment {
   network: string;
@@ -82,6 +83,7 @@ async function main() {
   const helper = await Helper.deploy();
   await helper.waitForDeployment();
   const addr = await helper.getAddress();
+  await verifyOnDeploy("MagnetaLpAtomicHelper", addr, []);
   console.log(`  → ${addr}`);
 
   // ─── Persist deployment record ───────────────────────────────────────────
