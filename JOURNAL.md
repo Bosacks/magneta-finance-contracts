@@ -7,7 +7,7 @@
 - Rescan des 4 adaptateurs UniV2 (audit `2693bb55`) : le panel a trouvé que le correctif fee-on-transfer du matin n'avait été posé que sur les chemins liquidité, **pas sur les swaps** — `swapExactTokensForTokens`/`ForETH` pullaient encore `amountIn` brut (F-1 HIGH)
 - `pullMeasured` étendu aux 5 points d'entrée des 4 adaptateurs ; plafonné à `amount` (F-4) contre les tokens réflexifs qui créditent en cours d'appel
 - 2 tests ajoutés, chacun **vérifié en échec correctif retiré** (100e18≠95e18 ; 1100e18>1000e18) ; 49/49 invariants + 8 durcissement verts (`f401f9a`)
-- Dependabot 20→0 en deux passes (`9e69a78`, `48e5c96`) : tar 7.5.22 (critique patchée seulement en .19), axios, adm-zip, fast-uri, immutable, puis brace-expansion 1.x/2.x — nouveaux avis publiés **pendant** la session, contre les copies que le premier override laissait volontairement de côté
+- Dependabot 20→0 en deux passes (`9e69a78`, `f1a93ef`) : tar 7.5.22 (critique patchée seulement en .19), axios, adm-zip, fast-uri, immutable, puis brace-expansion 1.x/2.x — nouveaux avis publiés **pendant** la session, contre les copies que le premier override laissait volontairement de côté
 - adm-zip est sur le chemin de téléchargement de solc → vérifié en compile cache vidé, pas incrémental (124 fichiers, 511+171 tests)
 - Constat : le rescan servait à valider le pipeline ; il a surtout relu du code neuf jamais relu — et y a trouvé un vrai trou
 
