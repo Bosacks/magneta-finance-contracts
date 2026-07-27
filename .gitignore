@@ -21,3 +21,6 @@ packages/*/package-lock.json
 # Sub-package lockfiles superseded by the root pnpm workspace lock
 tokens/package-lock.json
 tokens/pnpm-lock.yaml
+
+# Rapports de scan Sentinelleai (exports locaux, jamais versionnés)
+*Sentinelleai*.pdf
