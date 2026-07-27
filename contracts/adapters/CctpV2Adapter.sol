@@ -102,9 +102,22 @@ contract CctpV2Adapter {
 
     error ZeroAddress();
     error ZeroAmount();
+    /// @notice The messenger address holds no code.
+    error MessengerNotAContract(address messenger);
+    /// @notice The messenger did not consume the approval, so nothing was burnt.
+    error BurnDidNotConsumeApproval();
 
+    /// @param _v2Messenger Circle's TokenMessengerV2 on this chain.
+    /// @dev Requires actual code at the address, not merely a non-zero value.
+    ///      A call to an EOA SUCCEEDS and returns empty: with `_v2Messenger`
+    ///      pointing at one, `depositForBurn` would pull the caller's USDC,
+    ///      grant that EOA an allowance, return normally and emit
+    ///      V2BurnForwarded announcing a burn that never happened — while the
+    ///      EOA keeps a live allowance over the pulled funds. A deployment
+    ///      typo is enough. (Sentinelleai panel, 2026-07-27.)
     constructor(address _v2Messenger) {
         if (_v2Messenger == address(0)) revert ZeroAddress();
+        if (_v2Messenger.code.length == 0) revert MessengerNotAContract(_v2Messenger);
         v2Messenger = ITokenMessengerV2(_v2Messenger);
     }
 
@@ -142,6 +155,15 @@ contract CctpV2Adapter {
             0,                     // maxFee — no fast-finality fee
             FINALITY_STANDARD      // standard ~13-min finality
         );
+
+        // A real messenger pulls the exact allowance we just granted. Anything
+        // left means the burn did not happen, so refuse to emit an event
+        // claiming it did — and never leave a standing allowance behind, which
+        // is what turns a silent no-op into a theft.
+        if (IERC20(burnToken).allowance(address(this), address(v2Messenger)) != 0) {
+            IERC20(burnToken).forceApprove(address(v2Messenger), 0);
+            revert BurnDidNotConsumeApproval();
+        }
 
         emit V2BurnForwarded(msg.sender, burnToken, destinationDomain, amount, mintRecipient);
         return 0;

@@ -4,6 +4,7 @@ pragma solidity ^0.8.20;
 import { IERC20 }            from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { SafeERC20 }         from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { ReentrancyGuard }   from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import "./AdapterPull.sol";
 
 /// @title MoeRouterAdapter
 /// @notice Thin adapter exposing the Uniswap V2 router interface (WETH, addLiquidityETH, ...)
@@ -52,6 +53,7 @@ interface IMoeRouter {
 
 contract MoeRouterAdapter is ReentrancyGuard {
     using SafeERC20 for IERC20;
+    using AdapterPull for IERC20;
 
     IMoeRouter public immutable moe;
     address public immutable factory;
@@ -71,15 +73,19 @@ contract MoeRouterAdapter is ReentrancyGuard {
         uint256 amountAMin, uint256 amountBMin,
         address to, uint256 deadline
     ) external nonReentrant returns (uint256 amountA, uint256 amountB, uint256 liquidity) {
-        IERC20(tokenA).safeTransferFrom(msg.sender, address(this), amountADesired);
-        IERC20(tokenB).safeTransferFrom(msg.sender, address(this), amountBDesired);
-        IERC20(tokenA).forceApprove(address(moe), amountADesired);
-        IERC20(tokenB).forceApprove(address(moe), amountBDesired);
+        // Forward what actually ARRIVED, not what was asked for: a
+        // fee-on-transfer token delivers less, and approving the requested
+        // figure would have the router pull more than this call brought in.
+        uint256 gotA = IERC20(tokenA).pullMeasured(msg.sender, amountADesired);
+        uint256 gotB = IERC20(tokenB).pullMeasured(msg.sender, amountBDesired);
+        IERC20(tokenA).forceApprove(address(moe), gotA);
+        IERC20(tokenB).forceApprove(address(moe), gotB);
         (amountA, amountB, liquidity) = moe.addLiquidity(
-            tokenA, tokenB, amountADesired, amountBDesired, amountAMin, amountBMin, to, deadline
+            tokenA, tokenB, gotA, gotB, amountAMin, amountBMin, to, deadline
         );
-        if (amountADesired > amountA) IERC20(tokenA).safeTransfer(msg.sender, amountADesired - amountA);
-        if (amountBDesired > amountB) IERC20(tokenB).safeTransfer(msg.sender, amountBDesired - amountB);
+        // Refund against what was received, so the adapter stays balance-neutral.
+        if (gotA > amountA) IERC20(tokenA).safeTransfer(msg.sender, gotA - amountA);
+        if (gotB > amountB) IERC20(tokenB).safeTransfer(msg.sender, gotB - amountB);
         IERC20(tokenA).forceApprove(address(moe), 0);
         IERC20(tokenB).forceApprove(address(moe), 0);
     }
@@ -89,12 +95,16 @@ contract MoeRouterAdapter is ReentrancyGuard {
         uint256 amountTokenMin, uint256 amountETHMin,
         address to, uint256 deadline
     ) external payable nonReentrant returns (uint256 amountToken, uint256 amountETH, uint256 liquidity) {
-        IERC20(token).safeTransferFrom(msg.sender, address(this), amountTokenDesired);
-        IERC20(token).forceApprove(address(moe), amountTokenDesired);
+        // Token leg: same measured-pull rule as addLiquidity — the native leg
+
+        // is msg.value and needs no measuring.
+
+        uint256 gotToken = IERC20(token).pullMeasured(msg.sender, amountTokenDesired);
+        IERC20(token).forceApprove(address(moe), gotToken);
         (amountToken, amountETH, liquidity) = moe.addLiquidityNative{value: msg.value}(
-            token, amountTokenDesired, amountTokenMin, amountETHMin, to, deadline
+            token, gotToken, amountTokenMin, amountETHMin, to, deadline
         );
-        if (amountTokenDesired > amountToken) IERC20(token).safeTransfer(msg.sender, amountTokenDesired - amountToken);
+        if (gotToken > amountToken) IERC20(token).safeTransfer(msg.sender, gotToken - amountToken);
         IERC20(token).forceApprove(address(moe), 0);
 
         // Refund only the unused msg.value (Sentinelle HIGH SC03 — donation-drain).
