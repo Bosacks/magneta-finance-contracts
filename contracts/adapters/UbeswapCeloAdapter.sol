@@ -139,9 +139,14 @@ contract UbeswapCeloAdapter is ReentrancyGuard {
         uint256 amountIn, uint256 amountOutMin,
         address[] calldata path, address to, uint256 deadline
     ) external nonReentrant returns (uint256[] memory amounts) {
-        IERC20(path[0]).safeTransferFrom(msg.sender, address(this), amountIn);
-        IERC20(path[0]).forceApprove(address(ube), amountIn);
-        amounts = ube.swapExactTokensForTokens(amountIn, amountOutMin, path, to, deadline);
+        // Same measured-pull rule as the liquidity paths. Approving and
+        // instructing the router to spend amountIn when a fee-on-transfer
+        // token delivered less lets the router take the shortfall out of any
+        // residual balance this adapter holds — the remediation applied to
+        // addLiquidity but originally missed here (Sentinelleai F-1).
+        uint256 gotIn = IERC20(path[0]).pullMeasured(msg.sender, amountIn);
+        IERC20(path[0]).forceApprove(address(ube), gotIn);
+        amounts = ube.swapExactTokensForTokens(gotIn, amountOutMin, path, to, deadline);
         IERC20(path[0]).forceApprove(address(ube), 0);
     }
 
@@ -165,9 +170,14 @@ contract UbeswapCeloAdapter is ReentrancyGuard {
         address[] calldata path, address to, uint256 deadline
     ) external nonReentrant returns (uint256[] memory amounts) {
         require(path.length >= 2 && path[path.length - 1] == CELO, "path must end with CELO");
-        IERC20(path[0]).safeTransferFrom(msg.sender, address(this), amountIn);
-        IERC20(path[0]).forceApprove(address(ube), amountIn);
-        amounts = ube.swapExactTokensForTokens(amountIn, amountOutMin, path, address(this), deadline);
+        // Same measured-pull rule as the liquidity paths. Approving and
+        // instructing the router to spend amountIn when a fee-on-transfer
+        // token delivered less lets the router take the shortfall out of any
+        // residual balance this adapter holds — the remediation applied to
+        // addLiquidity but originally missed here (Sentinelleai F-1).
+        uint256 gotIn = IERC20(path[0]).pullMeasured(msg.sender, amountIn);
+        IERC20(path[0]).forceApprove(address(ube), gotIn);
+        amounts = ube.swapExactTokensForTokens(gotIn, amountOutMin, path, address(this), deadline);
         IERC20(path[0]).forceApprove(address(ube), 0);
 
         uint256 out = amounts[amounts.length - 1];

@@ -148,9 +148,14 @@ contract TraderJoeAvaxAdapter is ReentrancyGuard {
         uint256 amountIn, uint256 amountOutMin,
         address[] calldata path, address to, uint256 deadline
     ) external nonReentrant returns (uint256[] memory amounts) {
-        IERC20(path[0]).safeTransferFrom(msg.sender, address(this), amountIn);
-        IERC20(path[0]).forceApprove(address(joe), amountIn);
-        amounts = joe.swapExactTokensForTokens(amountIn, amountOutMin, path, to, deadline);
+        // Same measured-pull rule as the liquidity paths. Approving and
+        // instructing the router to spend amountIn when a fee-on-transfer
+        // token delivered less lets the router take the shortfall out of any
+        // residual balance this adapter holds — the remediation applied to
+        // addLiquidity but originally missed here (Sentinelleai F-1).
+        uint256 gotIn = IERC20(path[0]).pullMeasured(msg.sender, amountIn);
+        IERC20(path[0]).forceApprove(address(joe), gotIn);
+        amounts = joe.swapExactTokensForTokens(gotIn, amountOutMin, path, to, deadline);
         IERC20(path[0]).forceApprove(address(joe), 0);
     }
 
@@ -165,9 +170,14 @@ contract TraderJoeAvaxAdapter is ReentrancyGuard {
         uint256 amountIn, uint256 amountOutMin,
         address[] calldata path, address to, uint256 deadline
     ) external nonReentrant returns (uint256[] memory amounts) {
-        IERC20(path[0]).safeTransferFrom(msg.sender, address(this), amountIn);
-        IERC20(path[0]).forceApprove(address(joe), amountIn);
-        amounts = joe.swapExactTokensForAVAX(amountIn, amountOutMin, path, to, deadline);
+        // Same measured-pull rule as the liquidity paths. Approving and
+        // instructing the router to spend amountIn when a fee-on-transfer
+        // token delivered less lets the router take the shortfall out of any
+        // residual balance this adapter holds — the remediation applied to
+        // addLiquidity but originally missed here (Sentinelleai F-1).
+        uint256 gotIn = IERC20(path[0]).pullMeasured(msg.sender, amountIn);
+        IERC20(path[0]).forceApprove(address(joe), gotIn);
+        amounts = joe.swapExactTokensForAVAX(gotIn, amountOutMin, path, to, deadline);
         IERC20(path[0]).forceApprove(address(joe), 0);
     }
 
