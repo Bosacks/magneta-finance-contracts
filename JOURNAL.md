@@ -10,6 +10,7 @@
 - `MagnetaPool.t.sol` : l'invariant n'avait **aucune cible déclarée**, le fuzzer usurpait l'adresse du pool pour appeler `TokenB.transfer` et sortir 2077 wei sans toucher aux réserves. `targetContract` + `targetSender` (sinon campagne verte sans rien exercer)
 - **DÉFAUT PRODUCTION : `defaultRouter` de Flare n'a aucun code** (`0x0ECAA009…23e8`, vérifié on-chain avec USDC.e en contrôle positif). Les `LPModule` et `SwapModule` déployés le retournent tous deux depuis `router()`, qui est `immutable` → **LP et swap sur Flare échouent aujourd'hui**, seul un redéploiement corrige
 - `deployAll` refuse désormais de déployer si une adresse de la config n'a pas de bytecode sur la chaîne cible (vérifié : Flare bloqué, Base passe) — la valeur devient un argument de constructeur permanent, pas un réglage corrigeable
+- Bonne adresse Flare écrite : `UniswapV2Router02` `0x4a1E5A90…72a1e` (doc SparkDEX fournie par Dominique), vérifiée on-chain — code présent, `factory()` = le V2Factory de la doc, `WETH()` de symbole WFLR. **Ne corrige que les déploiements futurs**
 - `_refundDust` : le volet token de REMOVE_LP remboursait le **solde entier** là où le volet natif est borné par `nativeBefore` ; borné par instantané, test validé en replantant l'ancienne ligne (échec `0 != 7e17`)
 - Actions GitHub pinnées par SHA (4 repos)
 
