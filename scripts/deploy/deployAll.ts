@@ -20,7 +20,14 @@
 import { ethers, network } from "hardhat";
 import fs from "node:fs";
 import path from "node:path";
-import { CHAIN_CONFIG, ChainConfig, FEE_VAULT, PAUSE_GUARDIAN, RELAYER_PAUSER } from "./chainConfig";
+import {
+  CHAIN_CONFIG,
+  ChainConfig,
+  FEE_VAULT,
+  PAUSE_GUARDIAN,
+  RELAYER_PAUSER,
+  assertConfigAddressesHaveCode,
+} from "./chainConfig";
 
 interface DeployResult {
   network: string;
@@ -57,6 +64,11 @@ async function main() {
   if (balance === 0n) {
     throw new Error("Deployer has 0 balance — fund it first");
   }
+  // Before anything is constructed: every address this config points at must
+  // hold code on THIS chain. `router` is immutable in LPModule and SwapModule,
+  // so a wrong value here is not a configuration mistake to be corrected later —
+  // it is permanent until those contracts are redeployed. Flare shipped that way.
+  await assertConfigAddressesHaveCode(ethers.provider, chainId, cfg);
 
   // Deploy capability flags — each gates a group of dependent contracts.
   const deployCrossChain = cfg.lzEndpoint !== null && cfg.lzEid !== null;
