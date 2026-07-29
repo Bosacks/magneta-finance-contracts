@@ -162,15 +162,17 @@ export const CHAIN_CONFIG: Record<number, ChainConfig> = {
     lzEid: 30295,
     cctpDomain: null,
     usdc: "0xFbDa5F676cB37624f28265A144A48B0d6e87d3b6", // USDC.e (Stargate bridged) — verified on-chain 2026-04-23
-    // BROKEN — DO NOT REDEPLOY FLARE WITH THIS VALUE.
-    // eth_getCode returns 0x for this address on Flare (chainId 14), confirmed
-    // 2026-07-29 against flare-api.flare.network with USDC.e as a positive
-    // control. It was committed with no on-chain verification, and the already
-    // deployed LPModule (0x19fde032…224D) and SwapModule (0x984A1C2b…7eCC)
-    // both hold it in their `immutable router`, so LP and swap on Flare revert
-    // today. Replace with the real SparkDEX V2 router address, verified on
-    // chain, then redeploy both modules and re-register them in the Gateway.
-    defaultRouter: "0x0ECAA0096be73528Def68248e53B7C4C0CF923e8", // SparkDEX — NO CODE AT THIS ADDRESS
+    // SparkDEX UniswapV2Router02 — verified on-chain 2026-07-29 (flare-api.flare.network):
+    //   code present (17 763 bytes); factory() → 0x16b619B0…80A89, which matches
+    //   the V2Factory in SparkDEX's own docs; WETH() → 0x1d80c49b…f783d, symbol WFLR.
+    //
+    // Replaces 0x0ECAA0096be73528Def68248e53B7C4C0CF923e8, which had NO CODE on
+    // Flare and was committed with only a `// SparkDEX` comment. That dead value
+    // is baked into the `immutable router` of the already deployed LPModule
+    // (0x19fde032…224D) and SwapModule (0x984A1C2b…7eCC), so LP and swap on
+    // Flare revert until BOTH are redeployed with this address and re-registered
+    // in the Gateway. Fixing this line only fixes future deploys.
+    defaultRouter: "0x4a1E5A90e9943467FAd1acea1E7F0e5e88472a1e",
     router: "uniV2",
   },
   5000: { // Mantle
