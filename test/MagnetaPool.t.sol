@@ -54,6 +54,21 @@ contract MagnetaPoolInvariantTest is Test {
         tokenA.approve(address(pool), type(uint256).max);
         tokenB.approve(address(pool), type(uint256).max);
         vm.stopPrank();
+
+        // Confine the invariant fuzzer to the contract under test. Without this
+        // it also targets TokenA/TokenB and may pick ANY address as msg.sender —
+        // including the pool's own. It did exactly that: sending
+        // `TokenB.transfer(victim, 2077)` as MagnetaPool moved 2077 wei out
+        // without touching reserves, and I2 failed on a sequence the pool has no
+        // code path to produce. The bug was in the harness, not the AMM.
+        targetContract(address(pool));
+
+        // Senders are restricted to the two funded, approved actors. Left
+        // unrestricted, random senders hold neither balance nor approval, every
+        // call reverts, and the invariant passes without exercising anything —
+        // a green campaign that proves nothing.
+        targetSender(LP);
+        targetSender(TRADER);
     }
 
     /// I1: k never decreases across a swap.

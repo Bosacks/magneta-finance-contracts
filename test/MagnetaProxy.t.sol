@@ -60,6 +60,16 @@ contract MagnetaProxyTest is Test {
         router     = new MockSwapRouter();
         failRouter = new FailingSwapRouter();
 
+        // ce701c6 replaced the old zero-address checks with spender/target
+        // allowlists, so every happy path now needs its router listed. Both
+        // roles are granted because MockSwapRouter is also the spender it
+        // approves, mirroring how a real router approves itself.
+        address[] memory routers = new address[](2);
+        routers[0] = address(router);
+        routers[1] = address(failRouter);
+        proxy.setAllowedSpenders(routers, true);
+        proxy.setAllowedSwapTargets(routers, true);
+
         // Fund alice
         tokenIn.mint(alice, 10_000e18);
     }
@@ -137,10 +147,14 @@ contract MagnetaProxyTest is Test {
         vm.stopPrank();
     }
 
+    /// @dev The zero address can never be allowlisted (`setAllowedSpender`
+    ///      rejects it), so it is caught by the allowlist rather than by a
+    ///      dedicated zero check — which is why the expected message changed
+    ///      with ce701c6.
     function test_executeSwap_zeroSpender_reverts() public {
         vm.startPrank(alice);
         tokenIn.approve(address(proxy), 1000e18);
-        vm.expectRevert("Invalid spender");
+        vm.expectRevert("MagnetaProxy: spender not allowed");
         proxy.executeSwap(address(tokenIn), address(tokenOut), 1000e18, 0, address(0), address(router), "");
         vm.stopPrank();
     }
@@ -148,8 +162,41 @@ contract MagnetaProxyTest is Test {
     function test_executeSwap_zeroTarget_reverts() public {
         vm.startPrank(alice);
         tokenIn.approve(address(proxy), 1000e18);
-        vm.expectRevert("Invalid target");
+        vm.expectRevert("MagnetaProxy: target not allowed");
         proxy.executeSwap(address(tokenIn), address(tokenOut), 1000e18, 0, address(router), address(0), "");
+        vm.stopPrank();
+    }
+
+    /// @dev The property the allowlist actually exists for: an arbitrary
+    ///      attacker-supplied spender is refused, not merely address(0). Nothing
+    ///      covered this — the zero-address cases pass for a different reason
+    ///      (zero can never be listed), so they would keep passing even if the
+    ///      allowlist were reduced to a zero check.
+    function test_executeSwap_unlistedSpender_reverts() public {
+        address rogue = makeAddr("rogueSpender");
+        vm.startPrank(alice);
+        tokenIn.approve(address(proxy), 1000e18);
+        vm.expectRevert("MagnetaProxy: spender not allowed");
+        proxy.executeSwap(address(tokenIn), address(tokenOut), 1000e18, 0, rogue, address(router), "");
+        vm.stopPrank();
+    }
+
+    function test_executeSwap_unlistedTarget_reverts() public {
+        address rogue = makeAddr("rogueTarget");
+        vm.startPrank(alice);
+        tokenIn.approve(address(proxy), 1000e18);
+        vm.expectRevert("MagnetaProxy: target not allowed");
+        proxy.executeSwap(address(tokenIn), address(tokenOut), 1000e18, 0, address(router), rogue, "");
+        vm.stopPrank();
+    }
+
+    /// @dev De-listing must take effect: a previously allowed router loses access.
+    function test_executeSwap_delistedSpender_reverts() public {
+        proxy.setAllowedSpender(address(router), false);
+        vm.startPrank(alice);
+        tokenIn.approve(address(proxy), 1000e18);
+        vm.expectRevert("MagnetaProxy: spender not allowed");
+        proxy.executeSwap(address(tokenIn), address(tokenOut), 1000e18, 0, address(router), address(router), "");
         vm.stopPrank();
     }
 
