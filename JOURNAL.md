@@ -3,6 +3,16 @@
 > Fil chronologique des sessions. Anti-chronologique (plus récent en haut).
 > Voir `~/CLAUDE.md` pour la règle d'édition.
 
+## 2026-07-29 — 16:54 — Suite verte à nouveau, routeur Flare mort, garde pré-déploiement
+
+- **`forge` ne construisait plus le repo** : Foundry résout un seul solc et les sources Uniswap vendorisées imposent 0.5.16/0.6.6. Remède : `--skip "contracts/imports/*" --skip "contracts/uniswap/*"`. PIÈGE : `/usr/bin/forge` est un binaire « ZOE » sans rapport qui sort avec le code 0 — utiliser `~/.foundry/bin/forge`
+- **151→152 tests, 0 échec** (10 étaient rouges). `MagnetaProxy.t.sol` : le durcissement `ce701c6` avait ajouté les allowlists spender/target sans mettre à jour la fixture ; +3 tests couvrant la propriété réelle (spender quelconque non inscrit, pas seulement l'adresse zéro)
+- `MagnetaPool.t.sol` : l'invariant n'avait **aucune cible déclarée**, le fuzzer usurpait l'adresse du pool pour appeler `TokenB.transfer` et sortir 2077 wei sans toucher aux réserves. `targetContract` + `targetSender` (sinon campagne verte sans rien exercer)
+- **DÉFAUT PRODUCTION : `defaultRouter` de Flare n'a aucun code** (`0x0ECAA009…23e8`, vérifié on-chain avec USDC.e en contrôle positif). Les `LPModule` et `SwapModule` déployés le retournent tous deux depuis `router()`, qui est `immutable` → **LP et swap sur Flare échouent aujourd'hui**, seul un redéploiement corrige
+- `deployAll` refuse désormais de déployer si une adresse de la config n'a pas de bytecode sur la chaîne cible (vérifié : Flare bloqué, Base passe) — la valeur devient un argument de constructeur permanent, pas un réglage corrigeable
+- `_refundDust` : le volet token de REMOVE_LP remboursait le **solde entier** là où le volet natif est borné par `nativeBefore` ; borné par instantané, test validé en replantant l'ancienne ligne (échec `0 != 7e17`)
+- Actions GitHub pinnées par SHA (4 repos)
+
 ## 2026-07-27 — 17:02 — Rescan Sentinelleai : F-1 (ma remédiation incomplète) + 20→0 Dependabot
 - Rescan des 4 adaptateurs UniV2 (audit `2693bb55`) : le panel a trouvé que le correctif fee-on-transfer du matin n'avait été posé que sur les chemins liquidité, **pas sur les swaps** — `swapExactTokensForTokens`/`ForETH` pullaient encore `amountIn` brut (F-1 HIGH)
 - `pullMeasured` étendu aux 5 points d'entrée des 4 adaptateurs ; plafonné à `amount` (F-4) contre les tokens réflexifs qui créditent en cours d'appel
