@@ -62,6 +62,23 @@ contract PartialFillRouter {
         }
     }
 
+    /// @dev Burns the LP the module holds and pays the unwound side out to `to`,
+    ///      like the real router. Needed to reach LPModule's REMOVE_LP dust path.
+    function removeLiquidity(
+        address token,
+        address /*tokenB*/,
+        uint liquidity,
+        uint /*amountAMin*/,
+        uint /*amountBMin*/,
+        address to,
+        uint /*deadline*/
+    ) external returns (uint amountA, uint amountB) {
+        pair.burn(msg.sender, liquidity);
+        amountA = liquidity;
+        amountB = 0;
+        IERC20(token).safeTransfer(to, amountA);
+    }
+
     receive() external payable {}
 }
 
@@ -305,5 +322,96 @@ contract LPModuleReachabilityTest is LPModuleInvariantTest {
         assertEq(address(mod).balance, 0, "native dust left in module");
         assertEq(token.balanceOf(address(mod)), 0, "token dust left in module");
         assertEq(token.allowance(address(mod), address(router)), 0, "allowance left on router");
+    }
+
+    /// @dev REMOVE_LP used to refund `pair.balanceOf(module)` — the module's
+    ///      WHOLE pair-token balance — while the native side of the very same
+    ///      refund was bounded by `nativeBefore`. Any pair tokens the module
+    ///      already held (a stray donation, an aborted flow, a non-conforming
+    ///      router) were therefore handed to whoever called removeLP next.
+    ///
+    ///      Here a third party donates LP tokens to the module, then a caller
+    ///      runs REMOVE_LP. The donation must still be sitting in the module
+    ///      afterwards. Against the old code this assertion fails: the caller
+    ///      receives the donation on top of their own unwound liquidity.
+    function test_RemoveLp_DoesNotSweepPreexistingPairTokens() public {
+        // Seed a pair by creating liquidity once, so `getPair` is non-zero.
+        router.setFillBps(10_000);
+        _createLp(1e20, 1 ether);
+
+        MockLPToken pair = router.pair();
+        uint256 donation = 7e17;
+
+        // A stranger donates LP tokens straight to the module. Nothing in the
+        // protocol does this, which is exactly why nothing may spend them.
+        address stranger = makeAddr("stranger");
+        vm.prank(address(user));
+        pair.transfer(stranger, donation);
+        vm.prank(stranger);
+        pair.transfer(address(mod), donation);
+        assertEq(pair.balanceOf(address(mod)), donation, "setup: donation not in place");
+
+        // The user removes a small slice of their own liquidity.
+        uint256 liquidity = 1e17;
+        vm.prank(address(user));
+        pair.approve(address(mod), type(uint256).max);
+
+        uint256 callerPairBefore = pair.balanceOf(address(user));
+
+        LPModule.RemoveLPParams memory p = LPModule.RemoveLPParams({
+            token: address(token),
+            liquidity: liquidity,
+            amountTokenMin: 0,
+            amountETHMin: 0,
+            usdcFee: 0,
+            deadline: block.timestamp + 1000
+        });
+        IModule.Context memory ctx = IModule.Context({
+            caller: address(user),
+            originChainId: block.chainid,
+            feeVault: FEE_VAULT,
+            tokenSource: address(0)
+        });
+
+        gw.call(
+            address(mod),
+            ctx,
+            abi.encodePacked(uint8(IMagnetaGateway.OpType.REMOVE_LP), abi.encode(p))
+        );
+
+        assertEq(
+            pair.balanceOf(address(mod)),
+            donation,
+            "REMOVE_LP swept pair tokens the module already held"
+        );
+        assertEq(
+            pair.balanceOf(address(user)),
+            callerPairBefore - liquidity,
+            "caller received pair tokens that were not theirs"
+        );
+    }
+
+    function _createLp(uint256 tokenAmount, uint256 ethAmount) internal {
+        LPModule.CreateLPParams memory p = LPModule.CreateLPParams({
+            token: address(token),
+            tokenAmount: tokenAmount,
+            ethAmount: ethAmount,
+            amountTokenMin: 0,
+            amountETHMin: 0,
+            usdcFee: 0,
+            deadline: block.timestamp + 1000
+        });
+        IModule.Context memory ctx = IModule.Context({
+            caller: address(user),
+            originChainId: block.chainid,
+            feeVault: FEE_VAULT,
+            tokenSource: address(0)
+        });
+        vm.deal(address(gw), ethAmount);
+        gw.call{value: ethAmount}(
+            address(mod),
+            ctx,
+            abi.encodePacked(uint8(IMagnetaGateway.OpType.CREATE_LP), abi.encode(p))
+        );
     }
 }

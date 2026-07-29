@@ -220,6 +220,14 @@ contract LPModule is IModule, ReentrancyGuard, Ownable2Step {
         address pair = IUniswapV2Factory(IUniswapV2Router02(router).factory()).getPair(p.token, weth);
         require(pair != address(0), "no pair");
 
+        // Snapshot the module's pair-token balance BEFORE pulling, so the dust
+        // refund below can be bounded to what this operation actually left over.
+        // Refunding `balanceOf(this)` instead would hand the caller any
+        // pair tokens the module already held — from a donation, an aborted flow
+        // or a non-conforming router — which is the asymmetry an agent panel
+        // flagged on 2026-07-29: the native side of the same refund has always
+        // been bounded by `nativeBefore`, the token side was not.
+        uint256 pairBefore = IERC20(pair).balanceOf(address(this));
         _pullToken(ctx, pair, p.liquidity);
         uint256 nativeBefore = address(this).balance - msg.value;
         IERC20(pair).forceApprove(router, p.liquidity);
@@ -243,7 +251,8 @@ contract LPModule is IModule, ReentrancyGuard, Ownable2Step {
         // F7: sweep any pair-token / native leftover back to the caller. The
         // router sends the unwound token+native directly to ctx.caller, so dust
         // here is only a defensive measure against a non-conforming router.
-        _refundDust(ctx.caller, pair, IERC20(pair).balanceOf(address(this)), nativeBefore);
+        uint256 pairNow = IERC20(pair).balanceOf(address(this));
+        _refundDust(ctx.caller, pair, pairNow > pairBefore ? pairNow - pairBefore : 0, nativeBefore);
 
         emit LPRemoved(ctx.caller, p.token, p.liquidity, amountToken, amountETH);
         return abi.encode(amountToken, amountETH);
