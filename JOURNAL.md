@@ -3,6 +3,15 @@
 > Fil chronologique des sessions. Anti-chronologique (plus récent en haut).
 > Voir `~/CLAUDE.md` pour la règle d'édition.
 
+## 2026-07-30 — 3e passe — Arbitrages design + GUID + harnais hardhat (02d7257, 750a73f)
+
+- Arbitrages Dominique appliqués : BURN_LP officiellement gratuit (doc alignée sur le site), fee-on-transfer non supporté Bundler/LPModule (doc), bridge officiel (DVN + caps entrants) différé à son activation — CCTP+LI.FI en attendant
+- Oracle F-9 : `refreshPrice` = ré-ancrage progressif permissionless (1 pas de maxDeviation par bloc) — un -30 % légitime déverrouille en ~7 appels keeper ; `getAssetPrice` reste strict
+- GUID F-22/31 : `bytes32 guid` dans IModule.Context (LZ guid sur _lzReceive + fulfillValueOp, 0 en local) ; clés de replay LPAtomic/TokenCreation sur le guid — ⚠ **Gateway + TOUS les modules à redéployer EN BLOC** (sélecteur d'execute changé)
+- Harnais hardhat RACINE réparé : cause = chai 5 (ESM) résolu par pnpm pour la racine vs matchers chai ^4 — peer set du toolbox épinglé en dur (chai 4.5.0) ; **511 passing / 0 failing** (chaque fichier échouait avant)
+- Emprunt à exactement LTV : plus atteignable d'un wei d'arrondi (voulu, protocole-favorable, documenté)
+- Suites : forge 268/268, hardhat racine 511/511, tokens/ 189/189
+
 ## 2026-07-30 — 2e passe — Re-scans 15+16 traités (125d794)
 
 - Re-scans Dominique post-remédiation : les 27 fixes tiennent, aucun ne réapparaît
