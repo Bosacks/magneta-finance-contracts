@@ -38,11 +38,17 @@ import { CHAIN_CONFIG } from "./chainConfig";
 // OpType.CREATE_TOKEN = index 13 in the enum (0-indexed, last entry as of Sprint 2)
 const OP_CREATE_TOKEN = 13;
 
-// Path to the tokens repo's OFT deployments folder (sibling repo)
-const OFT_DEPLOYMENTS_DIR = path.resolve(
+// OFT deployments folder. Since the 2026-07-13 centralization the tokens
+// workspace lives inside THIS repo (tokens/deployments-oft); the old
+// sibling-repo path is kept as a fallback for chains deployed pre-migration.
+const OFT_DEPLOYMENTS_DIR_LOCAL = path.resolve(__dirname, "..", "..", "tokens", "deployments-oft");
+const OFT_DEPLOYMENTS_DIR_LEGACY = path.resolve(
   __dirname, "..", "..", "..",
   "magneta-finance-tokens", "contracts", "solidity", "deployments-oft",
 );
+const OFT_DEPLOYMENTS_DIR = fs.existsSync(OFT_DEPLOYMENTS_DIR_LOCAL)
+  ? OFT_DEPLOYMENTS_DIR_LOCAL
+  : OFT_DEPLOYMENTS_DIR_LEGACY;
 
 const REPO_ROOT      = path.join(__dirname, "..", "..");
 const DEPLOY_DIR     = path.join(REPO_ROOT, "deployments");
@@ -95,10 +101,15 @@ async function main() {
   }
   const chainDeploy = JSON.parse(fs.readFileSync(chainPath, "utf-8"));
   const gatewayAddr  = chainDeploy.contracts?.MagnetaGateway;
-  const safeAddr     = chainDeploy.gnosisSafe;
+  // Testnets have no Safe — ownership stays with the deployer EOA there.
+  const isTestnet = network.name.toLowerCase().includes("sepolia") || network.name.toLowerCase().includes("testnet");
+  const safeAddr     = chainDeploy.gnosisSafe || (isTestnet ? deployer.address : null);
   const tokenOpsAddr = chainDeploy.contracts?.TokenOpsModule;
   if (!gatewayAddr) throw new Error(`No MagnetaGateway in ${chainPath}`);
   if (!safeAddr)    throw new Error(`No gnosisSafe in ${chainPath}`);
+  if (isTestnet && !chainDeploy.gnosisSafe) {
+    console.log(`⚠ Testnet: no gnosisSafe recorded — ownership stays with the deployer ${deployer.address}`);
+  }
   if (!tokenOpsAddr) {
     console.warn(`⚠ No TokenOpsModule in ${chainPath} — tokens will be created but MINT/FREEZE etc. will revert with TokenNotRegistered until a registerByTokenOwner call lands.`);
   }
