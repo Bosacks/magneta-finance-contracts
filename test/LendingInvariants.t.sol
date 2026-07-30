@@ -46,7 +46,7 @@ contract LendHandler is Test {
     }
 
     function _hf(address who) internal view returns (uint256 hf) {
-        (, , , hf) = pool.calculateUserAccountData(who);
+        (, , , , hf) = pool.calculateUserAccountData(who);
     }
 
     function depositWeth(uint256 amount) external {
@@ -139,10 +139,11 @@ contract LendingInvariantTest is Test {
         usdcFeed = new LendFeed(1e8);        // $1
         wethFeed = new LendFeed(2_000e8);    // $2000
 
-        pool.initReserve(address(usdc), 8000, 8500);
-        pool.initReserve(address(weth), 7500, 8000);
+        // F-19: initReserve now requires a price feed to already be configured.
         pool.setPriceFeed(address(usdc), address(usdcFeed), address(0), 0.5e18, 2e18, 0);
         pool.setPriceFeed(address(weth), address(wethFeed), address(0), 100e18, 10_000e18, 0);
+        pool.initReserve(address(usdc), 8000, 8500);
+        pool.initReserve(address(weth), 7500, 8000);
 
         borrower = new LendUser();
         handler  = new LendHandler(pool, usdc, weth, wethFeed, borrower);
@@ -164,7 +165,11 @@ contract LendingInvariantTest is Test {
     function invariant_PoolNeverLendsOutMoreThanItHolds() public view {
         address[2] memory assets = [address(usdc), address(weth)];
         for (uint256 i = 0; i < assets.length; i++) {
-            (, uint256 totalSupplied, uint256 totalBorrowed, , , , , , ) = pool.reserves(assets[i]);
+            // Totals are now derived from shares × index (F-2) rather than a
+            // nominal accumulator — read via the public views instead of the
+            // reserves() tuple, whose layout changed.
+            uint256 totalSupplied = pool.getTotalSupplied(assets[i]);
+            uint256 totalBorrowed = pool.getTotalBorrowed(assets[i]);
             assertGe(
                 IERC20(assets[i]).balanceOf(address(pool)) + totalBorrowed,
                 totalSupplied,
@@ -195,7 +200,7 @@ contract LendingReachabilityTest is LendingInvariantTest {
         pool.deposit(address(w), 10e18);            // $20 000 collateral
         pool.borrow(address(usdc), 5_000e6);        // well within a 75 % LTV
 
-        (, , , uint256 hf) = pool.calculateUserAccountData(address(this));
+        (, , , , uint256 hf) = pool.calculateUserAccountData(address(this));
         assertGe(hf, 1e18, "position is underwater right after a conservative borrow");
 
         usdc.approve(address(pool), type(uint256).max);
