@@ -118,23 +118,27 @@ interface IMagnetaLpAtomicHelper {
  *   - Empty `params` rejected before reading `params[0]` (SC10 OOB panic).
  *   - Module-level replay protection via per-execution payload hash mapping
  *     (SC02). A repeated identical call from a compromised gateway path
- *     reverts on the second attempt. The hash mixes ctx.originChainId,
- *     ctx.caller, op, and the full inner params blob — including the
- *     user-supplied deadline so the same user can legitimately re-compound
- *     with a fresh deadline. originChainId was added by F-13/F-20 (audit-13
- *     remediation): without it, two distinct authenticated cross-chain
- *     messages from the same caller carrying byte-identical op+params but
- *     originating on DIFFERENT chains used to collide on the same key and
- *     the second would revert AlreadyExecuted even though nothing had
- *     actually replayed. Known residual limitation: IModule.Context carries
- *     no per-message GUID/nonce, only originChainId — two genuinely
- *     distinct messages from the SAME origin chain with byte-identical
- *     params are still architecturally indistinguishable at this layer and
- *     will still collide. True duplicate-GUID replay is already blocked one
- *     layer up, at MagnetaGateway._lzReceive's `processedGuid[_guid]`
- *     check, before the module is ever invoked; this module-level guard is
- *     defense-in-depth for the case where that upstream guard is bypassed
- *     or the local (non-LZ) `executeOperation` path is used.
+ *     reverts on the second attempt. F-22/F-31 (audit-13 re-scan-15):
+ *     IModule.Context now carries `guid`, the LayerZero GUID of the
+ *     authenticated message (bytes32(0) for local direct calls). When
+ *     `ctx.guid != 0` the replay key is `ctx.guid` alone — every
+ *     authenticated message is unique by LZ spec, so two genuinely distinct
+ *     bridged messages with byte-identical op+params (same origin chain,
+ *     same caller) now BOTH execute instead of the second reverting
+ *     AlreadyExecuted; a replayed/duplicated GUID still reverts. This
+ *     closes the residual limitation previously documented here (two
+ *     distinct same-origin-chain messages with identical params used to
+ *     collide because only originChainId, not a per-message identifier,
+ *     was available to key on).
+ *     When `ctx.guid == 0` (the local, non-bridged `executeOperation` path
+ *     — there is no cross-chain message to key on) the module falls back
+ *     to the pre-existing composite key: originChainId, caller, op, and the
+ *     full inner params blob — including the user-supplied deadline so
+ *     the same user can legitimately re-compound with a fresh deadline.
+ *     originChainId was added to that composite key by F-13/F-20 (audit-13
+ *     remediation) so two distinct authenticated cross-chain messages from
+ *     the same caller carrying byte-identical op+params but originating on
+ *     DIFFERENT chains don't collide on this local-fallback path either.
  *   - `block.timestamp <= deadline` enforced at the module before any token
  *     movement (SC04). Helper enforces a deadline buffer separately, but
  *     the module fails closed on expired deadlines BEFORE pulling the LP.
@@ -323,15 +327,18 @@ contract LPAtomicModule is IModule, ReentrancyGuard {
         IMagnetaGateway.OpType op = IMagnetaGateway.OpType(uint8(params[0]));
         bytes calldata inner = params[1:];
 
-        // SC02 / F-20: module-level replay protection. Hashing the
-        // (originChainId, caller, op, inner) tuple makes each user's calls
-        // scoped per (origin chain, op, params); the deadline is inside
-        // `inner` so legitimate repeats with a fresh deadline pass.
-        // originChainId is included so two distinct authenticated messages
-        // from different source chains never collide just because they
-        // happen to carry identical op+params (see class-level doc comment
-        // for the residual same-chain limitation).
-        bytes32 payloadHash = keccak256(abi.encode(ctx.originChainId, ctx.caller, op, inner));
+        // SC02 / F-20 / F-22 / F-31: module-level replay protection.
+        // Preferred key is the message GUID (unique per authenticated
+        // message by LZ spec) so two genuinely distinct bridged messages
+        // with byte-identical op+params never collide. Local direct calls
+        // carry no GUID (ctx.guid == 0) and fall back to the composite
+        // (originChainId, caller, op, inner) key — the deadline lives
+        // inside `inner` so legitimate local repeats with a fresh deadline
+        // still pass; originChainId keeps that fallback key scoped per
+        // origin chain (F-13/F-20).
+        bytes32 payloadHash = ctx.guid != bytes32(0)
+            ? ctx.guid
+            : keccak256(abi.encode(ctx.originChainId, ctx.caller, op, inner));
         if (executedPayloads[payloadHash]) revert AlreadyExecuted();
         executedPayloads[payloadHash] = true;
 

@@ -47,6 +47,15 @@ interface IUniswapV2Router02 {
  *           sellAndBundleBuy(sellToken, sellAmount, minEthFromSell, buyToken,
  *                            minTokensPerBuy[], recipients[], buyAmounts[], deadline)
  *           setRouter(addr) → proposeRouter(addr) + applyRouter() + cancelRouterChange()
+ *
+ * @dev    TOKEN SUPPORT (Sentinelle rescan-15 F-18, assumed decision
+ *         2026-07-30): fee-on-transfer / rebasing tokens are NOT supported.
+ *         The bundling legs pull, approve, and refund based on nominal /
+ *         router-reported amounts; a transfer-taxed token receives less than
+ *         requested and can revert a whole batch or strand dust. Magneta's
+ *         own token templates carry no transfer tax (the 2% auto-liquidity
+ *         template was retired 2026-06). Frontends must not route taxed
+ *         third-party tokens through the bundler.
  */
 contract MagnetaBundler is ReentrancyGuard, Pausable, Ownable2Step {
     using SafeERC20 for IERC20;

@@ -517,6 +517,45 @@ contract MagnetaLendingRemediationTest is Test {
         lending.flashLoan(address(receiver), assets, amounts, modes, address(0), "", 0);
     }
 
+    /// Rescan-15 F-9: a legitimate large market move beyond maxDeviationBps
+    /// must be recoverable permissionlessly — lastPrice walks toward the live
+    /// price by one cap-step per block instead of freezing the market until
+    /// an owner intervention, while never jumping more than one step per
+    /// block (flash-pump protection preserved).
+    function test_R15F9_steppedReanchorUnfreezesAfterLargeMove() public {
+        // Dedicated feed with a 5% deviation cap (setUp feeds have cap 0).
+        MockToken tok = new MockToken("Volatile", "VOL", 18);
+        MockPriceFeed feed = new MockPriceFeed(int256(100e8)); // $100
+        lending.setPriceFeed(address(tok), address(feed), address(0), 1e18, 1_000e18, 500);
+        lending.initReserve(address(tok), 7500, 8000);
+        lending.refreshPrice(address(tok)); // anchor lastPrice = $100
+
+        // Overnight -30%: $100 -> $70. Strict reads must now revert…
+        feed.setPrice(70e8);
+        vm.expectRevert("Price deviation too high");
+        lending.getAssetPrice(address(tok));
+
+        // …and a second clamped step in the SAME block is refused.
+        lending.refreshPrice(address(tok)); // step 1: 100 -> 95
+        vm.expectRevert("One anchor step per block");
+        lending.refreshPrice(address(tok));
+
+        // Walk down one step per block until the reference converges.
+        uint256 steps = 1;
+        while (true) {
+            vm.roll(block.number + 1);
+            lending.refreshPrice(address(tok));
+            steps++;
+            (, , , , , , , uint256 lastPrice, ) = lending.priceFeeds(address(tok));
+            if (lastPrice == 70e18) break;
+            assertLt(steps, 20, "must converge in a bounded number of steps");
+        }
+
+        // Strict path unfrozen: getAssetPrice works again at the new level.
+        assertEq(lending.getAssetPrice(address(tok)), 70e18);
+        assertLe(steps, 8, "a 30% move should converge in ~7 five-percent steps");
+    }
+
     /// Rescan-15 F-26-class: removing the canonical guardian must clear the
     /// pauseGuardian view so monitoring never trusts a revoked address.
     function test_R15F26_removePauserClearsCanonicalGuardian() public {

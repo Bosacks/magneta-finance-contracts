@@ -112,10 +112,13 @@ contract TokenCreationModule is IModule, ReentrancyGuard, Ownable2Step {
     uint8 public constant MIN_DVN_QUORUM = 2;
 
     /// @notice Per-message payload hash → consumed (F-24 — defense-in-depth
-    ///         replay guard). Key mirrors LPAtomicModule's corrected F-20
-    ///         key: origin chain + caller + template kind + inner params.
-    ///         See execute() for the same documented residual limitation
-    ///         (IModule.Context carries no per-message GUID/nonce).
+    ///         replay guard). F-22/F-31 (audit-13 re-scan-15): mirrors
+    ///         LPAtomicModule's corrected key — `ctx.guid` alone when
+    ///         non-zero (the LayerZero GUID of the authenticated message,
+    ///         unique by LZ spec), falling back to the composite key
+    ///         (origin chain + caller + template kind + inner params) only
+    ///         for the local, non-bridged `executeOperation` path where
+    ///         `ctx.guid == 0`. See execute() for details.
     mapping(bytes32 => bool) public executedPayloads;
 
     constructor(
@@ -224,16 +227,19 @@ contract TokenCreationModule is IModule, ReentrancyGuard, Ownable2Step {
         TemplateKind kind = TemplateKind(uint8(params[0]));
         bytes calldata inner = params[1:];
 
-        // F-24: module-level replay guard, defense-in-depth against a
-        // twice-delivered authenticated CREATE_TOKEN payload creating
-        // duplicate tokens. Key mirrors the corrected LPAtomicModule key
-        // (F-20): origin chain + caller + template kind + inner params.
-        // Same residual limitation applies — IModule.Context carries no
-        // per-message GUID/nonce, so two genuinely distinct messages from
-        // the same origin chain with byte-identical params still collide.
-        // True duplicate-GUID replay is already blocked one layer up at
-        // MagnetaGateway._lzReceive's `processedGuid[_guid]` check.
-        bytes32 payloadHash = keccak256(abi.encode(ctx.originChainId, ctx.caller, kind, inner));
+        // F-24 / F-22 / F-31: module-level replay guard, defense-in-depth
+        // against a twice-delivered authenticated CREATE_TOKEN payload
+        // creating duplicate tokens. Preferred key is `ctx.guid` (the LZ
+        // GUID of the authenticated message, unique by LZ spec) so two
+        // genuinely distinct messages from the same origin chain with
+        // byte-identical params now BOTH execute instead of the second
+        // colliding; a replayed/duplicated GUID still reverts. Local direct
+        // calls carry no GUID (ctx.guid == 0) and fall back to the composite
+        // key mirroring LPAtomicModule (F-20): origin chain + caller +
+        // template kind + inner params.
+        bytes32 payloadHash = ctx.guid != bytes32(0)
+            ? ctx.guid
+            : keccak256(abi.encode(ctx.originChainId, ctx.caller, kind, inner));
         if (executedPayloads[payloadHash]) revert AlreadyExecuted();
         executedPayloads[payloadHash] = true;
 

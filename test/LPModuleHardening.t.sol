@@ -160,7 +160,8 @@ contract LPModuleHardeningTest is Test {
             caller: address(recipient),
             originChainId: block.chainid,
             feeVault: FEE_VAULT,
-            tokenSource: address(0)
+            tokenSource: address(0),
+            guid: bytes32(0)
         });
     }
 
@@ -243,7 +244,8 @@ contract LPModuleHardeningTest is Test {
             // to reach _createLPFromBridgedUsdc at all.
             originChainId: block.chainid + 1,
             feeVault: FEE_VAULT,
-            tokenSource: address(gw) // non-zero => bridged branch
+            tokenSource: address(gw), // non-zero => bridged branch
+            guid: bytes32(0)
         });
 
         vm.deal(address(gw), 1 ether);
@@ -267,7 +269,8 @@ contract LPModuleHardeningTest is Test {
             caller: address(recipient),
             originChainId: block.chainid + 1, // != block.chainid => cross-chain
             feeVault: FEE_VAULT,
-            tokenSource: address(0)
+            tokenSource: address(0),
+            guid: bytes32(0)
         });
 
         // A single valid opcode byte is enough — the guard fires before the
@@ -296,7 +299,8 @@ contract LPModuleHardeningTest is Test {
         });
         IModule.Context memory ctx = IModule.Context({
             caller: address(recipient), originChainId: block.chainid,
-            feeVault: FEE_VAULT, tokenSource: address(0)
+            feeVault: FEE_VAULT, tokenSource: address(0),
+            guid: bytes32(0)
         });
 
         vm.deal(address(gw2), 1 ether);
@@ -323,7 +327,8 @@ contract LPModuleHardeningTest is Test {
             caller: address(recipient),
             originChainId: block.chainid,
             feeVault: FEE_VAULT,
-            tokenSource: address(gw) // non-zero => claims bridged
+            tokenSource: address(gw), // non-zero => claims bridged
+            guid: bytes32(0)
         });
 
         // The op-code byte alone is enough: the routing guard fires before
@@ -341,7 +346,8 @@ contract LPModuleHardeningTest is Test {
             caller: address(recipient),
             originChainId: block.chainid + 1,
             feeVault: FEE_VAULT,
-            tokenSource: address(0)
+            tokenSource: address(0),
+            guid: bytes32(0)
         });
 
         bytes memory params = abi.encodePacked(uint8(IMagnetaGateway.OpType.CREATE_LP));
@@ -369,7 +375,8 @@ contract LPModuleHardeningTest is Test {
             caller: address(recipient),
             originChainId: block.chainid + 1,
             feeVault: FEE_VAULT,
-            tokenSource: address(0)
+            tokenSource: address(0),
+            guid: bytes32(0)
         });
 
         vm.expectRevert(bytes("no pair"));
@@ -438,7 +445,8 @@ contract LPModuleBridgedDustRefundTest is Test {
             // test_CreateLPFromBridgedUsdc_RevertsIfMsgValueNonZero above).
             originChainId: block.chainid + 1,
             feeVault: FEE_VAULT,
-            tokenSource: address(gw)
+            tokenSource: address(gw),
+            guid: bytes32(0)
         });
 
         // Recipient rejects native. Must NOT revert (msg.value is correctly

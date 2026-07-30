@@ -76,7 +76,19 @@ interface IUniswapV2Factory {
 ///         SushiSwap on Arbitrum, QuickSwap on Polygon, PancakeSwap on BSC…).
 /// @dev    Called exclusively by MagnetaGateway. Pulls user tokens/native via
 ///         the gateway context caller. Magneta markup (0.15% of value) is
-///         taken in USDC and sent to the gateway feeVault.
+///         taken in USDC and sent to the gateway feeVault on value-moving ops
+///         (CREATE_LP / REMOVE_LP / CREATE_LP_AND_BUY). BURN_LP is
+///         deliberately FEE-EXEMPT (Sentinelle rescan-15 F-7, arbitrated
+///         2026-07-30): burning LP is value-destructive for the caller and no
+///         major AMM (Uniswap/Sushi-class, or launchpad graduation burns)
+///         charges a protocol fee on it — the site advertises it as free and
+///         the site is right; _burnLP intentionally has no fee leg.
+///
+///         Fee-on-transfer / rebasing tokens are NOT supported by this module
+///         (rescan-15 F-18, assumed): swap and liquidity legs size approvals
+///         and refunds on router-reported amounts, which a transfer-taxed
+///         token breaks. Magneta's own token templates carry no transfer tax
+///         (the 2% auto-liquidity tax template was retired 2026-06).
 contract LPModule is IModule, ReentrancyGuard, Ownable2Step {
     using SafeERC20 for IERC20;
 

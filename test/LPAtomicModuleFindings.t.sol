@@ -8,7 +8,7 @@ import "../contracts/interfaces/IModule.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-/// @notice Regression tests for audit-13 findings F-13 and F-20 on
+/// @notice Regression tests for audit-13 findings F-13, F-20, F-22/F-31 on
 ///         LPAtomicModule. Kept as a dedicated file (rather than folding
 ///         into LPAtomicModuleInvariants.t.sol) so each finding maps to a
 ///         small, obviously-named, deterministic test instead of being
@@ -25,6 +25,16 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 ///         two distinct authenticated messages from the same caller with
 ///         byte-identical op+params collided even when they legitimately
 ///         originated on different chains.
+///
+///         F-22 / F-31 (Sentinelle re-scan-15, "GUID dans le Context"): even
+///         after F-20, two genuinely distinct authenticated cross-chain
+///         messages from the SAME origin chain with byte-identical
+///         op+params still collided, because IModule.Context carried no
+///         per-message identifier. IModule.Context now carries `guid` (the
+///         LayerZero GUID for bridged ops); the replay key is `ctx.guid`
+///         alone whenever it is non-zero, so distinct GUIDs never collide
+///         and a replayed GUID still reverts. The local, non-bridged path
+///         (`ctx.guid == 0`) keeps the F-20 composite key unchanged.
 contract FindingsPairToken is ERC20 {
     address public factory;
     address public token0;
@@ -155,11 +165,29 @@ contract LPAtomicModuleFindingsTest is Test {
     }
 
     function _ctx(uint256 originChainId) internal view returns (IModule.Context memory) {
+        // guid: bytes32(0) — simulates the local, non-bridged path so the
+        // module falls back to the F-20 composite key. This is the pre-
+        // existing helper used by the F-13/F-20/F-19 tests below; F-22/F-31
+        // tests use `_ctxGuid` instead.
         return IModule.Context({
             caller: address(user),
             originChainId: originChainId,
             feeVault: address(0xFEE0),
-            tokenSource: address(0)
+            tokenSource: address(0),
+            guid: bytes32(0)
+        });
+    }
+
+    /// @dev F-22/F-31 helper: a Context carrying a non-zero message GUID,
+    ///      simulating what MagnetaGateway now populates on every bridged
+    ///      dispatch (_lzReceive / fulfillValueOp).
+    function _ctxGuid(bytes32 guid) internal view returns (IModule.Context memory) {
+        return IModule.Context({
+            caller: address(user),
+            originChainId: block.chainid,
+            feeVault: address(0xFEE0),
+            tokenSource: address(0),
+            guid: guid
         });
     }
 
@@ -216,21 +244,51 @@ contract LPAtomicModuleFindingsTest is Test {
         gw.call(address(mod), _ctx(2), payload); // "arrives from" chain id 2 — must NOT collide
     }
 
-    function test_F20_SameOriginSameParamsSecondCallStillReverts_KnownLimitation() public {
-        // Documents the residual limitation acknowledged in the remediation:
-        // IModule.Context carries no per-message GUID/nonce, only
-        // originChainId. Two calls from the SAME origin chain with
-        // byte-identical params are architecturally indistinguishable at
-        // the module layer and still collide here. Real duplicate-GUID
-        // replay of a single message is blocked one layer up, at
-        // MagnetaGateway._lzReceive's `processedGuid[_guid]` check, before
-        // the module is ever invoked — this module-level guard cannot see
-        // the GUID because IModule.Context doesn't carry one.
+    function test_F20_LocalPathSameOriginSameParamsSecondCallStillReverts() public {
+        // F-22/F-31 follow-up: this is now SPECIFICALLY the local
+        // (non-bridged, ctx.guid == 0) fallback behavior, not a residual
+        // limitation of the bridged path anymore. Two calls sharing the
+        // same origin chain, same caller, same params, and no message GUID
+        // are architecturally indistinguishable at the module layer under
+        // the composite key and still collide by design — see
+        // `test_F22_DistinctGuidsSameParamsBothSucceed` below for the fix
+        // that now covers the bridged case.
         bytes memory payload = _compoundPayload(block.timestamp + 1000);
 
         gw.call(address(mod), _ctx(1), payload);
         vm.expectRevert(LPAtomicModule.AlreadyExecuted.selector);
         gw.call(address(mod), _ctx(1), payload);
+    }
+
+    // ─── F-22 / F-31 ──────────────────────────────────────────────────────
+    // "GUID dans le Context" (Sentinelle re-scan-15): two LEGITIMATE and
+    // DISTINCT cross-chain messages (different LayerZero GUIDs) with
+    // byte-identical business params from the same origin chain used to
+    // collide on the module-level replay key — a real problem at high
+    // volume. ctx.guid fixes this: distinct GUIDs never collide, and a
+    // replayed GUID is still rejected.
+
+    function test_F22_DistinctGuidsSameParamsBothSucceed() public {
+        bytes memory payload = _compoundPayload(block.timestamp + 1000);
+
+        gw.call(address(mod), _ctxGuid(keccak256("lz-guid-1")), payload);
+        // Same caller, same op, same inner params, same origin chain — only
+        // the GUID differs. Before F-22/F-31 this would have collided with
+        // the composite key and reverted AlreadyExecuted even though it is
+        // a genuinely distinct, separately-authenticated LZ message.
+        gw.call(address(mod), _ctxGuid(keccak256("lz-guid-2")), payload);
+    }
+
+    function test_F22_SameGuidReplayedReverts() public {
+        bytes memory payload = _compoundPayload(block.timestamp + 1000);
+        bytes32 guid = keccak256("lz-guid-replay");
+
+        gw.call(address(mod), _ctxGuid(guid), payload);
+        // The SAME GUID delivered twice (LZ redelivery, compromised gateway
+        // path, etc.) must still be rejected — GUID-keyed replay protection
+        // is not weaker than the composite key it replaces.
+        vm.expectRevert(LPAtomicModule.AlreadyExecuted.selector);
+        gw.call(address(mod), _ctxGuid(guid), payload);
     }
 
     // ─── F-19 ─────────────────────────────────────────────────────────────

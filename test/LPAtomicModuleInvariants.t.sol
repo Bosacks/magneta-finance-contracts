@@ -142,7 +142,8 @@ contract LPAtomicHandler is Test {
             caller: address(user),
             originChainId: block.chainid,
             feeVault: address(0xFEE0),
-            tokenSource: address(0)
+            tokenSource: address(0),
+            guid: bytes32(0)
         });
     }
 
@@ -335,7 +336,7 @@ contract LPAtomicReachabilityTest is LPAtomicModuleInvariantTest {
 
         IModule.Context memory ctx = IModule.Context({
             caller: address(user), originChainId: block.chainid,
-            feeVault: address(0xFEE0), tokenSource: address(0)
+            feeVault: address(0xFEE0), tokenSource: address(0), guid: bytes32(0)
         });
 
         // NOT wrapped in try/catch: a revert must fail this test.

@@ -430,18 +430,8 @@ contract MagnetaLending is Ownable2Step, Pausable, ReentrancyGuard {
      * check is skipped — bounds + staleness still apply.
      */
     function getAssetPrice(address asset) public view returns (uint256) {
+        uint256 price18 = _validatedPrice(asset);
         FeedConfig storage cfg = priceFeeds[asset];
-        require(cfg.isSet, "Price feed not set");
-
-        uint256 price18 = _normalize(_readFeed(cfg.feed), cfg.feedDecimals);
-
-        if (cfg.ratioFeed != address(0)) {
-            uint256 ratio18 = _normalize(_readFeed(cfg.ratioFeed), cfg.ratioDecimals);
-            price18 = (price18 * ratio18) / PRICE_PRECISION;
-        }
-
-        require(price18 >= cfg.minPrice, "Price below floor");
-        require(price18 <= cfg.maxPrice, "Price above ceiling");
 
         if (cfg.lastPrice != 0 && cfg.maxDeviationBps != 0) {
             uint256 diff = price18 > cfg.lastPrice ? price18 - cfg.lastPrice : cfg.lastPrice - price18;
@@ -450,6 +440,26 @@ contract MagnetaLending is Ownable2Step, Pausable, ReentrancyGuard {
         }
 
         return price18;
+    }
+
+    /**
+     * @dev Feed read with staleness/round/bounds guards but WITHOUT the
+     * lastPrice-deviation check — the target price the stepped re-anchor in
+     * {refreshPrice} walks toward (Rescan-15 F-9).
+     */
+    function _validatedPrice(address asset) internal view returns (uint256 price18) {
+        FeedConfig storage cfg = priceFeeds[asset];
+        require(cfg.isSet, "Price feed not set");
+
+        price18 = _normalize(_readFeed(cfg.feed), cfg.feedDecimals);
+
+        if (cfg.ratioFeed != address(0)) {
+            uint256 ratio18 = _normalize(_readFeed(cfg.ratioFeed), cfg.ratioDecimals);
+            price18 = (price18 * ratio18) / PRICE_PRECISION;
+        }
+
+        require(price18 >= cfg.minPrice, "Price below floor");
+        require(price18 <= cfg.maxPrice, "Price above ceiling");
     }
 
     /**
@@ -463,14 +473,58 @@ contract MagnetaLending is Ownable2Step, Pausable, ReentrancyGuard {
         emit PriceLastUpdated(asset, price);
     }
 
+    /// @notice Block of the last CLAMPED re-anchor step per asset — rate-limits
+    ///         the stepped walk in {refreshPrice} to one deviation-cap step per
+    ///         block (Rescan-15 F-9).
+    mapping(address => uint256) public lastAnchorStepBlock;
+
     /**
      * @dev Permissionless: anyone can re-anchor lastPrice for an asset by reading
      * the validated price now. Useful for keepers to keep the deviation reference
      * fresh on assets that are sitting as collateral but not actively traded.
-     * Reverts under the same conditions as getAssetPrice (bounds/staleness/round/dev).
+     *
+     * Rescan-15 F-9 (stepped re-anchor): previously this reverted whenever the
+     * live price had moved beyond maxDeviationBps from lastPrice — the exact
+     * situation a keeper needs to recover from. A legitimate large market move
+     * therefore froze borrow/withdraw/liquidate on the asset until the owner
+     * manually replaced the feed config, while bad debt kept accruing.
+     * Now, when the validated feed price lies beyond the deviation cap,
+     * lastPrice STEPS toward it by exactly maxDeviationBps per block instead
+     * of reverting: the reference converges to a -30% overnight move in a
+     * handful of blocks (permissionless, keeper-callable), while a single
+     * malicious feed print still cannot drag the reference by more than one
+     * cap-step per block — the flash-pump protection this guard exists for.
+     * getAssetPrice() itself remains strict; mutating ops stay blocked until
+     * the reference has walked close enough, which is the intended
+     * circuit-breaker behavior. Absolute min/max bounds and staleness checks
+     * always apply to the target being walked toward.
      */
     function refreshPrice(address asset) external {
-        _refreshLastPrice(asset);
+        FeedConfig storage cfg = priceFeeds[asset];
+        uint256 target = _validatedPrice(asset); // bounds + staleness enforced
+        uint256 last = cfg.lastPrice;
+        uint256 newPrice;
+
+        if (last == 0 || cfg.maxDeviationBps == 0) {
+            newPrice = target;
+        } else {
+            uint256 maxStep = (last * cfg.maxDeviationBps) / BPS_DIVISOR;
+            if (maxStep == 0) maxStep = 1; // guarantee progress at dust prices
+            if (target > last + maxStep) {
+                require(lastAnchorStepBlock[asset] != block.number, "One anchor step per block");
+                lastAnchorStepBlock[asset] = block.number;
+                newPrice = last + maxStep;
+            } else if (target + maxStep < last) {
+                require(lastAnchorStepBlock[asset] != block.number, "One anchor step per block");
+                lastAnchorStepBlock[asset] = block.number;
+                newPrice = last - maxStep;
+            } else {
+                newPrice = target; // within cap — plain refresh
+            }
+        }
+
+        cfg.lastPrice = newPrice;
+        emit PriceLastUpdated(asset, newPrice);
     }
 
     /**

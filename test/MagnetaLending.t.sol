@@ -206,12 +206,23 @@ contract MagnetaLendingTest is Test {
     }
 
     /// refreshPrice itself must enforce the deviation cap.
-    function test_oracle_refreshPrice_enforcesDeviation() public {
+    /// Rescan-15 F-9: the strict read path still enforces the deviation cap,
+    /// but refreshPrice now STEPS the reference toward a large move (one
+    /// cap-step per block) instead of reverting and freezing the market.
+    function test_oracle_refreshPrice_stepsTowardLargeMove() public {
         lending.setPriceFeed(address(weth), address(wethFeed), address(0), 100e18, 10_000e18, 2000);
         lending.refreshPrice(address(weth));   // anchor at $2000
         wethFeed.setPrice(1000e8);             // 50% drop
+
         vm.expectRevert("Price deviation too high");
-        lending.refreshPrice(address(weth));
+        lending.getAssetPrice(address(weth));  // strict path unchanged
+
+        lending.refreshPrice(address(weth));   // steps 2000 -> 1600 (20% cap)
+        (, , , , , , , uint256 lastPrice, ) = lending.priceFeeds(address(weth));
+        assertEq(lastPrice, 1600e18, "one cap-step per call");
+
+        vm.expectRevert("One anchor step per block");
+        lending.refreshPrice(address(weth));   // rate-limited within the block
     }
 
     /// Deviation cap is skipped on first read (lastPrice == 0).
