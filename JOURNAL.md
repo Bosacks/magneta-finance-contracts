@@ -3,6 +3,17 @@
 > Fil chronologique des sessions. Anti-chronologique (plus récent en haut).
 > Voir `~/CLAUDE.md` pour la règle d'édition.
 
+## 2026-07-30 — 19:55 — Vague testnet Base Sepolia : dérive close, money paths validés (715a05b)
+
+- Merge security/audit-13-remediation → main (c769d5f) puis redeploy atomique complet sur Base Sepolia (Gateway + TOUS les modules en bloc — imposé par le changement de Context)
+- 12 contrats + LPAtomic stack (helper/registry/module, jamais présent sur ce testnet) + ServiceFee + CurveFactory ; ~0,0004 ETH de gas total
+- Contrôle de dérive : 12/12 longueurs bytecode on-chain == artefacts ; tous les sélecteurs que l'audit signalait absents répondent ; multiPool gate fermé, DVN=2, MAX_BATCH=50
+- Smoke on-chain : payFee → FeeVault +montant exact ; Lending deposit 100 USDC → withdraw complet (scénario F-2), état final 0/0/0
+- arbitrumSepolia.json marqué DEPRECATED (aucune chainConfig 421614, adresses pré-audit)
+- Scripts : deployLpAtomicStack.ts + smokeTestnetStack.ts nouveaux ; fallback testnet sans Safe dans deployTokenCreation/deployServiceFee ; chemin OFT post-centralisation corrigé
+- ⚠ BLOQUÉ op 13 (CREATE_TOKEN) : factories OFT testnet orphelines (owner = clé 0x7900 rotationnée/disparue) ET la factory actuelle fait 24 615 o > limite EIP-170 (déjà runs:1+viaIR) → toute future factory passe par le split factory/deployeur de la branche feat/erc20-permit-onesig (non auditée) — décision à prendre
+- Pièges vécus : RPC public Base Sepolia sert des blocs rassis juste après une tx (retry obligatoire dans les scripts de vérification)
+
 ## 2026-07-30 — 3e passe — Arbitrages design + GUID + harnais hardhat (02d7257, 750a73f)
 
 - Arbitrages Dominique appliqués : BURN_LP officiellement gratuit (doc alignée sur le site), fee-on-transfer non supporté Bundler/LPModule (doc), bridge officiel (DVN + caps entrants) différé à son activation — CCTP+LI.FI en attendant
