@@ -165,4 +165,40 @@ contract MagnetaCurveFactoryValidationTest is Test {
         address[] memory slice = factory.getAllTokensPaginated(len, type(uint256).max);
         assertEq(slice.length, 0);
     }
+
+    // ─────────────────────────── F-33 ───────────────────────────────────
+    // Sentinelle rescan-15: proposeRouter already required the proposed
+    // value to be a contract (`_router.code.length > 0`); proposeFeeVault
+    // only excluded address(0), so an EOA could be programmed as the sink
+    // for every future pool's 1% per-trade fee.
+
+    function test_F33_ProposeFeeVaultRevertsOnEOA() public {
+        address eoa = makeAddr("eoaFeeVault");
+        vm.prank(OWNER);
+        vm.expectRevert(bytes("vault not a contract"));
+        factory.proposeFeeVault(eoa);
+    }
+
+    /// Non-regression: a genuine contract is still accepted, and the full
+    /// propose -> timelock -> apply flow still works end-to-end.
+    function test_F33_ProposeFeeVaultAcceptsContractAndApplies() public {
+        FeeSink newVault = new FeeSink();
+
+        vm.prank(OWNER);
+        factory.proposeFeeVault(address(newVault));
+
+        vm.warp(block.timestamp + factory.CRITICAL_SETTER_DELAY());
+        vm.prank(OWNER);
+        factory.applyFeeVault();
+
+        assertEq(factory.feeVault(), address(newVault), "F-33: feeVault not updated after a valid propose/apply");
+    }
+
+    /// address(0) must still be rejected the same way as before (F-33 adds
+    /// a NEW check, it must not weaken the existing one).
+    function test_F33_ProposeFeeVaultStillRevertsOnZeroAddress() public {
+        vm.prank(OWNER);
+        vm.expectRevert(bytes("zero vault"));
+        factory.proposeFeeVault(address(0));
+    }
 }

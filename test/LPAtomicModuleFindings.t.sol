@@ -27,13 +27,51 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 ///         originated on different chains.
 contract FindingsPairToken is ERC20 {
     address public factory;
-    constructor(address _factory) ERC20("LP", "LP") { factory = _factory; }
+    address public token0;
+    address public token1;
+    constructor(address _factory, address _token0, address _token1) ERC20("LP", "LP") {
+        factory = _factory;
+        token0 = _token0;
+        token1 = _token1;
+    }
     function mint(address to, uint256 amt) external { _mint(to, amt); }
 }
 
 contract FindingsRouterStub {
     address public factory;
     constructor(address _factory) { factory = _factory; }
+}
+
+/// @dev F-19: a real, working UniV2-style factory whose `getPair` is
+///      load-bearing — LPAtomicModule now asks IT for the canonical pair
+///      instead of trusting the pair's self-reported `factory()`.
+contract FindingsFactoryStub {
+    mapping(bytes32 => address) private _pairs;
+    function setPair(address tokenA, address tokenB, address pair) external {
+        _pairs[_key(tokenA, tokenB)] = pair;
+    }
+    function getPair(address tokenA, address tokenB) external view returns (address) {
+        return _pairs[_key(tokenA, tokenB)];
+    }
+    function _key(address a, address b) private pure returns (bytes32) {
+        return keccak256(abi.encodePacked(a, b));
+    }
+}
+
+/// @dev F-19: a malicious "pair" that spoofs `factory()` to point at the
+///      real, allowlisted factory but was never actually registered there
+///      via getPair(token0, token1) — the exact attack the finding
+///      describes. It also freely lies about its own token0/token1 (an
+///      attacker controls both).
+contract MaliciousPair {
+    address public factory;
+    address public token0;
+    address public token1;
+    constructor(address _factory, address _token0, address _token1) {
+        factory = _factory;
+        token0 = _token0;
+        token1 = _token1;
+    }
 }
 
 contract FindingsRegistryStub {
@@ -48,7 +86,7 @@ contract FindingsRegistryStub {
 ///      needs the happy path to reach _compound successfully.
 contract FindingsHelperStub {
     FindingsPairToken public newLp;
-    constructor() { newLp = new FindingsPairToken(address(this)); }
+    constructor() { newLp = new FindingsPairToken(address(this), address(0xAAA1), address(0xAAA2)); }
 
     function compoundPositionFor(
         address pair, address, uint256 lpAmount, uint256, uint256, uint256, address user
@@ -89,18 +127,24 @@ contract LPAtomicModuleFindingsTest is Test {
     MutableGatewayStub gw;
     FindingsPairToken pair;
     FindingsRouterStub router;
+    FindingsFactoryStub factory;
     FindingsRegistryStub registry;
     FindingsHelperStub helper;
     AtomicFindingsUser user;
-    address constant FACTORY = address(0xFAC0);
+    address constant TOKEN0 = address(0x1111);
+    address constant TOKEN1 = address(0x2222);
 
     function setUp() public {
-        pair     = new FindingsPairToken(FACTORY);
-        router   = new FindingsRouterStub(FACTORY);
+        factory  = new FindingsFactoryStub();
+        pair     = new FindingsPairToken(address(factory), TOKEN0, TOKEN1);
+        router   = new FindingsRouterStub(address(factory));
         registry = new FindingsRegistryStub();
         helper   = new FindingsHelperStub();
         gw       = new MutableGatewayStub();
         user     = new AtomicFindingsUser();
+
+        // F-19: the real factory must actually know about this pair.
+        factory.setPair(TOKEN0, TOKEN1, address(pair));
 
         registry.setAllowed(address(router), true);
         mod = new LPAtomicModule(address(gw), address(helper), address(registry));
@@ -187,5 +231,63 @@ contract LPAtomicModuleFindingsTest is Test {
         gw.call(address(mod), _ctx(1), payload);
         vm.expectRevert(LPAtomicModule.AlreadyExecuted.selector);
         gw.call(address(mod), _ctx(1), payload);
+    }
+
+    // ─── F-19 ─────────────────────────────────────────────────────────────
+    // Sentinelle rescan-15: _checkRouterAndPair used to compare only
+    // pair.factory() == router.factory() — a value the "pair" contract
+    // self-reports and can freely lie about. The fix asks the router's
+    // factory directly: factory.getPair(token0, token1) must equal the
+    // pair address itself.
+
+    function _compoundPayloadFor(address pairAddr, uint256 deadline) internal view returns (bytes memory) {
+        LPAtomicModule.CompoundParams memory p = LPAtomicModule.CompoundParams({
+            pair: pairAddr,
+            router: address(router),
+            lpAmount: 1e18,
+            amountAMin: 1,
+            amountBMin: 1,
+            deadline: deadline
+        });
+        return abi.encodePacked(uint8(IMagnetaGateway.OpType.POOL_FEE_COMPOUND), abi.encode(p));
+    }
+
+    function test_F19_GenuinePairPasses() public {
+        // Sanity: the real pair, genuinely registered in the factory via
+        // getPair(TOKEN0, TOKEN1), must still be accepted.
+        gw.call(address(mod), _ctx(block.chainid), _compoundPayloadFor(address(pair), block.timestamp + 1000));
+    }
+
+    function test_F19_MaliciousPairSpoofingFactoryReverts() public {
+        // Attacker deploys a fake "pair" that claims factory() == the real,
+        // allowlisted factory (and freely lies about token0/token1 too), but
+        // was never actually created by that factory — factory.getPair(...)
+        // for whatever tokens it claims will not resolve back to THIS
+        // contract's address. Before the fix, the old check only compared
+        // pair.factory() == router.factory() and this would have passed.
+        MaliciousPair evil = new MaliciousPair(address(factory), TOKEN0, TOKEN1);
+
+        // Give the module something to pull so a false-negative (the module
+        // wrongly accepting) would be observable via a real balance change,
+        // not just silently reverting for an unrelated reason (no LP token
+        // logic on MaliciousPair — but the revert must happen BEFORE any
+        // token movement is even attempted, at the validation step).
+        vm.expectRevert(
+            abi.encodeWithSelector(LPAtomicModule.PairFactoryMismatch.selector, address(evil), address(router))
+        );
+        gw.call(address(mod), _ctx(block.chainid), _compoundPayloadFor(address(evil), block.timestamp + 1000));
+    }
+
+    function test_F19_MaliciousPairClaimingDifferentTokensReverts() public {
+        // Same attack, but the malicious pair claims a token0/token1 pair
+        // that was never registered with the factory at all (not even for a
+        // different, legitimate pair) — factory.getPair returns address(0),
+        // which trivially != the malicious pair's address.
+        MaliciousPair evil = new MaliciousPair(address(factory), address(0x3333), address(0x4444));
+
+        vm.expectRevert(
+            abi.encodeWithSelector(LPAtomicModule.PairFactoryMismatch.selector, address(evil), address(router))
+        );
+        gw.call(address(mod), _ctx(block.chainid), _compoundPayloadFor(address(evil), block.timestamp + 1000));
     }
 }

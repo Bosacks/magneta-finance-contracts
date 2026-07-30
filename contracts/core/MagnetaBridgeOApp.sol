@@ -82,12 +82,33 @@ contract MagnetaBridgeOApp is OApp, ReentrancyGuard {
     mapping(address => bool) public isPauser;
 
     // Per-tx amount cap: maxAmountPerTx[token]. 0 = no cap.
+    // F-20 (Sentinelle re-scan #15, MEDIUM — documented, not fixed): this cap
+    // applies ONLY to outbound {bridgeTokens}. Inbound deliveries via
+    // {_lzReceive} are NOT subject to it — a deliberate, assumed design
+    // decision (capping inbound would require its own, separately-specified
+    // policy; deferred). See the {_lzReceive} NatSpec for the same note.
     mapping(address => uint256) public maxAmountPerTx;
 
     // Rolling 24h volume cap per token. 0 = no cap.
+    // F-20 (documented, not fixed): outbound-only, same as maxAmountPerTx
+    // above — see {_lzReceive}.
     mapping(address => uint256) public dailyLimit;
 
-    // Tracking for the rolling window: dailyWindowStart resets after 24h,
+    // F-30 (Sentinelle re-scan #15, LOW): this is a TUMBLING window, not a
+    // continuously-rolling one. When block.timestamp >= dailyWindowStart +
+    // 1 days, {bridgeTokens} resets dailyVolume to 0 and dailyWindowStart to
+    // "now" wholesale, rather than sliding a continuous 24h lookback. Two
+    // consequences, both accepted by design:
+    //  (a) burst-at-the-boundary: up to ~2x dailyLimit can move across a
+    //      window edge (dailyLimit spent right before reset, then dailyLimit
+    //      again right after) — this is standard tumbling-window behavior,
+    //      not a bypass of the cap within any single window.
+    //  (b) stale counters while a limit is disarmed: dailyVolume/
+    //      dailyWindowStart do NOT get touched by {setDailyLimit} while the
+    //      limit stays enabled (only on re-arm, see {setDailyLimit}), so a
+    //      window opened under a since-changed limit can still be "live" (not
+    //      yet expired) when read.
+    // Tracking for the tumbling window: dailyWindowStart resets after 24h,
     // dailyVolume accumulates within the window.
     mapping(address => uint256) public dailyWindowStart;
     mapping(address => uint256) public dailyVolume;
@@ -267,6 +288,24 @@ contract MagnetaBridgeOApp is OApp, ReentrancyGuard {
             IERC20(token).safeTransfer(feeRecipient, fee);
         }
 
+        // F-2 (Sentinelle re-scan #15, HIGH×HIGH): bridgeTokens used to keep
+        // the user's net deposit in the contract's physical token balance but
+        // NEVER credited bridgeLiquidity[localEid][token] — the only counter
+        // _lzReceive is allowed to pay out of (see the `bridgeLiquidity[localEid][token]
+        // >= amount` check below in _lzReceive). After enough outbound sends,
+        // physical balance and tracked liquidity diverge: legitimate inbound
+        // deliveries revert with "insufficient bridge liquidity" despite the
+        // tokens actually sitting in the contract. `amountAfterFee` is exactly
+        // what physically remains here from this call (received, minus the fee
+        // already paid out above) and becomes available to back inbound
+        // deliveries INTO this chain (this chain's users bridging the same
+        // token back is what previously happened via the separate owner-only
+        // {addBridgeLiquidity} top-up path — this makes outbound sends
+        // self-fund that same counter instead of relying solely on manual
+        // top-ups).
+        bridgeLiquidity[localEid][token] += amountAfterFee;
+        emit BridgeLiquidityAdded(localEid, token, amountAfterFee);
+
         // F22: translate the local token to its CANONICAL address on the
         // destination chain. Encoding the source address verbatim would make the
         // destination release the wrong asset (or lock funds) because the same
@@ -280,16 +319,42 @@ contract MagnetaBridgeOApp is OApp, ReentrancyGuard {
 
         // Estimate fee and send message via LayerZero
         MessagingFee memory fee_ = _quote(dstEid, payload, options, payInLzToken);
-        
+
         require(msg.value >= fee_.nativeFee, "MagnetaBridgeOApp: insufficient native fee");
 
-        // Send message via LayerZero
+        // F-13 (Sentinelle re-scan #15, MEDIUM×HIGH — investigated, code
+        // unchanged; verified correct as written): passing the FULL
+        // `msg.value` as `MessagingFee.nativeFee` (rather than the quoted
+        // `fee_.nativeFee`) looks at first glance like it would treat any
+        // overpayment as "spent". It is NOT lost:
+        //  1. OAppSender._payNative (the LZ library this contract inherits
+        //     via _lzSend) hard-requires `msg.value == _fee.nativeFee`
+        //     exactly (`if (msg.value != _nativeFee) revert NotEnoughNative`).
+        //     Internal calls share the caller's msg.value and it cannot be
+        //     changed mid-call, so passing `fee_.nativeFee` (the quote, which
+        //     is typically LESS than msg.value when a caller pads for slack)
+        //     would make THAT check revert on every overpaid call — turning a
+        //     UX nicety (pad your fee estimate) into a hard failure. Passing
+        //     `msg.value` itself is the only way to satisfy that equality
+        //     while still forwarding the caller's full payment.
+        //  2. The real LayerZero EndpointV2.send() (see
+        //     node_modules/@layerzerolabs/lz-evm-protocol-v2/contracts/EndpointV2.sol,
+        //     `_payNative`) computes the REAL required fee independently and
+        //     explicitly refunds `suppliedNative - required` to
+        //     `_refundAddress` — which is `payable(msg.sender)` below, i.e.
+        //     the payer. The MockLayerZeroEndpoint used in this repo's tests
+        //     mirrors that same refund-the-excess behavior. So the excess is
+        //     refunded by the endpoint itself via the existing refund-address
+        //     mechanism, not swallowed. See
+        //     test_SurplusNativeFeeIsRefundedToPayer in
+        //     test/MagnetaBridgeOAppRemediation.t.sol for the regression test
+        //     locking this in.
         MessagingReceipt memory receipt = _lzSend(
             dstEid,
             payload,
             options,
             MessagingFee(msg.value, 0),
-            payInLzToken ? msg.sender : payable(msg.sender)
+            payable(msg.sender)
         );
         
         bytes32 guid = receipt.guid;
@@ -319,6 +384,17 @@ contract MagnetaBridgeOApp is OApp, ReentrancyGuard {
      * @param _payload Message payload
      * @param _executor Executor address
      * @param _extraData Extra data
+     *
+     * F-20 (Sentinelle re-scan #15, MEDIUM — documented, assumed decision,
+     * not fixed): {maxAmountPerTx} and {dailyLimit} are enforced ONLY on the
+     * outbound path in {bridgeTokens}. This function does not consult either
+     * cap — an inbound delivery can release any amount currently covered by
+     * {bridgeLiquidity}, regardless of the destination token's per-tx/daily
+     * caps. Inbound caps would need their own policy (e.g. is the relevant
+     * cap the SOURCE chain's outbound cap, or a separate inbound-specific
+     * one? what happens on a partial-window inbound burst from multiple
+     * source chains simultaneously?) and are deliberately deferred rather
+     * than bolted on here.
      */
     function _lzReceive(
         Origin calldata _origin,
@@ -536,6 +612,8 @@ contract MagnetaBridgeOApp is OApp, ReentrancyGuard {
 
     /**
      * @dev Set the per-tx amount cap for a token (0 = no cap).
+     *      F-20 (documented, not fixed): applies to OUTBOUND {bridgeTokens}
+     *      only — inbound {_lzReceive} deliveries are not capped by this.
      */
     function setMaxAmountPerTx(address token, uint256 cap) external onlyOwner {
         require(token != address(0), "MagnetaBridgeOApp: invalid token");
@@ -545,14 +623,35 @@ contract MagnetaBridgeOApp is OApp, ReentrancyGuard {
     }
 
     /**
-     * @dev Set the rolling 24h volume cap for a token (0 = no cap).
-     *      The window is per-token and resets lazily on the next bridge call.
+     * @dev Set the tumbling 24h volume cap for a token (0 = no cap).
+     *      F-20 (documented, not fixed): applies to OUTBOUND {bridgeTokens}
+     *      only — inbound {_lzReceive} deliveries are not capped by this.
+     *      The window is per-token, TUMBLING (not continuously rolling — see
+     *      the {dailyWindowStart}/{dailyVolume} NatSpec), and otherwise
+     *      resets lazily on the next bridge call once 24h have elapsed.
+     *
+     *      F-30: re-arming the limit — i.e. this call actually CHANGES the
+     *      stored value (`limit != old`, which covers both 0→non-zero and
+     *      any other value change) — resets dailyWindowStart/dailyVolume for
+     *      this token immediately. Without this, disabling a limit (set to
+     *      0) and re-enabling it later would inherit whatever dailyVolume/
+     *      dailyWindowStart were left over from the PRIOR regime, which could
+     *      wrongly throttle (stale accumulated volume counted against a new
+     *      limit) or wrongly permit a stale, already-expired-feeling window
+     *      to still be "live". Re-arming always starts the new limit with a
+     *      clean, full window.
      */
     function setDailyLimit(address token, uint256 limit) external onlyOwner {
         require(token != address(0), "MagnetaBridgeOApp: invalid token");
         uint256 old = dailyLimit[token];
         dailyLimit[token] = limit;
         emit DailyLimitUpdated(token, old, limit);
+
+        if (limit != old) {
+            dailyWindowStart[token] = block.timestamp;
+            dailyVolume[token] = 0;
+            emit DailyWindowReset(token, block.timestamp);
+        }
     }
 
     /**
@@ -593,15 +692,25 @@ contract MagnetaBridgeOApp is OApp, ReentrancyGuard {
     }
 
     /**
-     * @dev Add liquidity to bridge for a specific token and endpoint
-     * @param endpointId Endpoint ID (chain where tokens will be distributed)
+     * @dev Add liquidity to bridge for a specific token, funding THIS chain's
+     *      payout pool for that token.
+     * @param endpointId Must equal {localEid} (see F-21 note below).
      * @param token Token address
-     * @param amount Amount of tokens to add as liquidity
-     * 
-     * IMPORTANT: This function must be called on EACH chain where you want to receive bridged tokens.
-     * For example:
-     * - To receive USDC bridged from Base to Arbitrum, call this on Arbitrum
-     * - To receive USDC bridged from Arbitrum to Base, call this on Base
+     * @param amount Nominal amount of tokens to pull in as liquidity; the
+     *        amount actually CREDITED is measured via balance delta (see
+     *        F-15 note below) and may be less for a fee-on-transfer token.
+     *
+     * IMPORTANT — corrected semantics (Sentinelle re-scan #15, F-21): this
+     * function must be called on EACH chain where you want to be able to PAY
+     * OUT bridged deliveries, and `endpointId` must be THIS chain's own
+     * {localEid} — NOT the remote/destination chain, despite what an earlier
+     * version of this doc comment implied. `_lzReceive` always debits
+     * `bridgeLiquidity[localEid][token]` regardless of which chain a message
+     * originated from (it is a single per-token payout pool for this chain,
+     * not a per-route ledger) — crediting any other `endpointId` would fund a
+     * key `_lzReceive` never reads, stranding the deposit. For example, to be
+     * able to pay out USDC bridged INTO Arbitrum (from anywhere), call this
+     * on Arbitrum with `endpointId = Arbitrum's own localEid`.
      */
     function addBridgeLiquidity(
         uint32 endpointId,
@@ -611,14 +720,26 @@ contract MagnetaBridgeOApp is OApp, ReentrancyGuard {
         require(token != address(0), "MagnetaBridgeOApp: invalid token");
         require(amount > 0, "MagnetaBridgeOApp: invalid amount");
         require(supportedTokens[endpointId][token], "MagnetaBridgeOApp: token not supported");
+        // F-21: _lzReceive only ever consumes bridgeLiquidity[localEid][token]
+        // (see _lzReceive). Accepting a different endpointId here would let
+        // the owner "top up" a key that is never read, silently stranding
+        // the deposited tokens.
+        require(endpointId == localEid, "MagnetaBridgeOApp: endpointId must be localEid");
 
-        // Transfer tokens from owner to bridge contract
+        // F-15: measure the ACTUAL amount received via balance delta, the
+        // same pattern used in bridgeTokens. A fee-on-transfer / deflationary
+        // token would otherwise let the owner credit MORE liquidity than
+        // actually arrived — phantom liquidity that _lzReceive could later
+        // pay out of thin air, silently draining real deposits.
+        uint256 balBefore = IERC20(token).balanceOf(address(this));
         IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
+        uint256 received = IERC20(token).balanceOf(address(this)) - balBefore;
+        require(received > 0, "MagnetaBridgeOApp: nothing received");
 
         // Update liquidity tracking
-        bridgeLiquidity[endpointId][token] += amount;
+        bridgeLiquidity[endpointId][token] += received;
 
-        emit BridgeLiquidityAdded(endpointId, token, amount);
+        emit BridgeLiquidityAdded(endpointId, token, received);
     }
 
     /**

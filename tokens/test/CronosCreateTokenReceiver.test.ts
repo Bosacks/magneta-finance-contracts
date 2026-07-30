@@ -1,5 +1,6 @@
 import { expect } from "chai";
 import { ethers } from "hardhat";
+import { time } from "@nomicfoundation/hardhat-network-helpers";
 import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
 import {
   CronosCreateTokenReceiver,
@@ -472,6 +473,92 @@ describe("CronosCreateTokenReceiver — EIP-712 verified relayer pattern", funct
       await expect(
         receiver.connect(attacker).acceptOwnership(),
       ).to.be.revertedWithCustomError(receiver, "OwnableUnauthorizedAccount");
+    });
+  });
+
+  // ── Sentinelle re-scan #16 regression tests ───────────────────────────
+
+  describe("Report #16 F-3: CREATE_INTENT_TYPEHASH is a verifiable keccak256(...) constant", function () {
+    it("matches the exact value the old opaque literal held (no breaking change)", async function () {
+      const expected = ethers.keccak256(
+        ethers.toUtf8Bytes(
+          "CreateTokenIntent(address creator,string template,string name,string symbol,string tokenURI,uint256 totalSupply,uint256 liquidityToBurn,bool revokeUpdate,bool revokeFreeze,bool revokeMint,uint256 destinationChainId,address destinationReceiver,address destinationFactory,uint256 nonce,uint256 expiry)",
+        ),
+      );
+      expect(expected).to.equal(
+        "0x3a18bf21af8814f022a2d9158fca22f47530fba5c97ac36f8478847033f431eb",
+      );
+      expect(await receiver.CREATE_INTENT_TYPEHASH()).to.equal(expected);
+    });
+  });
+
+  describe("Report #16 F-1: bounded intent lifetime + creator-initiated cancellation", function () {
+    it("rejects an intent whose expiry is further out than MAX_INTENT_TTL", async function () {
+      const ttl = await receiver.MAX_INTENT_TTL();
+      const now = await time.latest();
+      const intent = makeIntent(user.address, receiverAddr, factoryAddr, {
+        expiry: BigInt(now) + ttl + 3600n, // 1h past the max allowed TTL
+      });
+      const sig = await signIntent(user, intent);
+
+      await expect(
+        receiver.connect(relayer).executeCreate(SOURCE_CHAIN_ID, sourceGateway, intent, sig),
+      ).to.be.revertedWithCustomError(receiver, "IntentExpiryTooFarInFuture");
+    });
+
+    it("accepts an intent whose expiry sits exactly at the MAX_INTENT_TTL boundary", async function () {
+      const ttl = await receiver.MAX_INTENT_TTL();
+      const now = await time.latest();
+      const intent = makeIntent(user.address, receiverAddr, factoryAddr, {
+        expiry: BigInt(now) + ttl, // right at the limit, not past it
+      });
+      const sig = await signIntent(user, intent);
+
+      await expect(
+        receiver.connect(relayer).executeCreate(SOURCE_CHAIN_ID, sourceGateway, intent, sig),
+      ).to.emit(receiver, "IntentExecuted");
+    });
+
+    it("creator can cancel their own signed intent; a subsequent executeCreate then reverts with IntentReplay", async function () {
+      const intent = makeIntent(user.address, receiverAddr, factoryAddr);
+      const sig = await signIntent(user, intent);
+
+      const expectedDigest = await receiver.digestOf(SOURCE_CHAIN_ID, sourceGateway, intent);
+
+      await expect(
+        receiver.connect(user).cancelIntent(SOURCE_CHAIN_ID, sourceGateway, intent),
+      ).to.emit(receiver, "IntentCancelled").withArgs(expectedDigest, user.address);
+
+      expect(await receiver.processedIntents(expectedDigest)).to.equal(true);
+
+      await expect(
+        receiver.connect(relayer).executeCreate(SOURCE_CHAIN_ID, sourceGateway, intent, sig),
+      ).to.be.revertedWithCustomError(receiver, "IntentReplay");
+    });
+
+    it("a third party cannot cancel someone else's intent", async function () {
+      const intent = makeIntent(user.address, receiverAddr, factoryAddr);
+
+      await expect(
+        receiver.connect(attacker).cancelIntent(SOURCE_CHAIN_ID, sourceGateway, intent),
+      ).to.be.revertedWithCustomError(receiver, "NotIntentCreator");
+
+      // Confirm it genuinely wasn't cancelled: the intent still executes fine.
+      const sig = await signIntent(user, intent);
+      await expect(
+        receiver.connect(relayer).executeCreate(SOURCE_CHAIN_ID, sourceGateway, intent, sig),
+      ).to.emit(receiver, "IntentExecuted");
+    });
+
+    it("cancelling an already-executed intent reverts with IntentReplay (can't double-mark)", async function () {
+      const intent = makeIntent(user.address, receiverAddr, factoryAddr);
+      const sig = await signIntent(user, intent);
+
+      await receiver.connect(relayer).executeCreate(SOURCE_CHAIN_ID, sourceGateway, intent, sig);
+
+      await expect(
+        receiver.connect(user).cancelIntent(SOURCE_CHAIN_ID, sourceGateway, intent),
+      ).to.be.revertedWithCustomError(receiver, "IntentReplay");
     });
   });
 });

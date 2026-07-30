@@ -237,7 +237,11 @@ contract LPModuleHardeningTest is Test {
 
         IModule.Context memory ctx = IModule.Context({
             caller: address(recipient),
-            originChainId: block.chainid,
+            // F-24: the bridged branch now also requires originChainId !=
+            // block.chainid (must agree with tokenSource != 0) — a genuinely
+            // cross-chain origin, not just a non-zero tokenSource, is needed
+            // to reach _createLPFromBridgedUsdc at all.
+            originChainId: block.chainid + 1,
             feeVault: FEE_VAULT,
             tokenSource: address(gw) // non-zero => bridged branch
         });
@@ -302,6 +306,78 @@ contract LPModuleHardeningTest is Test {
             abi.encodePacked(uint8(IMagnetaGateway.OpType.CREATE_LP), abi.encode(p))
         );
     }
+
+    // ─── F-24 ─────────────────────────────────────────────────────────────
+    // Sentinelle rescan-15: CREATE_LP routing picked the bridged-USDC branch
+    // on `ctx.tokenSource != 0` alone, while the DVN re-check above it gated
+    // on `ctx.originChainId != block.chainid` alone. An incoherent context
+    // (tokenSource set but originChainId still local — or the reverse) could
+    // enter the bridged branch WITHOUT ever passing through the DVN
+    // re-check, or enter the local branch while actually carrying bridged
+    // funds. Both combinations must now revert before either op body runs.
+
+    /// tokenSource claims "bridged funds staged by the gateway" but
+    /// originChainId says the op never left this chain — inconsistent.
+    function test_F24_CreateLp_TokenSourceSetButOriginLocal_Reverts() public {
+        IModule.Context memory ctx = IModule.Context({
+            caller: address(recipient),
+            originChainId: block.chainid,
+            feeVault: FEE_VAULT,
+            tokenSource: address(gw) // non-zero => claims bridged
+        });
+
+        // The op-code byte alone is enough: the routing guard fires before
+        // CreateLPParams is ever decoded.
+        bytes memory params = abi.encodePacked(uint8(IMagnetaGateway.OpType.CREATE_LP));
+
+        vm.expectRevert(LPModule.InconsistentLpRoutingContext.selector);
+        gw.call(address(mod), ctx, params);
+    }
+
+    /// originChainId says the op traversed a bridge but tokenSource is zero
+    /// (no bridged funds staged) — inconsistent the other way around.
+    function test_F24_CreateLp_CrossChainOriginButTokenSourceZero_Reverts() public {
+        IModule.Context memory ctx = IModule.Context({
+            caller: address(recipient),
+            originChainId: block.chainid + 1,
+            feeVault: FEE_VAULT,
+            tokenSource: address(0)
+        });
+
+        bytes memory params = abi.encodePacked(uint8(IMagnetaGateway.OpType.CREATE_LP));
+
+        vm.expectRevert(LPModule.InconsistentLpRoutingContext.selector);
+        gw.call(address(mod), ctx, params);
+    }
+
+    /// Non-regression: the tightened check is scoped to CREATE_LP only.
+    /// REMOVE_LP legitimately sees originChainId != block.chainid with
+    /// tokenSource == address(0) (e.g. dispatched as a plain cross-chain
+    /// command op, not a bridged-value op) and must reach _removeLP exactly
+    /// as before — failing here for an unrelated, pre-existing reason ("no
+    /// pair" on this mock router), never InconsistentLpRoutingContext.
+    function test_F24_NonRegression_RemoveLpCrossChainWithZeroTokenSourceUnaffected() public {
+        LPModule.RemoveLPParams memory p = LPModule.RemoveLPParams({
+            token: address(token),
+            liquidity: 1,
+            amountTokenMin: 0,
+            amountETHMin: 0,
+            usdcFee: 0,
+            deadline: block.timestamp + 1000
+        });
+        IModule.Context memory ctx = IModule.Context({
+            caller: address(recipient),
+            originChainId: block.chainid + 1,
+            feeVault: FEE_VAULT,
+            tokenSource: address(0)
+        });
+
+        vm.expectRevert(bytes("no pair"));
+        gw.call(
+            address(mod), ctx,
+            abi.encodePacked(uint8(IMagnetaGateway.OpType.REMOVE_LP), abi.encode(p))
+        );
+    }
 }
 
 /// @notice F17 (cross-chain site, ~lines 456-465 `_createLPFromBridgedUsdc`):
@@ -357,7 +433,10 @@ contract LPModuleBridgedDustRefundTest is Test {
 
         IModule.Context memory ctx = IModule.Context({
             caller: address(recipient),
-            originChainId: block.chainid,
+            // F-24: must be genuinely cross-chain to agree with the non-zero
+            // tokenSource below (see the sibling fix in
+            // test_CreateLPFromBridgedUsdc_RevertsIfMsgValueNonZero above).
+            originChainId: block.chainid + 1,
             feeVault: FEE_VAULT,
             tokenSource: address(gw)
         });

@@ -182,3 +182,145 @@ contract MagnetaBundlerRescueReentrancyTest is Test {
         assertEq(address(attacker).balance, 0, "F16: attacker drained ETH via reentrant rescueETH");
     }
 }
+
+/// @notice Regression coverage for the Sentinelle rescan-15 remediation of
+///         MagnetaBundler:
+///           F-26 — removePauser(account) did not clear {pauseGuardian} when
+///                  `account` was the canonical guardian, leaving monitoring
+///                  reading an address that can no longer call pause().
+///           F-25 — bundleBuy / bundleSell / sellAndBundleBuy / disperseEther
+///                  accepted unbounded arrays, risking an unbounded gas
+///                  estimate / out-of-gas failure mode for the caller.
+contract MagnetaBundlerRescanFindingsTest is Test {
+    MagnetaBundler bundler;
+    MockV2Router router;
+    MockWETH weth;
+
+    address owner = makeAddr("owner");
+    address guardian = makeAddr("guardian");
+    address user = makeAddr("user");
+
+    function setUp() public {
+        weth = new MockWETH();
+        router = new MockV2Router(address(weth));
+        vm.prank(owner);
+        bundler = new MagnetaBundler(address(router), address(0));
+
+        vm.deal(user, 1000 ether);
+    }
+
+    // ─── F-26 ─────────────────────────────────────────────────────────────
+
+    /// The literal scenario the finding describes: removePauser is called
+    /// with the address that is currently the canonical pauseGuardian.
+    /// Before the fix, {pauseGuardian} kept pointing at an address that
+    /// isPauser now maps to false — off-chain monitoring reading
+    /// pauseGuardian() would believe that address can still pause() when it
+    /// no longer can.
+    function test_F26_RemovePauser_ClearsCanonicalGuardian() public {
+        vm.startPrank(owner);
+        bundler.setPauseGuardian(guardian);
+        assertEq(bundler.pauseGuardian(), guardian, "setup: guardian not set");
+        assertTrue(bundler.isPauser(guardian), "setup: guardian not a pauser");
+
+        bundler.removePauser(guardian);
+        vm.stopPrank();
+
+        assertEq(bundler.pauseGuardian(), address(0), "F-26: pauseGuardian not cleared after removing the guardian");
+        assertFalse(bundler.isPauser(guardian), "guardian should no longer be a pauser");
+    }
+
+    /// Non-regression: removing a pauser that is NOT the canonical guardian
+    /// must leave {pauseGuardian} untouched.
+    function test_F26_RemovePauser_UnrelatedPauserDoesNotClearGuardian() public {
+        address otherPauser = makeAddr("otherPauser");
+        vm.startPrank(owner);
+        bundler.setPauseGuardian(guardian);
+        bundler.addPauser(otherPauser);
+
+        bundler.removePauser(otherPauser);
+        vm.stopPrank();
+
+        assertEq(bundler.pauseGuardian(), guardian, "unrelated removePauser must not clear the canonical guardian");
+        assertFalse(bundler.isPauser(otherPauser));
+        assertTrue(bundler.isPauser(guardian));
+    }
+
+    // ─── F-25 ─────────────────────────────────────────────────────────────
+
+    function _addrArray(uint256 n, uint256 seed) internal pure returns (address[] memory arr) {
+        arr = new address[](n);
+        for (uint256 i = 0; i < n; i++) {
+            arr[i] = address(uint160(uint256(keccak256(abi.encode(seed, i))) | 1));
+        }
+    }
+
+    function _uintArray(uint256 n, uint256 v) internal pure returns (uint256[] memory arr) {
+        arr = new uint256[](n);
+        for (uint256 i = 0; i < n; i++) arr[i] = v;
+    }
+
+    function test_F25_MaxBatchConstant() public view {
+        assertEq(bundler.MAX_BATCH(), 50);
+    }
+
+    function test_F25_BundleBuy_RevertsAboveMaxBatch() public {
+        uint256 n = bundler.MAX_BATCH() + 1;
+        address[] memory recipients = _addrArray(n, 1);
+        uint256[] memory ethAmounts = _uintArray(n, 0.01 ether);
+        uint256[] memory mins = _uintArray(n, 0);
+
+        vm.prank(user);
+        vm.expectRevert(bytes("MagnetaBundler: batch too large"));
+        bundler.bundleBuy{value: n * 0.01 ether}(makeAddr("token"), mins, recipients, ethAmounts, block.timestamp + 1000);
+    }
+
+    function test_F25_BundleSell_RevertsAboveMaxBatch() public {
+        uint256 n = bundler.MAX_BATCH() + 1;
+        address[] memory tokens = _addrArray(n, 2);
+        uint256[] memory amounts = _uintArray(n, 1 ether);
+        uint256[] memory mins = _uintArray(n, 0);
+
+        vm.prank(user);
+        vm.expectRevert(bytes("MagnetaBundler: batch too large"));
+        bundler.bundleSell(tokens, amounts, mins, block.timestamp + 1000);
+    }
+
+    function test_F25_SellAndBundleBuy_RevertsAboveMaxBatch() public {
+        uint256 n = bundler.MAX_BATCH() + 1;
+        address[] memory recipients = _addrArray(n, 3);
+        uint256[] memory buyAmounts = _uintArray(n, 0.01 ether);
+        uint256[] memory mins = _uintArray(n, 0);
+
+        vm.prank(user);
+        vm.expectRevert(bytes("MagnetaBundler: batch too large"));
+        bundler.sellAndBundleBuy(
+            makeAddr("sellToken"), 1 ether, 0, makeAddr("buyToken"), mins, recipients, buyAmounts, block.timestamp + 1000
+        );
+    }
+
+    function test_F25_DisperseEther_RevertsAboveMaxBatch() public {
+        uint256 n = bundler.MAX_BATCH() + 1;
+        address[] memory recipients = _addrArray(n, 4);
+        uint256[] memory values = _uintArray(n, 0.01 ether);
+
+        vm.prank(user);
+        vm.expectRevert(bytes("MagnetaBundler: batch too large"));
+        bundler.disperseEther{value: n * 0.01 ether}(recipients, values);
+    }
+
+    /// Boundary: exactly MAX_BATCH recipients must still be accepted (no
+    /// over-tightening). disperseEther is the cheapest op to exercise at the
+    /// boundary — no router/token wiring needed.
+    function test_F25_DisperseEther_ExactlyMaxBatchSucceeds() public {
+        uint256 n = bundler.MAX_BATCH();
+        address[] memory recipients = _addrArray(n, 5);
+        uint256[] memory values = _uintArray(n, 0.001 ether);
+
+        vm.prank(user);
+        bundler.disperseEther{value: n * 0.001 ether}(recipients, values);
+
+        assertEq(recipients[0].balance, 0.001 ether);
+        assertEq(recipients[n - 1].balance, 0.001 ether);
+    }
+}

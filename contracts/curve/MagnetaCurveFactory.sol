@@ -137,6 +137,14 @@ contract MagnetaCurveFactory is Ownable2Step, ReentrancyGuard {
 
     function proposeFeeVault(address _feeVault) external onlyOwner {
         require(_feeVault != address(0), "zero vault");
+        // F-33 (Sentinelle rescan-15): proposeRouter already required the
+        // proposed value to be a contract; proposeFeeVault only excluded
+        // address(0), so an EOA could be programmed as the sink for every
+        // future pool's 1% per-trade fee — plausible but easy-to-miss
+        // misconfiguration (typo'd address, wrong key). A vault MUST be a
+        // contract (even a trivial receive()-only forwarder) so the intent
+        // is unambiguous at propose time, mirroring proposeRouter's guard.
+        require(_feeVault.code.length > 0, "vault not a contract");
         pendingFeeVault = _feeVault;
         pendingFeeVaultTime = block.timestamp + CRITICAL_SETTER_DELAY;
         emit FeeVaultProposed(_feeVault, pendingFeeVaultTime);

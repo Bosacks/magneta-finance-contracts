@@ -111,3 +111,52 @@ contract MagnetaFactoryDLMMValidationTest is Test {
         assertEq(factory.MAX_DLMM_TOTAL_FEE_BPS(), 1000);
     }
 }
+
+/// @notice Regression coverage for F-32 (Sentinelle rescan-15): removePauser
+///         did not clear {pauseGuardian} when the removed account was the
+///         canonical guardian, leaving monitoring reading a guardian address
+///         that can no longer call pause(). Mirrors the pattern already
+///         applied in MagnetaLending / MagnetaBundler.
+contract MagnetaFactoryPauserFindingsTest is Test {
+    MagnetaFactory factory;
+    MagnetaPool standardPool;
+
+    address constant OWNER = address(0xA11CE);
+    address constant GUARDIAN = address(0xC0FFEE);
+
+    function setUp() public {
+        vm.startPrank(OWNER);
+        standardPool = new MagnetaPool(OWNER);
+        factory = new MagnetaFactory(address(standardPool), OWNER);
+        vm.stopPrank();
+    }
+
+    function test_F32_RemovePauser_ClearsCanonicalGuardian() public {
+        vm.startPrank(OWNER);
+        factory.setPauseGuardian(GUARDIAN);
+        assertEq(factory.pauseGuardian(), GUARDIAN, "setup: guardian not set");
+        assertTrue(factory.isPauser(GUARDIAN), "setup: guardian not a pauser");
+
+        factory.removePauser(GUARDIAN);
+        vm.stopPrank();
+
+        assertEq(factory.pauseGuardian(), address(0), "F-32: pauseGuardian not cleared after removing the guardian");
+        assertFalse(factory.isPauser(GUARDIAN), "guardian should no longer be a pauser");
+    }
+
+    /// Non-regression: removing an unrelated pauser must not clear the
+    /// canonical guardian.
+    function test_F32_RemovePauser_UnrelatedPauserDoesNotClearGuardian() public {
+        address otherPauser = address(0xBEEF);
+        vm.startPrank(OWNER);
+        factory.setPauseGuardian(GUARDIAN);
+        factory.addPauser(otherPauser);
+
+        factory.removePauser(otherPauser);
+        vm.stopPrank();
+
+        assertEq(factory.pauseGuardian(), GUARDIAN, "unrelated removePauser must not clear the canonical guardian");
+        assertFalse(factory.isPauser(otherPauser));
+        assertTrue(factory.isPauser(GUARDIAN));
+    }
+}

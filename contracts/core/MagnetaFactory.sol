@@ -171,10 +171,18 @@ contract MagnetaFactory is Ownable2Step, Pausable {
     }
 
     /// @notice Revoke an address's pauser role. Owner-only.
+    /// @dev Sentinelle rescan-15 F-32: if the removed account is the
+    ///      canonical {pauseGuardian}, clear that view too — otherwise
+    ///      monitoring reads a guardian address that can no longer pause.
+    ///      Mirrors the pattern already applied in MagnetaLending.
     function removePauser(address account) external onlyOwner {
         require(account != address(0), "MagnetaFactory: zero pauser");
         isPauser[account] = false;
         emit PauserRemoved(account);
+        if (account == pauseGuardian) {
+            pauseGuardian = address(0);
+            emit PauseGuardianUpdated(account, address(0));
+        }
     }
 
     /// @notice Deprecated single-guardian setter, retained for back-compat.

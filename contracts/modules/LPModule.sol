@@ -113,6 +113,18 @@ contract LPModule is IModule, ReentrancyGuard, Ownable2Step {
     ///         constructor only proves the quorum at deploy time, so execute()
     ///         must re-check it for any op that actually traversed a bridge.
     error DVNQuorumBelowMinimum();
+    /// @notice Thrown when a CREATE_LP dispatch carries an incoherent
+    ///         cross-chain context — `ctx.tokenSource != address(0)` (bridged
+    ///         funds staged by the gateway) must always agree with
+    ///         `ctx.originChainId != block.chainid` (the op actually
+    ///         traversed a bridge). Sentinelle rescan-15 F-24: the two
+    ///         predicates diverged — routing picked the bridged-USDC branch
+    ///         on `tokenSource != 0` alone, while the DVN re-check above
+    ///         gated on `originChainId != block.chainid` alone, so an
+    ///         inconsistent context (e.g. tokenSource set but
+    ///         originChainId == block.chainid) could enter the bridged
+    ///         branch WITHOUT ever passing through the DVN re-check.
+    error InconsistentLpRoutingContext();
 
     /// @notice Minimum attested DVN quorum the gateway must surface for this
     ///         module to wire up. Mitigates Kelp-DAO-class single-validator
@@ -178,7 +190,18 @@ contract LPModule is IModule, ReentrancyGuard, Ownable2Step {
         }
 
         if (op == IMagnetaGateway.OpType.CREATE_LP) {
-            if (ctx.tokenSource != address(0)) {
+            // F-24: CREATE_LP is the only op whose ROUTING depends on
+            // ctx.tokenSource, so it is the only op where the two predicates
+            // (tokenSource != 0, originChainId != block.chainid) must agree.
+            // Other ops (REMOVE_LP/BURN_LP/CREATE_LP_AND_BUY, and TOKEN_OPS /
+            // fan-out handled elsewhere) can legitimately see
+            // originChainId != block.chainid with tokenSource == 0 — e.g. a
+            // fan-out command op has no bridged token leg at all — so this
+            // tightened check is intentionally scoped to CREATE_LP only.
+            bool bridgedFunds = ctx.tokenSource != address(0);
+            bool crossChainOrigin = ctx.originChainId != block.chainid;
+            if (bridgedFunds != crossChainOrigin) revert InconsistentLpRoutingContext();
+            if (bridgedFunds) {
                 return _createLPFromBridgedUsdc(ctx, inner);
             }
             return _createLP(ctx, inner);

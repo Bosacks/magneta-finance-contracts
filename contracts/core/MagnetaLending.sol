@@ -202,7 +202,12 @@ contract MagnetaLending is Ownable2Step, Pausable, ReentrancyGuard {
         uint256 ltv,
         uint256 liquidationThreshold
     ) external onlyOwner {
-        require(!reserves[asset].isActive, "Reserve already active");
+        // Rescan-15 F-1: key the "already initialized" guard on supplyIndex,
+        // not isActive — a reserve deactivated via setReserveActive(false)
+        // still has supplyIndex != 0, and re-running initReserve on it would
+        // wipe totalSupplyShares/totalDebtShares/availableCash while user
+        // positions persist, and push a duplicate allReserves entry.
+        require(reserves[asset].supplyIndex == 0, "Reserve already initialized");
         require(
             ltv > 0 && liquidationThreshold >= ltv && liquidationThreshold <= BPS_DIVISOR,
             "Invalid risk params"
@@ -588,7 +593,13 @@ contract MagnetaLending is Ownable2Step, Pausable, ReentrancyGuard {
         require(reserve.availableCash >= amount, "Insufficient liquidity");
         reserve.availableCash -= amount;
 
-        if (getUserTotalDebt(msg.sender) > 0) {
+        // Rescan-15 F-10 (defense-in-depth): gate on the existence of debt
+        // SHARES, not the truncated underlying sum. With borrowIndex >= 1e18
+        // (monotone from init) any nonzero shares already yield >= 1 wei of
+        // underlying, so the truncation-to-zero bypass is not reachable
+        // today — but the shares check is equivalent, cheaper (no division),
+        // and stays correct even if the index invariant ever changes.
+        if (_hasDebtShares(msg.sender)) {
             _refreshLastPrice(asset);
             (, , , , uint256 healthFactor) = calculateUserAccountData(msg.sender);
             require(healthFactor >= 1e18, "Health factor too low after withdrawal");
@@ -698,7 +709,7 @@ contract MagnetaLending is Ownable2Step, Pausable, ReentrancyGuard {
         address debtAsset,
         address collateralAsset,
         uint256 amountToRepay
-    ) external nonReentrant {
+    ) external nonReentrant whenNotPaused {
         _updateReserve(debtAsset);
         _updateReserve(collateralAsset);
 
@@ -732,8 +743,17 @@ contract MagnetaLending is Ownable2Step, Pausable, ReentrancyGuard {
         uint256 userCollateral = (userCollateralShares * collateralReserve.supplyIndex) / 1e18;
         require(userCollateral >= collateralToSeize, "Insufficient collateral to seize");
 
-        // Execute liquidation
-        uint256 debtSharesToBurn = (received * 1e18) / debtReserve.borrowIndex; // round down
+        // Execute liquidation. Rescan-15 F-8: debt shares burn rounds UP and
+        // must be nonzero — with floor division a dust repayment could burn
+        // zero debt shares while still seizing nonzero collateral, letting
+        // repeated calls strip collateral without reducing debt. Rounding up
+        // over-burns by at most one share-wei (protocol-favoring, borne by
+        // the position being liquidated); the cap keeps the burn within the
+        // user's actual shares.
+        uint256 debtSharesToBurn = _mulDivUp(received, 1e18, debtReserve.borrowIndex);
+        uint256 userDebtShares = users[user].debtShares[debtAsset];
+        if (debtSharesToBurn > userDebtShares) debtSharesToBurn = userDebtShares;
+        require(debtSharesToBurn > 0, "Liquidation amount too small");
         users[user].debtShares[debtAsset] -= debtSharesToBurn;
         debtReserve.totalDebtShares -= debtSharesToBurn;
         debtReserve.availableCash += received;
@@ -773,6 +793,15 @@ contract MagnetaLending is Ownable2Step, Pausable, ReentrancyGuard {
     ) external nonReentrant {
         require(msg.sender != address(0), "Invalid sender");
         require(assets.length == amounts.length, "Array length mismatch");
+        // Rescan-15 F-29: the Aave-shaped `modes` parameter is accepted but
+        // debt-mode semantics are NOT implemented — full repayment is always
+        // required. Reject anything but mode 0 so an integrator assuming
+        // Aave behavior fails loudly here instead of losing funds to a
+        // repayment model it did not expect.
+        require(modes.length == assets.length, "Array length mismatch");
+        for (uint256 i = 0; i < modes.length; i++) {
+            require(modes[i] == 0, "Debt modes not supported");
+        }
 
         // F-18: reject duplicate assets — small arrays, O(n^2) is fine.
         for (uint256 i = 0; i < assets.length; i++) {
@@ -876,10 +905,17 @@ contract MagnetaLending is Ownable2Step, Pausable, ReentrancyGuard {
     }
 
     /// @notice Revoke an address's pauser role. Owner-only.
+    /// @dev Rescan-15 F-26-class: if the removed account is the canonical
+    ///      {pauseGuardian}, clear that view too — otherwise monitoring reads
+    ///      a guardian address that can no longer pause.
     function removePauser(address account) external onlyOwner {
         require(account != address(0), "MagnetaLending: zero pauser");
         isPauser[account] = false;
         emit PauserRemoved(account);
+        if (account == pauseGuardian) {
+            pauseGuardian = address(0);
+            emit PauseGuardianUpdated(account, address(0));
+        }
     }
 
     /// @notice Deprecated single-guardian setter, retained for back-compat.
@@ -907,9 +943,19 @@ contract MagnetaLending is Ownable2Step, Pausable, ReentrancyGuard {
         return (users[user].debtShares[asset] * reserves[asset].borrowIndex) / 1e18;
     }
 
+    /// @dev Cheap oracle-free debt-existence check (Rescan-15 F-10): true iff
+    ///      the user holds nonzero debt shares in any reserve. Used to gate
+    ///      the health-factor check in {withdraw}.
+    function _hasDebtShares(address user) internal view returns (bool) {
+        for (uint256 i = 0; i < allReserves.length; i++) {
+            if (users[user].debtShares[allReserves[i]] != 0) return true;
+        }
+        return false;
+    }
+
     /// @dev Never touches the oracle (getUserBorrow is index-based only), so F-9's
     /// "skip unused reserves before pricing" concern does not apply here — kept
-    /// as a plain sum, used only as a `> 0` gate in {withdraw}.
+    /// as a plain sum.
     function getUserTotalDebt(address user) public view returns (uint256) {
         uint256 totalDebt = 0;
         for (uint256 i = 0; i < allReserves.length; i++) {

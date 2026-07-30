@@ -401,6 +401,134 @@ contract MagnetaLendingRemediationTest is Test {
         lending.withdraw(address(usdc), bobBalance);
     }
 
+    // ═══ Rescan (report 15) regressions ════════════════════════════════════════
+
+    /// Rescan-15 F-1 (CRITICAL): re-running initReserve on a deactivated
+    /// reserve must revert — it would wipe shares/cash while user positions
+    /// persist and push a duplicate allReserves entry.
+    function test_R15F1_reinitAfterDeactivationReverts() public {
+        vm.startPrank(bob);
+        usdc.approve(address(lending), 1_000e6);
+        lending.deposit(address(usdc), 1_000e6);
+        vm.stopPrank();
+
+        lending.setReserveActive(address(usdc), false);
+        vm.expectRevert("Reserve already initialized");
+        lending.initReserve(address(usdc), 7500, 8000);
+
+        // Reactivation is the only sanctioned path, and positions survive.
+        lending.setReserveActive(address(usdc), true);
+        assertEq(lending.getUserCollateral(bob, address(usdc)), 1_000e6);
+    }
+
+    /// Rescan-15 F-8: a liquidation too small to burn a single debt share
+    /// must revert instead of seizing collateral against zero burned debt.
+    function test_R15F8_dustLiquidationBurningZeroSharesReverts() public {
+        vm.startPrank(bob);
+        usdc.approve(address(lending), 1_000_000e6);
+        lending.deposit(address(usdc), 1_000_000e6);
+        vm.stopPrank();
+
+        vm.startPrank(alice);
+        weth.approve(address(lending), 1e18);
+        lending.deposit(address(weth), 1e18);
+        lending.borrow(address(usdc), 1_500e6);
+        vm.stopPrank();
+
+        // Accrue interest so borrowIndex > 1e18 — the regime where floor
+        // division on a 1-unit repayment burns ZERO debt shares while the
+        // seize formula still transfers nonzero collateral wei.
+        vm.warp(block.timestamp + 365 days);
+        vm.prank(alice);
+        lending.repay(address(usdc), 0); // poke _updateReserve
+
+        wethFeed.setPrice(1800e8); // > 80% threshold → liquidatable
+
+        uint256 debtSharesValueBefore = lending.getUserBorrow(alice, address(usdc));
+
+        // A zero-value liquidation must refuse outright.
+        vm.startPrank(liquidator);
+        usdc.approve(address(lending), 1e6);
+        vm.expectRevert("Liquidation amount too small");
+        lending.liquidate(alice, address(usdc), address(weth), 0);
+
+        // A 1-unit (1e-6 USDC) liquidation must strictly reduce the debt —
+        // pre-fix it burned 0 shares (floor) while seizing ~1e5 wei of WETH.
+        uint256 wethBefore = weth.balanceOf(liquidator);
+        lending.liquidate(alice, address(usdc), address(weth), 1);
+        vm.stopPrank();
+
+        assertLt(
+            lending.getUserBorrow(alice, address(usdc)),
+            debtSharesValueBefore,
+            "debt must strictly decrease whenever collateral is seized"
+        );
+        assertGt(weth.balanceOf(liquidator), wethBefore, "seizure did happen");
+    }
+
+    /// Rescan-15 F-11: liquidate must respect the pause like every other
+    /// user-facing operation — otherwise pausing creates a one-sided window
+    /// where borrowers cannot repay but liquidators can still seize.
+    function test_R15F11_liquidateBlockedWhilePaused() public {
+        vm.startPrank(bob);
+        usdc.approve(address(lending), 1_000_000e6);
+        lending.deposit(address(usdc), 1_000_000e6);
+        vm.stopPrank();
+
+        vm.startPrank(alice);
+        weth.approve(address(lending), 1e18);
+        lending.deposit(address(weth), 1e18);
+        lending.borrow(address(usdc), 1_500e6);
+        vm.stopPrank();
+
+        wethFeed.setPrice(1800e8);
+        lending.pause();
+
+        vm.startPrank(liquidator);
+        usdc.approve(address(lending), 500e6);
+        vm.expectRevert("Pausable: paused");
+        lending.liquidate(alice, address(usdc), address(weth), 500e6);
+        vm.stopPrank();
+
+        lending.unpause();
+        vm.prank(liquidator);
+        lending.liquidate(alice, address(usdc), address(weth), 500e6);
+    }
+
+    /// Rescan-15 F-29: Aave-shaped `modes` values other than 0 must revert —
+    /// debt-mode semantics are not implemented.
+    function test_R15F29_nonZeroFlashLoanModeReverts() public {
+        vm.startPrank(bob);
+        usdc.approve(address(lending), 100_000e6);
+        lending.deposit(address(usdc), 100_000e6);
+        vm.stopPrank();
+
+        GoodFlashReceiver receiver = new GoodFlashReceiver();
+        usdc.mint(address(receiver), 1_000e6);
+
+        address[] memory assets = new address[](1);
+        uint256[] memory amounts = new uint256[](1);
+        uint256[] memory modes = new uint256[](1);
+        assets[0] = address(usdc);
+        amounts[0] = 1_000e6;
+        modes[0] = 1;
+
+        vm.expectRevert("Debt modes not supported");
+        lending.flashLoan(address(receiver), assets, amounts, modes, address(0), "", 0);
+    }
+
+    /// Rescan-15 F-26-class: removing the canonical guardian must clear the
+    /// pauseGuardian view so monitoring never trusts a revoked address.
+    function test_R15F26_removePauserClearsCanonicalGuardian() public {
+        address guardian = makeAddr("guardian");
+        lending.setPauseGuardian(guardian);
+        assertEq(lending.pauseGuardian(), guardian);
+
+        lending.removePauser(guardian);
+        assertEq(lending.pauseGuardian(), address(0), "canonical view must be cleared");
+        assertFalse(lending.isPauser(guardian));
+    }
+
     // ── F-18: duplicate assets in one flashLoan call must revert ───────────────
 
     function test_F18_flashLoan_duplicateAsset_reverts() public {

@@ -132,7 +132,7 @@ contract MagnetaLendingTest is Test {
     }
 
     function test_initReserve_cannotInitTwice() public {
-        vm.expectRevert("Reserve already active");
+        vm.expectRevert("Reserve already initialized");
         lending.initReserve(address(usdc), 8000, 8500);
     }
 

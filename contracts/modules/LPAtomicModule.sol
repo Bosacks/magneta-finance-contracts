@@ -14,15 +14,26 @@ interface IMagnetaRouterRegistry {
     function isRouterAllowed(address router) external view returns (bool);
 }
 
-/// Minimal UniV2 pair view used to verify a pair was created by an
-/// allowlisted router's factory (transitive trust for pairs).
-interface IUniV2PairFactoryView {
-    function factory() external view returns (address);
+/// Minimal UniV2 pair view used to read the pair's constituent tokens so the
+/// module can verify canonicity against the router's factory (F-19 — Sentinelle
+/// rescan-15). `pair.factory()` alone is spoofable: any arbitrary contract can
+/// implement a `factory()` getter that returns the allowlisted factory address
+/// without ever having actually been created by it. Reading token0()/token1()
+/// and asking the factory itself for the canonical pair closes that gap.
+interface IUniV2PairView {
+    function token0() external view returns (address);
+    function token1() external view returns (address);
 }
 
 /// Minimal UniV2 router view used to fetch the factory.
 interface IUniV2RouterFactoryView {
     function factory() external view returns (address);
+}
+
+/// Minimal UniV2 factory view used to verify a pair was actually created by
+/// the router's factory (F-19 fix).
+interface IUniV2FactoryPairView {
+    function getPair(address tokenA, address tokenB) external view returns (address pair);
 }
 
 /// Subset of MagnetaLpAtomicHelper that this module needs. The full helper
@@ -167,10 +178,15 @@ interface IMagnetaLpAtomicHelper {
  *   SC04 HIGH (no router/pair allowlist): RESOLVED in chantier #2 — the
  *   module now consumes a MagnetaRouterRegistry (Safe-governed, ideally
  *   behind a Timelock) at every execute(). Compound and migrate ops both
- *   require the router to be on the allowlist; pairs are trusted
- *   transitively via `pair.factory() == router.factory()`. An attacker who
- *   supplies an arbitrary router reverts on `RouterNotAllowed` before any
- *   token movement.
+ *   require the router to be on the allowlist; pairs are verified against
+ *   the router's own factory via `factory.getPair(token0, token1) == pair`
+ *   (F-19 hardening — Sentinelle rescan-15: the original
+ *   `pair.factory() == router.factory()` check trusted the pair's
+ *   self-reported factory, which an arbitrary contract can spoof without
+ *   ever having been created by that factory). An attacker who supplies an
+ *   arbitrary router reverts on `RouterNotAllowed` before any token
+ *   movement; an attacker who supplies a spoofed pair reverts on
+ *   `PairFactoryMismatch`.
  */
 contract LPAtomicModule is IModule, ReentrancyGuard {
     using SafeERC20 for IERC20;
@@ -408,17 +424,28 @@ contract LPAtomicModule is IModule, ReentrancyGuard {
         return abi.encode(ctx.caller, p.srcPair, p.dstRouter, p.lpAmount);
     }
 
-    /// @dev Chantier #2 — router/pair allowlist enforcement.
-    ///      `router` must be on the registry allowlist; `pair` must be from
-    ///      that router's factory (transitive trust). Reverts with a
-    ///      specific custom error so off-chain decoders can distinguish.
+    /// @dev Chantier #2 — router/pair allowlist enforcement. Hardened by F-19
+    ///      (Sentinelle rescan-15): `router` must be on the registry allowlist,
+    ///      and `pair` must be the CANONICAL pair the router's factory itself
+    ///      created for (token0, token1) — i.e.
+    ///      `factory.getPair(token0, token1) == pair`. The prior check only
+    ///      compared `pair.factory() == router.factory()`, which trusts
+    ///      whatever `pair` claims its own factory to be; an attacker's
+    ///      contract can implement `factory()` to return the allowlisted
+    ///      factory address without ever having been created by it. Asking
+    ///      the factory itself "what pair do you have for these two tokens"
+    ///      is the only way to establish the pair was genuinely created by
+    ///      that factory. Reverts with a specific custom error so off-chain
+    ///      decoders can distinguish.
     function _checkRouterAndPair(address router, address pair) private view {
         if (!IMagnetaRouterRegistry(registry).isRouterAllowed(router)) {
             revert RouterNotAllowed(router);
         }
-        address pairFactory   = IUniV2PairFactoryView(pair).factory();
         address routerFactory = IUniV2RouterFactoryView(router).factory();
-        if (pairFactory != routerFactory) {
+        address token0 = IUniV2PairView(pair).token0();
+        address token1 = IUniV2PairView(pair).token1();
+        address canonicalPair = IUniV2FactoryPairView(routerFactory).getPair(token0, token1);
+        if (canonicalPair != pair) {
             revert PairFactoryMismatch(pair, router);
         }
     }
