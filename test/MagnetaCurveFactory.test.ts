@@ -88,7 +88,14 @@ describe("MagnetaCurveFactory — Sentinelle hardening", function () {
     });
 
     it("applyFeeVault follows the same timelock", async function () {
-      await curveFactory.proposeFeeVault(alice.address);
+      // Rescan-15 F-33: proposeFeeVault now rejects EOAs — the proposed vault
+      // must be a contract. Use the already-deployed WETH9 as a stand-in.
+      await expect(curveFactory.proposeFeeVault(alice.address)).to.be.revertedWith(
+        "vault not a contract"
+      );
+
+      const newVault = await weth.getAddress();
+      await curveFactory.proposeFeeVault(newVault);
       await expect(curveFactory.applyFeeVault()).to.be.revertedWith("timelock active");
 
       await ethers.provider.send("evm_increaseTime", [24 * 3600 + 1]);
@@ -96,8 +103,8 @@ describe("MagnetaCurveFactory — Sentinelle hardening", function () {
 
       await expect(curveFactory.applyFeeVault())
         .to.emit(curveFactory, "FeeVaultUpdated")
-        .withArgs(feeVault.address, alice.address);
-      expect(await curveFactory.feeVault()).to.equal(alice.address);
+        .withArgs(feeVault.address, newVault);
+      expect(await curveFactory.feeVault()).to.equal(newVault);
     });
 
     it("non-owner cannot propose", async function () {

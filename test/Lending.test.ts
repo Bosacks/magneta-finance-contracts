@@ -35,8 +35,8 @@ describe("MagnetaLending", function () {
         lending = await MagnetaLending.deploy();
         await lending.waitForDeployment();
 
-        // Initialize reserves
-        await lending.initReserve(await token.getAddress(), 7500, 8000);
+        // Initialize reserves — feeds must be configured BEFORE initReserve
+        // (audit-13 F-19: initReserve requires priceFeeds[asset].isSet).
         await lending.setPriceFeed(
             await token.getAddress(),
             await priceFeed.getAddress(),
@@ -45,8 +45,8 @@ describe("MagnetaLending", function () {
             ethers.parseEther("10000"),   // ceiling $10,000
             0                              // deviation cap disabled for baseline tests
         );
+        await lending.initReserve(await token.getAddress(), 7500, 8000);
 
-        await lending.initReserve(await token2.getAddress(), 8000, 8500);
         await lending.setPriceFeed(
             await token2.getAddress(),
             await priceFeed2.getAddress(),
@@ -55,6 +55,7 @@ describe("MagnetaLending", function () {
             ethers.parseEther("2"),
             0
         );
+        await lending.initReserve(await token2.getAddress(), 8000, 8500);
 
         // Give user some tokens
         await token.transfer(user.address, ethers.parseEther("1000"));
@@ -131,12 +132,17 @@ describe("MagnetaLending", function () {
             await token.connect(user).approve(await lending.getAddress(), collateralAmount);
             await lending.connect(user).deposit(await token.getAddress(), collateralAmount);
 
-            // Borrow max possible USDC ($2000 * 0.75 = $1500)
-            const borrowAmount = ethers.parseUnits("1500", 6);
+            // Borrow just under the 75% LTV cap ($2000 * 0.75 = $1500).
+            // Exactly $1500 is no longer reachable: debt shares round UP
+            // (audit-13 F-22) and borrowIndex accrues at the base rate from
+            // the very next block, so an exact-boundary borrow exceeds the
+            // LTV limit by a rounding wei and reverts — protocol-favoring by
+            // design.
+            const borrowAmount = ethers.parseUnits("1499", 6);
             await lending.connect(user).borrow(await token2.getAddress(), borrowAmount);
 
             // Drop ETH price to $1700
-            // HF = ($1700 * 0.8) / $1500 = 1360 / 1500 = 0.906
+            // HF = ($1700 * 0.8) / $1499 = 1360 / 1499 = 0.907
             await priceFeed.setPrice(ethers.parseUnits("1700", 18));
 
             // Health factor should be < 1.0

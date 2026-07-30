@@ -155,6 +155,7 @@ describe("TokenCreationModule", function () {
                 originChainId: 1n,
                 feeVault: feeVault.address,
                 tokenSource: ethers.ZeroAddress,
+                guid: ethers.ZeroHash,
             };
             const innerEncoded = ethers.AbiCoder.defaultAbiCoder().encode(
                 ["tuple(string,string,string,uint256,bool,bool,bool)"],
