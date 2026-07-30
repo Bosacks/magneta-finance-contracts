@@ -3,6 +3,18 @@
 > Fil chronologique des sessions. Anti-chronologique (plus récent en haut).
 > Voir `~/CLAUDE.md` pour la règle d'édition.
 
+## 2026-07-30 — 2e passe — Re-scans 15+16 traités (125d794)
+
+- Re-scans Dominique post-remédiation : les 27 fixes tiennent, aucun ne réapparaît
+- Corrigé la RÉGRESSION CRITICAL de ma réécriture lending : initReserve ré-initialisable après setReserveActive(false) → garde sur supplyIndex==0
+- Lending aussi : arrondi liquidation (saisie sans burn de dette), whenNotPaused sur liquidate, modes flash-loan rejetés
+- Bridge : bridgeLiquidity créditée à l'envoi (divergence compteur/balance), delta mesuré addBridgeLiquidity, endpointId==localEid, reset fenêtre au ré-armement
+- Modules : validation de paire anti-spoof (getPair canonique), prédicats routage CREATE_LP unifiés, MAX_BATCH=50, sync pauseGuardian ×3, feeVault contrat
+- Cronos : MAX_INTENT_TTL 30j + cancelIntent creator, typehash compile-time (valeur inchangée)
+- 3 findings RÉFUTÉS avec preuve : F-5 (registerByTokenOwner est permissionless), F-10 (borrowIndex≥1e18 rend la troncature inatteignable), F-13 (EndpointV2 rembourse déjà le surplus — vérifié dans les sources LZ)
+- Suites : forge 262/262, tokens/ hardhat 189/189
+- Décisions design en attente : frais BURN_LP (F-7), ré-ancrage oracle après grand mouvement (F-9), plancher DVN du bridge OApp (F-14), politique fee-on-transfer Bundler/LP (F-18), GUID dans IModule.Context (F-22/31), caps entrants bridge (F-20), bornage allReserves (F-27)
+
 ## 2026-07-30 — Remédiation audit 13+14 : 27 findings de code corrigés, branche security/audit-13-remediation
 
 - Phase 1 (04e586a) : 15 findings rapport 13 hors lending (DVN re-check à chaque execute, payInLzToken rejeté, validation createDLMMPool, allowances Bundler, nonReentrant rescueETH, pull-payment dust LPModule, clés de replay + msg.value modules, CEI ServiceFee, bounds+pagination CurveFactory, event registration) + 3 findings rapport 14 Cronos
