@@ -275,6 +275,10 @@ contract MagnetaBundler is ReentrancyGuard, Pausable, Ownable2Step {
                 msg.sender, // Send ETH directly to user
                 deadline
             ) returns (uint[] memory resultAmounts) {
+                // F15: clear the allowance on the successful leg too — the router
+                // only pulls what it needs, so an unconsumed remainder would
+                // otherwise stay approved until the next call touches this token.
+                IERC20(tokens[i]).forceApprove(router, 0);
                 totalEthReceived += resultAmounts[resultAmounts.length - 1];
                 successCount++;
             } catch {
@@ -337,6 +341,11 @@ contract MagnetaBundler is ReentrancyGuard, Pausable, Ownable2Step {
             deadline
         );
 
+        // F15: clear the sell-leg allowance now that the router has pulled what
+        // it needed — a router that consumes less than tokenAmount would
+        // otherwise leave a standing approval after a successful call.
+        IERC20(token).forceApprove(router, 0);
+
         emit BundleSell(msg.sender, token, returnAmounts[1], 1);
     }
 
@@ -386,6 +395,10 @@ contract MagnetaBundler is ReentrancyGuard, Pausable, Ownable2Step {
             deadline
         );
         uint256 ethProceeds = amounts[1];
+
+        // F15: clear the sell-leg allowance now that the router has pulled what
+        // it needed — mirrors bundleSell / atomicVolumeBrush.
+        IERC20(sellToken).forceApprove(router, 0);
 
         // 2. Bundle buy with the proceeds.
         uint256 totalRequired = 0;
@@ -501,8 +514,12 @@ contract MagnetaBundler is ReentrancyGuard, Pausable, Ownable2Step {
     }
 
     /// @notice Rescue idle native — bounded so it can never dip into funds owed
-    ///         to pull-payment claimants (pendingWithdrawals).
-    function rescueETH() external onlyOwner {
+    ///         to pull-payment claimants (pendingWithdrawals). F16: nonReentrant
+    ///         so an owner that is a callback-capable contract cannot reenter
+    ///         this from the recipient side of disperseEther / _forwardFee /
+    ///         _refundOrCredit and rescue ETH before it is credited to
+    ///         pendingWithdrawals (treating in-flight liabilities as idle).
+    function rescueETH() external onlyOwner nonReentrant {
         uint256 rescuable = address(this).balance - totalPendingWithdrawals;
         require(rescuable > 0, "MagnetaBundler: nothing to rescue");
         (bool success, ) = msg.sender.call{value: rescuable}("");

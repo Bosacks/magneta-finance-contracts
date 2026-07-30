@@ -185,7 +185,9 @@ contract MagnetaBridgeOApp is OApp, ReentrancyGuard {
      * @param dstEid Destination endpoint ID (LayerZero endpoint ID)
      * @param to Recipient address on destination chain
      * @param options Message execution options
-     * @param payInLzToken Whether to pay in LZ token
+     * @param payInLzToken Must be false. LZ-token payment is not implemented
+     *        (F-10) — passing true always reverts. Kept as a parameter for
+     *        ABI stability; see the require() at the top of the function body.
      */
     function bridgeTokens(
         address token,
@@ -195,6 +197,22 @@ contract MagnetaBridgeOApp is OApp, ReentrancyGuard {
         bytes calldata options,
         bool payInLzToken
     ) external payable nonReentrant whenNotPaused {
+
+        // F-10 (Sentinelle audit #13, MEDIUM×HIGH): this function used to
+        // quote a LayerZero fee via `_quote(..., payInLzToken)` — which can
+        // return a non-zero `lzTokenFee` when payInLzToken=true — but then
+        // ALWAYS called `_lzSend` with `MessagingFee(msg.value, 0)`, i.e.
+        // 100% native payment regardless of what was quoted/requested. The
+        // quoted LZ-token fee was silently discarded, so the advertised
+        // "pay in LZ token" path could be rejected by the endpoint or behave
+        // differently from the quote shown to the caller. LZ-token payment
+        // is not an implemented product path, so — per the audit's own
+        // remediation options ("implement it or reject it") — reject it
+        // outright rather than ship a payment mode that lies about what it
+        // charges. `estimateBridgeFee` still accepts payInLzToken for
+        // informational quoting only; it is a view function and spends no
+        // funds.
+        require(!payInLzToken, "MagnetaBridgeOApp: LZ token payment not supported");
 
         require(token != address(0), "MagnetaBridgeOApp: invalid token");
         require(amount > 0, "MagnetaBridgeOApp: invalid amount");
@@ -550,7 +568,11 @@ contract MagnetaBridgeOApp is OApp, ReentrancyGuard {
      * @dev Estimate bridge fee
      * @param dstEid Destination endpoint ID
      * @param options Message execution options
-     * @param payInLzToken Whether to pay in LZ token
+     * @param payInLzToken Whether to pay in LZ token. NOTE (F-10): this is an
+     *        informational quote only — `bridgeTokens` always reverts if
+     *        called with payInLzToken=true, since LZ-token payment is not
+     *        implemented. This function stays available so a caller can see
+     *        that fact reflected in a real quote rather than guessing.
      */
     function estimateBridgeFee(
         uint32 dstEid,

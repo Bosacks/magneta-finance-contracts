@@ -107,9 +107,23 @@ interface IMagnetaLpAtomicHelper {
  *   - Empty `params` rejected before reading `params[0]` (SC10 OOB panic).
  *   - Module-level replay protection via per-execution payload hash mapping
  *     (SC02). A repeated identical call from a compromised gateway path
- *     reverts on the second attempt. The hash mixes ctx.caller, op, and the
- *     full inner params blob — including the user-supplied deadline so the
- *     same user can legitimately re-compound with a fresh deadline.
+ *     reverts on the second attempt. The hash mixes ctx.originChainId,
+ *     ctx.caller, op, and the full inner params blob — including the
+ *     user-supplied deadline so the same user can legitimately re-compound
+ *     with a fresh deadline. originChainId was added by F-13/F-20 (audit-13
+ *     remediation): without it, two distinct authenticated cross-chain
+ *     messages from the same caller carrying byte-identical op+params but
+ *     originating on DIFFERENT chains used to collide on the same key and
+ *     the second would revert AlreadyExecuted even though nothing had
+ *     actually replayed. Known residual limitation: IModule.Context carries
+ *     no per-message GUID/nonce, only originChainId — two genuinely
+ *     distinct messages from the SAME origin chain with byte-identical
+ *     params are still architecturally indistinguishable at this layer and
+ *     will still collide. True duplicate-GUID replay is already blocked one
+ *     layer up, at MagnetaGateway._lzReceive's `processedGuid[_guid]`
+ *     check, before the module is ever invoked; this module-level guard is
+ *     defense-in-depth for the case where that upstream guard is bypassed
+ *     or the local (non-LZ) `executeOperation` path is used.
  *   - `block.timestamp <= deadline` enforced at the module before any token
  *     movement (SC04). Helper enforces a deadline buffer separately, but
  *     the module fails closed on expired deadlines BEFORE pulling the LP.
@@ -141,9 +155,14 @@ interface IMagnetaLpAtomicHelper {
  *   one). The honest answer is that a compromised gateway is treated as
  *   game-over across the protocol; defense is at the gateway layer.
  *
- *   SC01 HIGH (DVN quorum off-chain): Same as the 2026-06-12 follow-up.
- *   Cannot enforce on-chain until IMagnetaGateway exposes a view; the
- *   deployment script invariant is the V1 control.
+ *   SC01 HIGH (DVN quorum off-chain): RESOLVED — F-13 (audit-13 remediation).
+ *   IMagnetaGateway now exposes `requiredDVNCount()` and this module reads
+ *   it not only at construction but on EVERY execute() dispatch (see the
+ *   guard at the top of execute()). A constructor-only check meant that a
+ *   gateway later reconfigured below the 2-DVN floor would leave an already
+ *   -deployed module silently accepting calls under a weaker trust model;
+ *   the per-dispatch recheck closes that gap without requiring a redeploy
+ *   to detect the downgrade — the module now fails closed instead.
  *
  *   SC04 HIGH (no router/pair allowlist): RESOLVED in chantier #2 — the
  *   module now consumes a MagnetaRouterRegistry (Safe-governed, ideally
@@ -220,7 +239,10 @@ contract LPAtomicModule is IModule, ReentrancyGuard {
      *
      * Reverts:
      *  - `DVNQuorumTooLow` if the gateway's attested DVN floor < MIN_DVN_QUORUM
-     *    (chantier #3).
+     *    (chantier #3). This is a deploy-time sanity check only — execute()
+     *    independently re-checks the same floor on every call (F-13), so a
+     *    later downgrade of the gateway's attested quorum is caught live
+     *    without needing to redeploy this module.
      *  - `ZeroAddress` if any constructor arg is zero (no fallback to "no
      *    allowlist" — that would defeat chantier #2).
      */
@@ -267,6 +289,16 @@ contract LPAtomicModule is IModule, ReentrancyGuard {
         nonReentrant
         returns (bytes memory)
     {
+        // F-13: re-check the DVN quorum floor on EVERY dispatch, not just at
+        // construction. The constructor-only check left a live module unable
+        // to notice a later downgrade of the gateway's attested DVN floor
+        // below MIN_DVN_QUORUM — it would keep accepting execute() calls
+        // under a weakened (single-validator-class) trust model. Failing
+        // closed here means a downgrade takes effect immediately, with no
+        // redeploy required to enforce it.
+        uint8 attestedDvn = IMagnetaGateway(gateway).requiredDVNCount();
+        if (attestedDvn < MIN_DVN_QUORUM) revert DVNQuorumTooLow(attestedDvn);
+
         // SC10: refuse ETH (interface requires `payable` so we can't drop it).
         if (msg.value != 0) revert EthNotAccepted();
         // SC10: prevent calldata OOB panic on empty params.
@@ -275,10 +307,15 @@ contract LPAtomicModule is IModule, ReentrancyGuard {
         IMagnetaGateway.OpType op = IMagnetaGateway.OpType(uint8(params[0]));
         bytes calldata inner = params[1:];
 
-        // SC02: module-level replay protection. Hashing the (caller, op, inner)
-        // triple makes each user's calls scoped per (op, params); the deadline
-        // is inside `inner` so legitimate repeats with a fresh deadline pass.
-        bytes32 payloadHash = keccak256(abi.encode(ctx.caller, op, inner));
+        // SC02 / F-20: module-level replay protection. Hashing the
+        // (originChainId, caller, op, inner) tuple makes each user's calls
+        // scoped per (origin chain, op, params); the deadline is inside
+        // `inner` so legitimate repeats with a fresh deadline pass.
+        // originChainId is included so two distinct authenticated messages
+        // from different source chains never collide just because they
+        // happen to carry identical op+params (see class-level doc comment
+        // for the residual same-chain limitation).
+        bytes32 payloadHash = keccak256(abi.encode(ctx.originChainId, ctx.caller, op, inner));
         if (executedPayloads[payloadHash]) revert AlreadyExecuted();
         executedPayloads[payloadHash] = true;
 

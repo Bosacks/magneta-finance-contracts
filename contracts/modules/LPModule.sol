@@ -93,10 +93,26 @@ contract LPModule is IModule, ReentrancyGuard, Ownable2Step {
     event LPCreated(address indexed caller, address indexed token, uint256 amountToken, uint256 amountETH, uint256 liquidity);
     event LPRemoved(address indexed caller, address indexed token, uint256 liquidity, uint256 amountToken, uint256 amountETH);
     event LPBurned(address indexed caller, address indexed token, uint256 liquidity);
+    /// @notice A native dust refund could not be pushed to `to` (e.g. a
+    ///         contract recipient that rejects native currency) and was
+    ///         credited to the pull-payment ledger instead (F17).
+    event NativeRefundPending(address indexed to, uint256 amount);
+    event NativeRefundWithdrawn(address indexed to, uint256 amount);
+
+    /// @notice Native owed to a caller whose dust refund push failed. Lets a
+    ///         completed LP/swap operation stay final instead of reverting
+    ///         because an unrelated recipient can't receive native currency
+    ///         (Sentinelle F17 — mirrors MagnetaBundler's pendingWithdrawals).
+    mapping(address => uint256) public pendingRefunds;
 
     error OnlyGateway();
     error InvalidParams();
     error UnsupportedOp();
+    /// @notice Thrown when a cross-chain op is dispatched while the gateway's
+    ///         CURRENT DVN quorum has dropped below {MIN_DVN_QUORUM} — the
+    ///         constructor only proves the quorum at deploy time, so execute()
+    ///         must re-check it for any op that actually traversed a bridge.
+    error DVNQuorumBelowMinimum();
 
     /// @notice Minimum attested DVN quorum the gateway must surface for this
     ///         module to wire up. Mitigates Kelp-DAO-class single-validator
@@ -120,6 +136,24 @@ contract LPModule is IModule, ReentrancyGuard, Ownable2Step {
 
     receive() external payable {}
 
+    /// @notice Claim native owed from a dust refund whose push failed (F17
+    ///         pull-payment fallback). Callable by anyone owed a balance —
+    ///         there is no gateway/reentrancy dependency, unlike execute().
+    function withdrawPendingRefund() external nonReentrant {
+        uint256 amount = pendingRefunds[msg.sender];
+        require(amount > 0, "LPModule: nothing to withdraw");
+        pendingRefunds[msg.sender] = 0;
+        (bool ok, ) = msg.sender.call{value: amount}("");
+        require(ok, "LPModule: withdraw failed");
+        emit NativeRefundWithdrawn(msg.sender, amount);
+    }
+
+    /// @dev Credit `amount` native to `to`'s pull-payment balance (F17).
+    function _creditRefund(address to, uint256 amount) internal {
+        pendingRefunds[to] += amount;
+        emit NativeRefundPending(to, amount);
+    }
+
     /// @inheritdoc IModule
     /// @dev Dispatches by the first byte of `params`: it carries the OpType so
     ///      the same module can serve the 4 LP ops without extra indirection.
@@ -133,6 +167,15 @@ contract LPModule is IModule, ReentrancyGuard, Ownable2Step {
     {
         IMagnetaGateway.OpType op = IMagnetaGateway.OpType(uint8(params[0]));
         bytes calldata inner = params[1:];
+
+        // F4: the constructor only proves the gateway's DVN quorum once, at
+        // deploy time. Re-check it here for every op that actually traversed
+        // a bridge (originChainId != block.chainid) so a quorum that has
+        // since dropped below MIN_DVN_QUORUM is caught before this module
+        // trusts bridged params, not just at wiring time.
+        if (ctx.originChainId != block.chainid) {
+            if (IMagnetaGateway(gateway).requiredDVNCount() < MIN_DVN_QUORUM) revert DVNQuorumBelowMinimum();
+        }
 
         if (op == IMagnetaGateway.OpType.CREATE_LP) {
             if (ctx.tokenSource != address(0)) {
@@ -345,6 +388,13 @@ contract LPModule is IModule, ReentrancyGuard, Ownable2Step {
     );
 
     function _createLPFromBridgedUsdc(Context calldata ctx, bytes calldata raw) internal returns (bytes memory) {
+        // F21: this branch is funded entirely from bridged USDC — its native-dust
+        // accounting below (nativeReceived - amountETH) only tracks WETH withdrawn
+        // during this op, so any msg.value the gateway forwarded here would be
+        // silently absorbed into "dust" and refunded as if it came from the swap.
+        // Reject it outright instead of accounting for it.
+        require(msg.value == 0, "LPModule: no native for bridged LP");
+
         CrossChainLPParams memory p = abi.decode(raw, (CrossChainLPParams));
         require(p.tokenShareBps > 0 && p.tokenShareBps < 10_000, "bad share");
 
@@ -405,13 +455,17 @@ contract LPModule is IModule, ReentrancyGuard, Ownable2Step {
         IERC20(usdc).forceApprove(router, 0);
         IERC20(p.token).forceApprove(router, 0);
 
-        // Refund dust to user (same address on destination EVM chain)
+        // Refund dust to user (same address on destination EVM chain). F17: a
+        // failed native push (e.g. ctx.caller is a contract that rejects native
+        // currency) is credited to pendingRefunds instead of reverting — the
+        // swaps + LP add already completed and must not be unwound because an
+        // unrelated dust transfer couldn't land.
         uint256 tokenDust = tokenReceived - amountToken;
         if (tokenDust > 0) IERC20(p.token).safeTransfer(ctx.caller, tokenDust);
         uint256 nativeDust = nativeReceived - amountETH;
         if (nativeDust > 0) {
             (bool ok, ) = ctx.caller.call{value: nativeDust}("");
-            require(ok, "native refund failed");
+            if (!ok) _creditRefund(ctx.caller, nativeDust);
         }
 
         emit LPCreatedFromUsdc(ctx.caller, p.token, p.usdcTotal, amountToken, amountETH, liquidity);
@@ -471,12 +525,16 @@ contract LPModule is IModule, ReentrancyGuard, Ownable2Step {
     ///      cross-chain dust-refund block in _createLPFromBridgedUsdc.
     ///      `tokenDust` is the precomputed token leftover; the native leftover is
     ///      derived from the module's pre-op native balance (`nativeBefore`).
+    ///      F17: a failed native push is credited to pendingRefunds instead of
+    ///      reverting — `to` is ctx.caller and may be a contract that rejects
+    ///      native currency, and the LP add / removal has already completed by
+    ///      this point, so it must not be unwound over unrelated dust.
     function _refundDust(address to, address token, uint256 tokenDust, uint256 nativeBefore) internal {
         if (tokenDust > 0) IERC20(token).safeTransfer(to, tokenDust);
         uint256 nativeDust = address(this).balance - nativeBefore;
         if (nativeDust > 0) {
             (bool ok, ) = to.call{value: nativeDust}("");
-            require(ok, "native refund failed");
+            if (!ok) _creditRefund(to, nativeDust);
         }
     }
 

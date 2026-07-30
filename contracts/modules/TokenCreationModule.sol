@@ -69,16 +69,54 @@ contract TokenCreationModule is IModule, ReentrancyGuard, Ownable2Step {
     event AutoLiquidityFactoryUpdated(address indexed previous, address indexed current);
     event TokenOpsModuleUpdated(address indexed previous, address indexed current);
 
+    /// @notice Emitted every time `_maybeRegisterToken` is attempted, whether
+    ///         it succeeds or not (F-28 — audit-13 remediation). Previously
+    ///         every registration failure was swallowed by a bare `catch {}`
+    ///         with no on-chain signal, while `TokenSpawned` was emitted as
+    ///         though the token were fully wired to TokenOpsModule. Off-chain
+    ///         monitoring can now alert on `success == false` and inspect
+    ///         `revertData` instead of discovering the gap only when a user
+    ///         tries to MINT/FREEZE/UPDATE and finds the token unregistered.
+    /// @param  token       The freshly-created token that registration was
+    ///                     attempted for.
+    /// @param  success     Whether `registerByTokenOwner` returned normally.
+    /// @param  revertData  Raw revert data on failure (selector + payload for
+    ///                     custom errors / Error(string) / Panic(uint));
+    ///                     empty on success.
+    event TokenOpsRegistration(
+        address indexed token,
+        bool    indexed success,
+        bytes           revertData
+    );
+
     error OnlyGateway();
     error UnsupportedTemplate();
     error UnsupportedOp();
     error FactoryNotSet();
     error InvalidPayload();
+    /// @notice F-23 — mirrors LPAtomicModule.EthNotAccepted. IModule mandates
+    ///         `payable` but this module never forwards, refunds, or
+    ///         recovers msg.value, so any nonzero amount would be trapped.
+    error EthNotAccepted();
+    /// @notice F-24 — defense-in-depth replay guard, mirrors the corrected
+    ///         LPAtomicModule key (F-20).
+    error AlreadyExecuted();
+    error DVNQuorumTooLow(uint8 attested);
 
     /// @notice Minimum attested DVN quorum the gateway must surface for this
     ///         module to wire up. Mitigates Kelp-DAO-class single-validator
-    ///         risk (chantier #3 — Sentinelle 2026-06-12 SC01:2026).
+    ///         risk (chantier #3 — Sentinelle 2026-06-12 SC01:2026). Checked
+    ///         at construction AND, since F-13, on every execute() dispatch
+    ///         — see execute() for why the constructor-only check was
+    ///         insufficient.
     uint8 public constant MIN_DVN_QUORUM = 2;
+
+    /// @notice Per-message payload hash → consumed (F-24 — defense-in-depth
+    ///         replay guard). Key mirrors LPAtomicModule's corrected F-20
+    ///         key: origin chain + caller + template kind + inner params.
+    ///         See execute() for the same documented residual limitation
+    ///         (IModule.Context carries no per-message GUID/nonce).
+    mapping(bytes32 => bool) public executedPayloads;
 
     constructor(
         address _gateway,
@@ -145,8 +183,13 @@ contract TokenCreationModule is IModule, ReentrancyGuard, Ownable2Step {
         if (ops.code.length == 0) return;          // EOA or self-destructed contract — skip
         try ITokenOpsModuleRegistry(ops).registerByTokenOwner(token) {
             // success — token now has tokenAdmin == token.owner() in TokenOps
-        } catch {
-            // already-registered, owner is zero, etc — non-fatal
+            emit TokenOpsRegistration(token, true, "");
+        } catch (bytes memory reason) {
+            // already-registered, owner is zero, etc — non-fatal, but now
+            // observable off-chain (F-28) instead of silently swallowed.
+            // `catch (bytes memory)` as the sole clause catches every revert
+            // shape (custom error, Error(string), Panic(uint)).
+            emit TokenOpsRegistration(token, false, reason);
         }
     }
 
@@ -162,10 +205,37 @@ contract TokenCreationModule is IModule, ReentrancyGuard, Ownable2Step {
         nonReentrant
         returns (bytes memory result)
     {
+        // F-13: re-check the DVN quorum floor on EVERY dispatch, mirroring
+        // LPAtomicModule. The constructor-only check meant a live module had
+        // no way to notice the gateway later being reconfigured below
+        // MIN_DVN_QUORUM; it would keep accepting execute() calls under a
+        // weakened trust model. Failing closed here takes effect immediately
+        // — no redeploy required to enforce a downgrade.
+        uint8 attestedDvn = IMagnetaGateway(gateway).requiredDVNCount();
+        if (attestedDvn < MIN_DVN_QUORUM) revert DVNQuorumTooLow(attestedDvn);
+
+        // F-23: reject ETH. IModule mandates `payable` but this module never
+        // forwards, refunds, or recovers msg.value — accepting it would trap
+        // the funds forever. Mirrors LPAtomicModule's EthNotAccepted guard.
+        if (msg.value != 0) revert EthNotAccepted();
+
         if (params.length == 0) revert InvalidPayload();
 
         TemplateKind kind = TemplateKind(uint8(params[0]));
         bytes calldata inner = params[1:];
+
+        // F-24: module-level replay guard, defense-in-depth against a
+        // twice-delivered authenticated CREATE_TOKEN payload creating
+        // duplicate tokens. Key mirrors the corrected LPAtomicModule key
+        // (F-20): origin chain + caller + template kind + inner params.
+        // Same residual limitation applies — IModule.Context carries no
+        // per-message GUID/nonce, so two genuinely distinct messages from
+        // the same origin chain with byte-identical params still collide.
+        // True duplicate-GUID replay is already blocked one layer up at
+        // MagnetaGateway._lzReceive's `processedGuid[_guid]` check.
+        bytes32 payloadHash = keccak256(abi.encode(ctx.originChainId, ctx.caller, kind, inner));
+        if (executedPayloads[payloadHash]) revert AlreadyExecuted();
+        executedPayloads[payloadHash] = true;
 
         if (kind == TemplateKind.Standard) {
             return _createStandard(ctx, inner);

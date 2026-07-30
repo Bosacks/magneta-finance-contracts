@@ -55,13 +55,27 @@ contract MagnetaServiceFee is Ownable2Step {
     /// @notice Pay the protocol-set native fee for `opId`. `msg.value` must equal
     ///         `opFee[opId]` exactly (which must be non-zero / enabled). Forwards
     ///         to the FeeVault and emits a nonced event for off-chain verification.
+    /// @dev F-25: checks-effects-interactions. The nonce is reserved (read +
+    ///      incremented) BEFORE the external call to `feeVault`, not after —
+    ///      previously `paymentNonce++` was evaluated inside `emit`, i.e.
+    ///      after the external call had already run, so a callback-capable
+    ///      feeVault could reenter `payFee` mid-call and observe/consume the
+    ///      not-yet-incremented nonce. Reserving it first means a reentrant
+    ///      call simply gets the next nonce, same as any other sequential
+    ///      call — no reuse, no reordering. This does NOT change what gets
+    ///      emitted: `nonce` here is still the pre-increment value, exactly
+    ///      as `paymentNonce++` produced before, and `nonReentrant` was
+    ///      deliberately not added on top since the reservation already
+    ///      closes the gap without extra bytecode/gas on a contract live on
+    ///      20 chains.
     function payFee(bytes32 opId) external payable {
         uint256 required = opFee[opId];
         if (required == 0) revert FeeNotSet(opId);
         if (msg.value != required) revert WrongFeeAmount(msg.value, required);
+        uint256 nonce = paymentNonce++;
         (bool ok, ) = payable(feeVault).call{value: msg.value}("");
         if (!ok) revert TransferFailed();
-        emit ServiceFeePaid(msg.sender, opId, msg.value, paymentNonce++);
+        emit ServiceFeePaid(msg.sender, opId, msg.value, nonce);
     }
 
     /// @notice Owner (Safe) sets the native fee for an off-chain op id.
