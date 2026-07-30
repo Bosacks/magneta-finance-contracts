@@ -3,6 +3,16 @@
 > Fil chronologique des sessions. Anti-chronologique (plus récent en haut).
 > Voir `~/CLAUDE.md` pour la règle d'édition.
 
+## 2026-07-30 — Remédiation audit 13+14 : 27 findings de code corrigés, branche security/audit-13-remediation
+
+- Phase 1 (04e586a) : 15 findings rapport 13 hors lending (DVN re-check à chaque execute, payInLzToken rejeté, validation createDLMMPool, allowances Bundler, nonReentrant rescueETH, pull-payment dust LPModule, clés de replay + msg.value modules, CEI ServiceFee, bounds+pagination CurveFactory, event registration) + 3 findings rapport 14 Cronos
+- BREAKING Cronos : `CREATE_INTENT_TYPEHASH` changé (binding receiver/factory) → `lib/relayer/cronosRelayer.ts` à mettre à jour AVANT redéploiement
+- Phase 2 (b357de1) : réécriture comptabilité MagnetaLending — parts canoniques (F-2), ltv≠threshold (F-3), availableCash interne (F-7), fee-on-transfer mesuré (F-8), skip oracle réserves vides (F-9), primes flash-loan comptabilisées (F-11), + F-18/19/22
+- Bug attrapé en review du travail d'agent : flashLoan re-créditait la prime seule, pas le principal → fuite `amount-premium` du ledger à chaque flash-loan ; corrigé + test de conservation mutation-checké
+- Suite complète : 170 (baseline) → 228 tests, 0 échec ; tokens/ hardhat 183/183
+- Restent OUVERTS : F-1/F-5/F-6/F-12 (dérive de déploiement — seul un redeploy testnet depuis build épinglé les clôt) ; re-scan Sentinelleai à relancer (vérifier crédits OpenRouter d'abord)
+- Harnais hardhat racine cassé (`Invalid Chai property`, pré-existant, tous fichiers) — hors périmètre, à réparer
+
 ## 2026-07-29 — 16:54 — Suite verte à nouveau, routeur Flare mort, garde pré-déploiement
 
 - **`forge` ne construisait plus le repo** : Foundry résout un seul solc et les sources Uniswap vendorisées imposent 0.5.16/0.6.6. Remède : `--skip "contracts/imports/*" --skip "contracts/uniswap/*"`. PIÈGE : `/usr/bin/forge` est un binaire « ZOE » sans rapport qui sort avec le code 0 — utiliser `~/.foundry/bin/forge`
