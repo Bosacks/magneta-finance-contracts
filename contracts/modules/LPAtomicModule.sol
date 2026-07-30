@@ -14,15 +14,26 @@ interface IMagnetaRouterRegistry {
     function isRouterAllowed(address router) external view returns (bool);
 }
 
-/// Minimal UniV2 pair view used to verify a pair was created by an
-/// allowlisted router's factory (transitive trust for pairs).
-interface IUniV2PairFactoryView {
-    function factory() external view returns (address);
+/// Minimal UniV2 pair view used to read the pair's constituent tokens so the
+/// module can verify canonicity against the router's factory (F-19 — Sentinelle
+/// rescan-15). `pair.factory()` alone is spoofable: any arbitrary contract can
+/// implement a `factory()` getter that returns the allowlisted factory address
+/// without ever having actually been created by it. Reading token0()/token1()
+/// and asking the factory itself for the canonical pair closes that gap.
+interface IUniV2PairView {
+    function token0() external view returns (address);
+    function token1() external view returns (address);
 }
 
 /// Minimal UniV2 router view used to fetch the factory.
 interface IUniV2RouterFactoryView {
     function factory() external view returns (address);
+}
+
+/// Minimal UniV2 factory view used to verify a pair was actually created by
+/// the router's factory (F-19 fix).
+interface IUniV2FactoryPairView {
+    function getPair(address tokenA, address tokenB) external view returns (address pair);
 }
 
 /// Subset of MagnetaLpAtomicHelper that this module needs. The full helper
@@ -107,9 +118,27 @@ interface IMagnetaLpAtomicHelper {
  *   - Empty `params` rejected before reading `params[0]` (SC10 OOB panic).
  *   - Module-level replay protection via per-execution payload hash mapping
  *     (SC02). A repeated identical call from a compromised gateway path
- *     reverts on the second attempt. The hash mixes ctx.caller, op, and the
- *     full inner params blob — including the user-supplied deadline so the
- *     same user can legitimately re-compound with a fresh deadline.
+ *     reverts on the second attempt. F-22/F-31 (audit-13 re-scan-15):
+ *     IModule.Context now carries `guid`, the LayerZero GUID of the
+ *     authenticated message (bytes32(0) for local direct calls). When
+ *     `ctx.guid != 0` the replay key is `ctx.guid` alone — every
+ *     authenticated message is unique by LZ spec, so two genuinely distinct
+ *     bridged messages with byte-identical op+params (same origin chain,
+ *     same caller) now BOTH execute instead of the second reverting
+ *     AlreadyExecuted; a replayed/duplicated GUID still reverts. This
+ *     closes the residual limitation previously documented here (two
+ *     distinct same-origin-chain messages with identical params used to
+ *     collide because only originChainId, not a per-message identifier,
+ *     was available to key on).
+ *     When `ctx.guid == 0` (the local, non-bridged `executeOperation` path
+ *     — there is no cross-chain message to key on) the module falls back
+ *     to the pre-existing composite key: originChainId, caller, op, and the
+ *     full inner params blob — including the user-supplied deadline so
+ *     the same user can legitimately re-compound with a fresh deadline.
+ *     originChainId was added to that composite key by F-13/F-20 (audit-13
+ *     remediation) so two distinct authenticated cross-chain messages from
+ *     the same caller carrying byte-identical op+params but originating on
+ *     DIFFERENT chains don't collide on this local-fallback path either.
  *   - `block.timestamp <= deadline` enforced at the module before any token
  *     movement (SC04). Helper enforces a deadline buffer separately, but
  *     the module fails closed on expired deadlines BEFORE pulling the LP.
@@ -141,17 +170,27 @@ interface IMagnetaLpAtomicHelper {
  *   one). The honest answer is that a compromised gateway is treated as
  *   game-over across the protocol; defense is at the gateway layer.
  *
- *   SC01 HIGH (DVN quorum off-chain): Same as the 2026-06-12 follow-up.
- *   Cannot enforce on-chain until IMagnetaGateway exposes a view; the
- *   deployment script invariant is the V1 control.
+ *   SC01 HIGH (DVN quorum off-chain): RESOLVED — F-13 (audit-13 remediation).
+ *   IMagnetaGateway now exposes `requiredDVNCount()` and this module reads
+ *   it not only at construction but on EVERY execute() dispatch (see the
+ *   guard at the top of execute()). A constructor-only check meant that a
+ *   gateway later reconfigured below the 2-DVN floor would leave an already
+ *   -deployed module silently accepting calls under a weaker trust model;
+ *   the per-dispatch recheck closes that gap without requiring a redeploy
+ *   to detect the downgrade — the module now fails closed instead.
  *
  *   SC04 HIGH (no router/pair allowlist): RESOLVED in chantier #2 — the
  *   module now consumes a MagnetaRouterRegistry (Safe-governed, ideally
  *   behind a Timelock) at every execute(). Compound and migrate ops both
- *   require the router to be on the allowlist; pairs are trusted
- *   transitively via `pair.factory() == router.factory()`. An attacker who
- *   supplies an arbitrary router reverts on `RouterNotAllowed` before any
- *   token movement.
+ *   require the router to be on the allowlist; pairs are verified against
+ *   the router's own factory via `factory.getPair(token0, token1) == pair`
+ *   (F-19 hardening — Sentinelle rescan-15: the original
+ *   `pair.factory() == router.factory()` check trusted the pair's
+ *   self-reported factory, which an arbitrary contract can spoof without
+ *   ever having been created by that factory). An attacker who supplies an
+ *   arbitrary router reverts on `RouterNotAllowed` before any token
+ *   movement; an attacker who supplies a spoofed pair reverts on
+ *   `PairFactoryMismatch`.
  */
 contract LPAtomicModule is IModule, ReentrancyGuard {
     using SafeERC20 for IERC20;
@@ -220,7 +259,10 @@ contract LPAtomicModule is IModule, ReentrancyGuard {
      *
      * Reverts:
      *  - `DVNQuorumTooLow` if the gateway's attested DVN floor < MIN_DVN_QUORUM
-     *    (chantier #3).
+     *    (chantier #3). This is a deploy-time sanity check only — execute()
+     *    independently re-checks the same floor on every call (F-13), so a
+     *    later downgrade of the gateway's attested quorum is caught live
+     *    without needing to redeploy this module.
      *  - `ZeroAddress` if any constructor arg is zero (no fallback to "no
      *    allowlist" — that would defeat chantier #2).
      */
@@ -267,6 +309,16 @@ contract LPAtomicModule is IModule, ReentrancyGuard {
         nonReentrant
         returns (bytes memory)
     {
+        // F-13: re-check the DVN quorum floor on EVERY dispatch, not just at
+        // construction. The constructor-only check left a live module unable
+        // to notice a later downgrade of the gateway's attested DVN floor
+        // below MIN_DVN_QUORUM — it would keep accepting execute() calls
+        // under a weakened (single-validator-class) trust model. Failing
+        // closed here means a downgrade takes effect immediately, with no
+        // redeploy required to enforce it.
+        uint8 attestedDvn = IMagnetaGateway(gateway).requiredDVNCount();
+        if (attestedDvn < MIN_DVN_QUORUM) revert DVNQuorumTooLow(attestedDvn);
+
         // SC10: refuse ETH (interface requires `payable` so we can't drop it).
         if (msg.value != 0) revert EthNotAccepted();
         // SC10: prevent calldata OOB panic on empty params.
@@ -275,10 +327,18 @@ contract LPAtomicModule is IModule, ReentrancyGuard {
         IMagnetaGateway.OpType op = IMagnetaGateway.OpType(uint8(params[0]));
         bytes calldata inner = params[1:];
 
-        // SC02: module-level replay protection. Hashing the (caller, op, inner)
-        // triple makes each user's calls scoped per (op, params); the deadline
-        // is inside `inner` so legitimate repeats with a fresh deadline pass.
-        bytes32 payloadHash = keccak256(abi.encode(ctx.caller, op, inner));
+        // SC02 / F-20 / F-22 / F-31: module-level replay protection.
+        // Preferred key is the message GUID (unique per authenticated
+        // message by LZ spec) so two genuinely distinct bridged messages
+        // with byte-identical op+params never collide. Local direct calls
+        // carry no GUID (ctx.guid == 0) and fall back to the composite
+        // (originChainId, caller, op, inner) key — the deadline lives
+        // inside `inner` so legitimate local repeats with a fresh deadline
+        // still pass; originChainId keeps that fallback key scoped per
+        // origin chain (F-13/F-20).
+        bytes32 payloadHash = ctx.guid != bytes32(0)
+            ? ctx.guid
+            : keccak256(abi.encode(ctx.originChainId, ctx.caller, op, inner));
         if (executedPayloads[payloadHash]) revert AlreadyExecuted();
         executedPayloads[payloadHash] = true;
 
@@ -371,17 +431,28 @@ contract LPAtomicModule is IModule, ReentrancyGuard {
         return abi.encode(ctx.caller, p.srcPair, p.dstRouter, p.lpAmount);
     }
 
-    /// @dev Chantier #2 — router/pair allowlist enforcement.
-    ///      `router` must be on the registry allowlist; `pair` must be from
-    ///      that router's factory (transitive trust). Reverts with a
-    ///      specific custom error so off-chain decoders can distinguish.
+    /// @dev Chantier #2 — router/pair allowlist enforcement. Hardened by F-19
+    ///      (Sentinelle rescan-15): `router` must be on the registry allowlist,
+    ///      and `pair` must be the CANONICAL pair the router's factory itself
+    ///      created for (token0, token1) — i.e.
+    ///      `factory.getPair(token0, token1) == pair`. The prior check only
+    ///      compared `pair.factory() == router.factory()`, which trusts
+    ///      whatever `pair` claims its own factory to be; an attacker's
+    ///      contract can implement `factory()` to return the allowlisted
+    ///      factory address without ever having been created by it. Asking
+    ///      the factory itself "what pair do you have for these two tokens"
+    ///      is the only way to establish the pair was genuinely created by
+    ///      that factory. Reverts with a specific custom error so off-chain
+    ///      decoders can distinguish.
     function _checkRouterAndPair(address router, address pair) private view {
         if (!IMagnetaRouterRegistry(registry).isRouterAllowed(router)) {
             revert RouterNotAllowed(router);
         }
-        address pairFactory   = IUniV2PairFactoryView(pair).factory();
         address routerFactory = IUniV2RouterFactoryView(router).factory();
-        if (pairFactory != routerFactory) {
+        address token0 = IUniV2PairView(pair).token0();
+        address token1 = IUniV2PairView(pair).token1();
+        address canonicalPair = IUniV2FactoryPairView(routerFactory).getPair(token0, token1);
+        if (canonicalPair != pair) {
             revert PairFactoryMismatch(pair, router);
         }
     }

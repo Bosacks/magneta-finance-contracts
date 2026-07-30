@@ -192,11 +192,15 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
             emit ServiceFeeCollected(msg.sender, op, fee);
         }
 
+        // F-22/F-31: local direct call — no cross-chain message to identify,
+        // so guid is the zero sentinel. Modules fall back to the composite
+        // replay key (originChainId, caller, op, inner) for this path.
         IModule.Context memory ctx = IModule.Context({
             caller: msg.sender,
             originChainId: block.chainid,
             feeVault: _feeVault,
-            tokenSource: address(0)
+            tokenSource: address(0),
+            guid: bytes32(0)
         });
 
         result = IModule(module).execute{value: opValue}(ctx, params);
@@ -333,11 +337,20 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
         // Approve module to pull bridged tokens from this gateway
         IERC20(p.bridgedToken).forceApprove(module, p.bridgedAmount);
 
+        // F-22/F-31: `_guid` is the LayerZero GUID of the version-1 message
+        // that created this pending op in `_lzReceive` (it is the mapping
+        // key `pendingValueOps[_guid]` looked up above) — already verified
+        // once at receipt time (peer check + processedGuid dedup), so it is
+        // both authenticated and unique per LZ spec. Reusing it here (rather
+        // than minting a new identifier at fulfill time) means the module's
+        // replay key spans the FULL lifecycle of this cross-chain value op,
+        // not just the fulfill call.
         IModule.Context memory ctx = IModule.Context({
             caller: p.caller,
             originChainId: 0, // cross-chain marker
             feeVault: _feeVault,
-            tokenSource: address(this)
+            tokenSource: address(this),
+            guid: _guid
         });
 
         bytes memory result = IModule(module).execute(ctx, p.params);
@@ -528,11 +541,17 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
             address module = _modules[op];
             if (module == address(0)) revert ModuleNotSet(op);
 
+            // F-22/F-31: `_guid` is the LayerZero GUID of THIS message,
+            // already checked against `processedGuid` above — unique by LZ
+            // spec, so two distinct authenticated messages with identical
+            // op+params from the same origin chain no longer collide in the
+            // module's replay key.
             IModule.Context memory ctx = IModule.Context({
                 caller: caller,
                 originChainId: _srcEidToChainId(_origin.srcEid),
                 feeVault: _feeVault,
-                tokenSource: address(0)
+                tokenSource: address(0),
+                guid: _guid
             });
 
             bytes memory result = IModule(module).execute(ctx, params);

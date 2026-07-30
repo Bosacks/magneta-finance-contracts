@@ -35,6 +35,18 @@ contract MagnetaFactory is Ownable2Step, Pausable {
     ///         fees, so 1e17 = 10%).
     uint256 public constant MAX_SWAP_FEE_WAD = 1e17; // 10%
 
+    /// @notice Upper bound for the combined `lpFeeBps + protocolFeeBps` accepted
+    ///         by `createDLMMPool`. Mirrors MagnetaDLMM's own constructor cap
+    ///         (`DLMM: total fee > 10%`) so a bad call fails fast at the
+    ///         factory with a clear reason instead of reverting deep inside
+    ///         the pool's constructor, and stays correct even if MagnetaDLMM's
+    ///         internal check is ever weakened (F-14).
+    uint16 public constant MAX_DLMM_TOTAL_FEE_BPS = 1000; // 10%
+
+    /// @notice Upper bound for `binStep` accepted by `createDLMMPool`. Mirrors
+    ///         MagnetaDLMM's own constructor cap (F-14).
+    uint16 public constant MAX_DLMM_BIN_STEP = 500;
+
     /// @notice Gate for {createMultiPool}. Disabled by default so that even
     ///         after the MagnetaMultiPool reserve-accounting rework a
     ///         governance review must explicitly enable multi-pool creation
@@ -87,6 +99,19 @@ contract MagnetaFactory is Ownable2Step, Pausable {
 
     /**
      * @dev Deploys a new DLMM (Dynamic Liquidity Market Maker) pool.
+     *
+     * F-14: MagnetaDLMM's constructor already reverts on most of these bad
+     * inputs, but that check happens after CREATE has already started
+     * running, deep inside the pool's own logic. Validating here makes the
+     * factory fail fast with a factory-level reason and keeps the guard in
+     * place even if MagnetaDLMM's own checks are ever changed. `binStep` is
+     * bounded rather than merely nonzero because MagnetaDLMM's constructor
+     * itself caps it at 500 (5%) — passing it through unchecked here would
+     * just move the revert one frame deeper, not remove the risk.
+     * `initialActiveId` (uint24) needs no extra bound: BinHelper.getPriceFromId
+     * clamps the number of steps walked from BASE_ID to MAX_STEPS internally
+     * for any binId, so no value of initialActiveId can blow up gas or price
+     * math.
      */
     function createDLMMPool(
         address tokenX,
@@ -97,6 +122,11 @@ contract MagnetaFactory is Ownable2Step, Pausable {
         uint24 initialActiveId,
         address feeRecipient
     ) external whenNotPaused returns (address pool) {
+        require(tokenX != address(0) && tokenY != address(0), "MagnetaFactory: zero token");
+        require(tokenX != tokenY, "MagnetaFactory: identical tokens");
+        require(feeRecipient != address(0), "MagnetaFactory: zero fee recipient");
+        require(binStep > 0 && binStep <= MAX_DLMM_BIN_STEP, "MagnetaFactory: binStep out of range");
+        require(uint256(lpFeeBps) + protocolFeeBps <= MAX_DLMM_TOTAL_FEE_BPS, "MagnetaFactory: dlmm fee too high");
         pool = address(new MagnetaDLMM(tokenX, tokenY, binStep, lpFeeBps, protocolFeeBps, initialActiveId, msg.sender, feeRecipient));
         dlmmPools.push(pool);
         emit DLMMPoolCreated(pool, tokenX, tokenY, binStep, msg.sender);
@@ -141,10 +171,18 @@ contract MagnetaFactory is Ownable2Step, Pausable {
     }
 
     /// @notice Revoke an address's pauser role. Owner-only.
+    /// @dev Sentinelle rescan-15 F-32: if the removed account is the
+    ///      canonical {pauseGuardian}, clear that view too — otherwise
+    ///      monitoring reads a guardian address that can no longer pause.
+    ///      Mirrors the pattern already applied in MagnetaLending.
     function removePauser(address account) external onlyOwner {
         require(account != address(0), "MagnetaFactory: zero pauser");
         isPauser[account] = false;
         emit PauserRemoved(account);
+        if (account == pauseGuardian) {
+            pauseGuardian = address(0);
+            emit PauseGuardianUpdated(account, address(0));
+        }
     }
 
     /// @notice Deprecated single-guardian setter, retained for back-compat.

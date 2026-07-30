@@ -102,15 +102,17 @@ contract MagnetaLendingTest is Test {
         usdcFeed = new MockPriceFeed(int256(USDC_PRICE));
         wethFeed = new MockPriceFeed(int256(WETH_PRICE));
 
-        // Init reserves
-        lending.initReserve(address(usdc), 8000, 8500); // 80% LTV, 85% liq threshold
-        lending.initReserve(address(weth), 7500, 8000); // 75% LTV, 80% liq threshold
-
         // Set price feeds. Wide bounds + deviation disabled so existing baseline tests
         // (which crash WETH from $2000 to $1000 in a single tx for liquidation flow)
         // still pass. Dedicated oracle tests below exercise tighter configs.
+        // F-19: initReserve now requires a price feed to already be configured, so
+        // setPriceFeed must run before initReserve.
         lending.setPriceFeed(address(usdc), address(usdcFeed), address(0), 0.5e18, 2e18, 0);
         lending.setPriceFeed(address(weth), address(wethFeed), address(0), 100e18, 10_000e18, 0);
+
+        // Init reserves
+        lending.initReserve(address(usdc), 8000, 8500); // 80% LTV, 85% liq threshold
+        lending.initReserve(address(weth), 7500, 8000); // 75% LTV, 80% liq threshold
 
         // Fund users
         usdc.mint(alice, 100_000e6);
@@ -130,7 +132,7 @@ contract MagnetaLendingTest is Test {
     }
 
     function test_initReserve_cannotInitTwice() public {
-        vm.expectRevert("Reserve already active");
+        vm.expectRevert("Reserve already initialized");
         lending.initReserve(address(usdc), 8000, 8500);
     }
 
@@ -169,8 +171,9 @@ contract MagnetaLendingTest is Test {
     function test_oracle_normalizesNonStandardDecimals() public {
         MockPriceFeedWithDecimals f = new MockPriceFeedWithDecimals(int256(1234e18), 18);
         MockToken tok = new MockToken("X", "X", 18);
-        lending.initReserve(address(tok), 5000, 6000);
+        // F-19: feed must be configured before initReserve.
         lending.setPriceFeed(address(tok), address(f), address(0), 1, type(uint256).max, 0);
+        lending.initReserve(address(tok), 5000, 6000);
         assertEq(lending.getAssetPrice(address(tok)), 1234e18);
     }
 
@@ -203,20 +206,32 @@ contract MagnetaLendingTest is Test {
     }
 
     /// refreshPrice itself must enforce the deviation cap.
-    function test_oracle_refreshPrice_enforcesDeviation() public {
+    /// Rescan-15 F-9: the strict read path still enforces the deviation cap,
+    /// but refreshPrice now STEPS the reference toward a large move (one
+    /// cap-step per block) instead of reverting and freezing the market.
+    function test_oracle_refreshPrice_stepsTowardLargeMove() public {
         lending.setPriceFeed(address(weth), address(wethFeed), address(0), 100e18, 10_000e18, 2000);
         lending.refreshPrice(address(weth));   // anchor at $2000
         wethFeed.setPrice(1000e8);             // 50% drop
+
         vm.expectRevert("Price deviation too high");
-        lending.refreshPrice(address(weth));
+        lending.getAssetPrice(address(weth));  // strict path unchanged
+
+        lending.refreshPrice(address(weth));   // steps 2000 -> 1600 (20% cap)
+        (, , , , , , , uint256 lastPrice, ) = lending.priceFeeds(address(weth));
+        assertEq(lastPrice, 1600e18, "one cap-step per call");
+
+        vm.expectRevert("One anchor step per block");
+        lending.refreshPrice(address(weth));   // rate-limited within the block
     }
 
     /// Deviation cap is skipped on first read (lastPrice == 0).
     function test_oracle_deviationCap_skippedOnFirstRead() public {
         MockPriceFeed f = new MockPriceFeed(int256(2000e8));
         MockToken tok = new MockToken("X", "X", 18);
-        lending.initReserve(address(tok), 5000, 6000);
+        // F-19: feed must be configured before initReserve.
         lending.setPriceFeed(address(tok), address(f), address(0), 100e18, 10_000e18, 1000); // 10% cap
+        lending.initReserve(address(tok), 5000, 6000);
 
         // No prior refresh → lastPrice = 0 → no deviation enforced.
         assertEq(lending.getAssetPrice(address(tok)), 2000e18);
@@ -238,7 +253,7 @@ contract MagnetaLendingTest is Test {
         MockPriceFeed eth = new MockPriceFeed(int256(2000e8));
 
         MockToken cbeth = new MockToken("cbETH", "cbETH", 18);
-        lending.initReserve(address(cbeth), 7000, 7500);
+        // F-19: feed must be configured before initReserve.
         lending.setPriceFeed(
             address(cbeth),
             address(eth),     // USD feed (ETH/USD)
@@ -247,6 +262,7 @@ contract MagnetaLendingTest is Test {
             10_000e18,
             0
         );
+        lending.initReserve(address(cbeth), 7000, 7500);
 
         // Expected: 2000 * 1.05 = 2100 USD per cbETH (in 18 dec)
         assertEq(lending.getAssetPrice(address(cbeth)), 2100e18);
@@ -258,9 +274,10 @@ contract MagnetaLendingTest is Test {
         MockPriceFeed flatUsd = new MockPriceFeed(int256(1e8)); // $1 — wrong for cbETH!
 
         MockToken cbeth = new MockToken("cbETH", "cbETH", 18);
-        lending.initReserve(address(cbeth), 7000, 7500);
         // Operator forgot ratioFeed but set a sensible floor of $100. Floor catches it.
+        // F-19: feed must be configured before initReserve.
         lending.setPriceFeed(address(cbeth), address(flatUsd), address(0), 100e18, 10_000e18, 0);
+        lending.initReserve(address(cbeth), 7000, 7500);
 
         vm.expectRevert("Price below floor");
         lending.getAssetPrice(address(cbeth));
@@ -388,7 +405,8 @@ contract MagnetaLendingTest is Test {
         vm.startPrank(alice);
         weth.approve(address(lending), wethDeposit);
         lending.deposit(address(weth), wethDeposit);
-        vm.expectRevert("Health factor too low to borrow");
+        // F-3: borrow power is now gated on avgLtv, not the liquidation threshold.
+        vm.expectRevert("Borrow exceeds LTV limit");
         lending.borrow(address(usdc), usdcBorrow);
         vm.stopPrank();
     }

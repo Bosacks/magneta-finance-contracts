@@ -8,11 +8,19 @@ import "../contracts/interfaces/IModule.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
-/// @dev A UniV2-style LP token that also answers `factory()`, which
-///      LPAtomicModule reads to bind a pair to its router.
+/// @dev A UniV2-style LP token that also answers `factory()`/`token0()`/
+///      `token1()`. F-19: LPAtomicModule now verifies canonicity via
+///      `factory.getPair(token0, token1) == pair` instead of trusting
+///      `pair.factory()` alone, so the mock needs token0/token1 too.
 contract PairToken is ERC20 {
     address public factory;
-    constructor(address _factory) ERC20("LP", "LP") { factory = _factory; }
+    address public token0;
+    address public token1;
+    constructor(address _factory, address _token0, address _token1) ERC20("LP", "LP") {
+        factory = _factory;
+        token0 = _token0;
+        token1 = _token1;
+    }
     function mint(address to, uint256 amt) external { _mint(to, amt); }
     function burn(address from, uint256 amt) external { _burn(from, amt); }
 }
@@ -20,6 +28,21 @@ contract PairToken is ERC20 {
 contract RouterStub {
     address public factory;
     constructor(address _factory) { factory = _factory; }
+}
+
+/// @dev A real, working UniV2-style factory: `getPair` is now load-bearing
+///      (F-19) rather than a value that's merely compared for equality.
+contract FactoryStub {
+    mapping(bytes32 => address) private _pairs;
+    function setPair(address tokenA, address tokenB, address pair) external {
+        _pairs[_key(tokenA, tokenB)] = pair;
+    }
+    function getPair(address tokenA, address tokenB) external view returns (address) {
+        return _pairs[_key(tokenA, tokenB)];
+    }
+    function _key(address a, address b) private pure returns (bytes32) {
+        return keccak256(abi.encodePacked(a, b));
+    }
 }
 
 contract RegistryStub {
@@ -41,7 +64,7 @@ contract HelperStub {
     uint16 public consumeBps = 10_000;
     PairToken public newLp;
 
-    constructor() { newLp = new PairToken(address(this)); }
+    constructor() { newLp = new PairToken(address(this), address(0xAAA1), address(0xAAA2)); }
 
     function setConsumeBps(uint16 bps) external { consumeBps = bps > 10_000 ? 10_000 : bps; }
 
@@ -119,7 +142,8 @@ contract LPAtomicHandler is Test {
             caller: address(user),
             originChainId: block.chainid,
             feeVault: address(0xFEE0),
-            tokenSource: address(0)
+            tokenSource: address(0),
+            guid: bytes32(0)
         });
     }
 
@@ -223,19 +247,27 @@ contract LPAtomicModuleInvariantTest is Test {
     GatewayStub2 gw;
     PairToken pair;
     RouterStub router;
+    FactoryStub factory;
     RegistryStub registry;
     HelperStub helper;
     AtomicUser user;
     LPAtomicHandler handler;
-    address constant FACTORY = address(0xFAC0);
+    address constant TOKEN0 = address(0x1111);
+    address constant TOKEN1 = address(0x2222);
 
     function setUp() public {
-        pair     = new PairToken(FACTORY);
-        router   = new RouterStub(FACTORY);
+        factory  = new FactoryStub();
+        pair     = new PairToken(address(factory), TOKEN0, TOKEN1);
+        router   = new RouterStub(address(factory));
         registry = new RegistryStub();
         helper   = new HelperStub();
         gw       = new GatewayStub2();
         user     = new AtomicUser();
+
+        // F-19: register the canonical (token0, token1) -> pair mapping in
+        // the real factory, which _checkRouterAndPair now consults directly
+        // instead of trusting the pair's self-reported factory() value.
+        factory.setPair(TOKEN0, TOKEN1, address(pair));
 
         registry.setAllowed(address(router), true);
         mod = new LPAtomicModule(address(gw), address(helper), address(registry));
@@ -304,7 +336,7 @@ contract LPAtomicReachabilityTest is LPAtomicModuleInvariantTest {
 
         IModule.Context memory ctx = IModule.Context({
             caller: address(user), originChainId: block.chainid,
-            feeVault: address(0xFEE0), tokenSource: address(0)
+            feeVault: address(0xFEE0), tokenSource: address(0), guid: bytes32(0)
         });
 
         // NOT wrapped in try/catch: a revert must fail this test.

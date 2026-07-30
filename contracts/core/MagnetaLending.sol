@@ -4,15 +4,56 @@ pragma solidity 0.8.20;
 /// ⚠️ NOT FOR PRODUCTION ⚠️
 ///
 /// MagnetaLending is V1.1+ scope — lending / flash-loan surface is
-/// outside V1 launch. Sentinelle Multi-AI 2026-05-22 returned
-/// CAUTION 52/100 with:
-///   - HIGH SC02: borrow() and flashLoan() use raw
-///     `balanceOf(address(this))` for collateral / liquidity math,
-///     making them trivially manipulable via direct ERC20 donations
-///     (Venus Protocol March 2026 $2M+ pattern).
-/// Replace balanceOf with internal per-token reserve accounting
-/// before any production use. Do NOT deploy until the V1.1 audit
-/// pass is complete.
+/// outside V1 launch. Sentinelle Multi-AI audit #13 (2026-07-30)
+/// returned 2 CRITICAL + 7 findings on this contract, all remediated
+/// in this pass:
+///   - F-2 CRITICAL: `totalSupplied`/`totalBorrowed` were nominal
+///     (principal-only) accumulators. Repaying or withdrawing an
+///     interest-inclusive amount subtracted more than the stale
+///     nominal figure held, underflowing and bricking the reserve
+///     (last depositors could never withdraw). FIXED: shares
+///     (`totalSupplyShares`/`totalDebtShares`) are now the sole
+///     source of truth; underlying totals are derived on read via
+///     the index (`getTotalSupplied`/`getTotalBorrowed`).
+///   - F-3 CRITICAL: borrow power was gated on `liquidationThreshold`
+///     instead of `ltv`, so a position could be opened already
+///     inside its own liquidation band. FIXED: `avgLtv` (borrow
+///     power) and `avgLiquidationThreshold` (health factor /
+///     liquidation) are now computed and used separately.
+///   - F-7 HIGH (previously flagged 2026-05-22 as SC02): borrow()
+///     and flashLoan() used raw `balanceOf(address(this))` for
+///     liquidity math, trivially manipulable via direct ERC20
+///     donations (Venus Protocol March 2026 $2M+ pattern). RESOLVED:
+///     liquidity checks now use an internal `availableCash` ledger
+///     per reserve; `balanceOf` is only read to verify flash-loan
+///     repayment.
+///   - F-8 HIGH: fee-on-transfer tokens could mint shares / clear
+///     debt against the nominal amount instead of what was actually
+///     received. FIXED: deposit/repay/liquidate all measure the
+///     actual balance delta.
+///   - F-9 HIGH: an unrelated stale/misconfigured oracle blocked
+///     borrow/withdraw/liquidate for users with zero exposure to
+///     that reserve. FIXED: reserves with 0 collateral and 0 debt
+///     shares are skipped before any `getAssetPrice` call.
+///   - F-11/F-18 MEDIUM: flash-loan premiums were not accounted for
+///     anywhere, and duplicate assets in one call were not rejected.
+///     FIXED: premiums split reserve-factor/suppliers via
+///     `protocolFees`/`supplyIndex`; duplicate assets revert.
+///   - F-19 HIGH: `initReserve` accepted any ltv/threshold and no
+///     price feed, and there was no way to patch a live reserve's
+///     risk params without redeploying. FIXED: bounds enforced at
+///     init, feed required first; `setReserveParams`/
+///     `setReserveActive` added.
+///   - F-22: share mint/burn rounding was not directionally
+///     protocol-favoring. FIXED: deposits/borrows mint (round
+///     down/up respectively away from the user); withdrawals/repays
+///     burn (round up/down respectively, also away from the user).
+///
+/// This remediation pass changes the ABI (`ReserveData` layout,
+/// `calculateUserAccountData` return values, several revert
+/// strings) — a redeploy is required regardless of prior testnet
+/// deployments. Do NOT deploy to production until the full V1.1
+/// audit pass is complete.
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
@@ -52,8 +93,9 @@ contract MagnetaLending is Ownable2Step, Pausable, ReentrancyGuard {
 
     struct ReserveData {
         bool isActive;
-        uint256 totalSupplied;
-        uint256 totalBorrowed;
+        uint256 totalSupplyShares;  // Shares are the source of truth; underlying is derived via supplyIndex.
+        uint256 totalDebtShares;    // Shares are the source of truth; underlying is derived via borrowIndex.
+        uint256 availableCash;      // Internal cash ledger — NOT balanceOf(this). Donations never inflate this.
         uint256 ltv;           // Loan to Value (e.g., 7500 = 75%)
         uint256 liquidationThreshold;
         uint256 supplyIndex;    // For interest accrual
@@ -97,6 +139,9 @@ contract MagnetaLending is Ownable2Step, Pausable, ReentrancyGuard {
     mapping(address => UserData) private users;
     mapping(address => FeedConfig) public priceFeeds; // Asset -> oracle config
 
+    /// @notice Accrued protocol share of flash-loan premiums, withdrawable by the owner.
+    mapping(address => uint256) public protocolFees;
+
     uint256 public constant SECONDS_PER_YEAR = 31536000;
     uint256 public constant BASE_RATE = 2e16; // 2% Base APY
     uint256 public constant KINK = 8e17;      // 80% Utilization Kink
@@ -111,6 +156,10 @@ contract MagnetaLending is Ownable2Step, Pausable, ReentrancyGuard {
     uint256 public constant PRICE_STALENESS_THRESHOLD = 3600; // 1 hour
     uint256 public constant PRICE_PRECISION = 1e18;
 
+    // --- Errors ---
+
+    error DuplicateFlashLoanAsset(address asset);
+
     // --- Events ---
 
     event Deposit(address indexed asset, address indexed user, uint256 amount);
@@ -124,6 +173,9 @@ contract MagnetaLending is Ownable2Step, Pausable, ReentrancyGuard {
     event PauseGuardianUpdated(address indexed oldGuardian, address indexed newGuardian);
     event PauserAdded(address indexed account);
     event PauserRemoved(address indexed account);
+    event ProtocolFeesWithdrawn(address indexed asset, address indexed to, uint256 amount);
+    event ReserveParamsUpdated(address indexed asset, uint256 ltv, uint256 liquidationThreshold);
+    event ReserveActiveSet(address indexed asset, bool isActive);
 
     /// @notice Canonical human guardian (back-compat view). Kept in sync with
     ///         {isPauser} by {setPauseGuardian}. Prefer {addPauser}/{removePauser}.
@@ -150,13 +202,24 @@ contract MagnetaLending is Ownable2Step, Pausable, ReentrancyGuard {
         uint256 ltv,
         uint256 liquidationThreshold
     ) external onlyOwner {
-        require(!reserves[asset].isActive, "Reserve already active");
+        // Rescan-15 F-1: key the "already initialized" guard on supplyIndex,
+        // not isActive — a reserve deactivated via setReserveActive(false)
+        // still has supplyIndex != 0, and re-running initReserve on it would
+        // wipe totalSupplyShares/totalDebtShares/availableCash while user
+        // positions persist, and push a duplicate allReserves entry.
+        require(reserves[asset].supplyIndex == 0, "Reserve already initialized");
+        require(
+            ltv > 0 && liquidationThreshold >= ltv && liquidationThreshold <= BPS_DIVISOR,
+            "Invalid risk params"
+        );
+        require(priceFeeds[asset].isSet, "Price feed not set");
         // NOTE: Aderyn flags this as a CEI violation, but reading metadata before state initialization is safe.
         uint8 decimals = IERC20Metadata(asset).decimals();
         reserves[asset] = ReserveData({
             isActive: true,
-            totalSupplied: 0,
-            totalBorrowed: 0,
+            totalSupplyShares: 0,
+            totalDebtShares: 0,
+            availableCash: 0,
             ltv: ltv,
             liquidationThreshold: liquidationThreshold,
             supplyIndex: 1e18,
@@ -165,6 +228,38 @@ contract MagnetaLending is Ownable2Step, Pausable, ReentrancyGuard {
             decimals: decimals
         });
         allReserves.push(asset);
+    }
+
+    /**
+     * @dev Update risk params on an already-initialized reserve, without a
+     * redeploy. Same bounds as {initReserve}.
+     */
+    function setReserveParams(
+        address asset,
+        uint256 ltv,
+        uint256 liquidationThreshold
+    ) external onlyOwner {
+        ReserveData storage reserve = reserves[asset];
+        require(reserve.supplyIndex != 0, "Reserve not initialized");
+        require(
+            ltv > 0 && liquidationThreshold >= ltv && liquidationThreshold <= BPS_DIVISOR,
+            "Invalid risk params"
+        );
+        reserve.ltv = ltv;
+        reserve.liquidationThreshold = liquidationThreshold;
+        emit ReserveParamsUpdated(asset, ltv, liquidationThreshold);
+    }
+
+    /**
+     * @dev Toggle a reserve's active flag. Inactive reserves refuse new
+     * deposit()/borrow() calls but always allow withdraw()/repay()/
+     * liquidate() — users must never be locked out of exiting a market.
+     */
+    function setReserveActive(address asset, bool active) external onlyOwner {
+        ReserveData storage reserve = reserves[asset];
+        require(reserve.supplyIndex != 0, "Reserve not initialized");
+        reserve.isActive = active;
+        emit ReserveActiveSet(asset, active);
     }
 
     /**
@@ -219,6 +314,46 @@ contract MagnetaLending is Ownable2Step, Pausable, ReentrancyGuard {
     // --- Internal/Interest Functions ---
 
     /**
+     * @dev mulDiv rounding UP. No external dependency — small, self-contained
+     * helper used wherever a share burn or debt-share mint must round away
+     * from the user (protocol-favoring direction, F-22).
+     */
+    function _mulDivUp(uint256 x, uint256 y, uint256 denominator) internal pure returns (uint256) {
+        uint256 product = x * y;
+        if (product == 0) return 0;
+        return (product - 1) / denominator + 1;
+    }
+
+    /**
+     * @dev Total underlying currently supplied to `asset`, derived from
+     * shares × index. This is interest-inclusive and always in sync — there
+     * is no separate nominal accumulator to drift out of step (F-2).
+     */
+    function _totalSuppliedUnderlying(address asset) internal view returns (uint256) {
+        ReserveData storage reserve = reserves[asset];
+        return (reserve.totalSupplyShares * reserve.supplyIndex) / 1e18;
+    }
+
+    /**
+     * @dev Total underlying currently borrowed from `asset`, derived from
+     * shares × index (F-2).
+     */
+    function _totalBorrowedUnderlying(address asset) internal view returns (uint256) {
+        ReserveData storage reserve = reserves[asset];
+        return (reserve.totalDebtShares * reserve.borrowIndex) / 1e18;
+    }
+
+    /// @notice Interest-inclusive total supplied for `asset`.
+    function getTotalSupplied(address asset) public view returns (uint256) {
+        return _totalSuppliedUnderlying(asset);
+    }
+
+    /// @notice Interest-inclusive total borrowed for `asset`.
+    function getTotalBorrowed(address asset) public view returns (uint256) {
+        return _totalBorrowedUnderlying(asset);
+    }
+
+    /**
      * @dev Updates reserve data including interest accrual based on utilization
      */
     function _updateReserve(address asset) internal {
@@ -240,10 +375,13 @@ contract MagnetaLending is Ownable2Step, Pausable, ReentrancyGuard {
         reserve.lastUpdateTimestamp = block.timestamp;
     }
 
+    /// @dev Utilization is computed on interest-inclusive derived totals — never on
+    /// stale nominal accumulators (F-2).
     function getUtilization(address asset) public view returns (uint256) {
-        ReserveData storage reserve = reserves[asset];
-        if (reserve.totalSupplied == 0) return 0;
-        return (reserve.totalBorrowed * 1e18) / reserve.totalSupplied;
+        uint256 totalSupplied = _totalSuppliedUnderlying(asset);
+        if (totalSupplied == 0) return 0;
+        uint256 totalBorrowed = _totalBorrowedUnderlying(asset);
+        return (totalBorrowed * 1e18) / totalSupplied;
     }
 
     function getBorrowRate(address asset, uint256 utilization) public pure returns (uint256) {
@@ -292,18 +430,8 @@ contract MagnetaLending is Ownable2Step, Pausable, ReentrancyGuard {
      * check is skipped — bounds + staleness still apply.
      */
     function getAssetPrice(address asset) public view returns (uint256) {
+        uint256 price18 = _validatedPrice(asset);
         FeedConfig storage cfg = priceFeeds[asset];
-        require(cfg.isSet, "Price feed not set");
-
-        uint256 price18 = _normalize(_readFeed(cfg.feed), cfg.feedDecimals);
-
-        if (cfg.ratioFeed != address(0)) {
-            uint256 ratio18 = _normalize(_readFeed(cfg.ratioFeed), cfg.ratioDecimals);
-            price18 = (price18 * ratio18) / PRICE_PRECISION;
-        }
-
-        require(price18 >= cfg.minPrice, "Price below floor");
-        require(price18 <= cfg.maxPrice, "Price above ceiling");
 
         if (cfg.lastPrice != 0 && cfg.maxDeviationBps != 0) {
             uint256 diff = price18 > cfg.lastPrice ? price18 - cfg.lastPrice : cfg.lastPrice - price18;
@@ -312,6 +440,26 @@ contract MagnetaLending is Ownable2Step, Pausable, ReentrancyGuard {
         }
 
         return price18;
+    }
+
+    /**
+     * @dev Feed read with staleness/round/bounds guards but WITHOUT the
+     * lastPrice-deviation check — the target price the stepped re-anchor in
+     * {refreshPrice} walks toward (Rescan-15 F-9).
+     */
+    function _validatedPrice(address asset) internal view returns (uint256 price18) {
+        FeedConfig storage cfg = priceFeeds[asset];
+        require(cfg.isSet, "Price feed not set");
+
+        price18 = _normalize(_readFeed(cfg.feed), cfg.feedDecimals);
+
+        if (cfg.ratioFeed != address(0)) {
+            uint256 ratio18 = _normalize(_readFeed(cfg.ratioFeed), cfg.ratioDecimals);
+            price18 = (price18 * ratio18) / PRICE_PRECISION;
+        }
+
+        require(price18 >= cfg.minPrice, "Price below floor");
+        require(price18 <= cfg.maxPrice, "Price above ceiling");
     }
 
     /**
@@ -325,37 +473,101 @@ contract MagnetaLending is Ownable2Step, Pausable, ReentrancyGuard {
         emit PriceLastUpdated(asset, price);
     }
 
+    /// @notice Block of the last CLAMPED re-anchor step per asset — rate-limits
+    ///         the stepped walk in {refreshPrice} to one deviation-cap step per
+    ///         block (Rescan-15 F-9).
+    mapping(address => uint256) public lastAnchorStepBlock;
+
     /**
      * @dev Permissionless: anyone can re-anchor lastPrice for an asset by reading
      * the validated price now. Useful for keepers to keep the deviation reference
      * fresh on assets that are sitting as collateral but not actively traded.
-     * Reverts under the same conditions as getAssetPrice (bounds/staleness/round/dev).
+     *
+     * Rescan-15 F-9 (stepped re-anchor): previously this reverted whenever the
+     * live price had moved beyond maxDeviationBps from lastPrice — the exact
+     * situation a keeper needs to recover from. A legitimate large market move
+     * therefore froze borrow/withdraw/liquidate on the asset until the owner
+     * manually replaced the feed config, while bad debt kept accruing.
+     * Now, when the validated feed price lies beyond the deviation cap,
+     * lastPrice STEPS toward it by exactly maxDeviationBps per block instead
+     * of reverting: the reference converges to a -30% overnight move in a
+     * handful of blocks (permissionless, keeper-callable), while a single
+     * malicious feed print still cannot drag the reference by more than one
+     * cap-step per block — the flash-pump protection this guard exists for.
+     * getAssetPrice() itself remains strict; mutating ops stay blocked until
+     * the reference has walked close enough, which is the intended
+     * circuit-breaker behavior. Absolute min/max bounds and staleness checks
+     * always apply to the target being walked toward.
      */
     function refreshPrice(address asset) external {
-        _refreshLastPrice(asset);
+        FeedConfig storage cfg = priceFeeds[asset];
+        uint256 target = _validatedPrice(asset); // bounds + staleness enforced
+        uint256 last = cfg.lastPrice;
+        uint256 newPrice;
+
+        if (last == 0 || cfg.maxDeviationBps == 0) {
+            newPrice = target;
+        } else {
+            uint256 maxStep = (last * cfg.maxDeviationBps) / BPS_DIVISOR;
+            if (maxStep == 0) maxStep = 1; // guarantee progress at dust prices
+            if (target > last + maxStep) {
+                require(lastAnchorStepBlock[asset] != block.number, "One anchor step per block");
+                lastAnchorStepBlock[asset] = block.number;
+                newPrice = last + maxStep;
+            } else if (target + maxStep < last) {
+                require(lastAnchorStepBlock[asset] != block.number, "One anchor step per block");
+                lastAnchorStepBlock[asset] = block.number;
+                newPrice = last - maxStep;
+            } else {
+                newPrice = target; // within cap — plain refresh
+            }
+        }
+
+        cfg.lastPrice = newPrice;
+        emit PriceLastUpdated(asset, newPrice);
     }
 
+    /**
+     * @dev Aggregates a user's account across all reserves.
+     *
+     * F-9: a reserve the user has zero exposure to (0 collateral AND 0 debt
+     * shares) is skipped entirely — including the `getAssetPrice` call — so a
+     * stale/misconfigured feed on a market the user never touched cannot
+     * block their borrow/withdraw/liquidate on other markets.
+     *
+     * F-3: `avgLtv` (weighted by `reserve.ltv`) and `avgLiquidationThreshold`
+     * (weighted by `reserve.liquidationThreshold`) are computed and returned
+     * separately. `avgLtv` gates borrow power; `avgLiquidationThreshold`
+     * drives `healthFactor`, which gates withdraw/liquidate. Since
+     * ltv <= liquidationThreshold always (enforced at init/param-set), a
+     * position sized to avgLtv is guaranteed to be above HF 1 at inception.
+     */
     function calculateUserAccountData(address user) public view returns (
         uint256 totalCollateralBase,
         uint256 totalDebtBase,
         uint256 avgLtv,
+        uint256 avgLiquidationThreshold,
         uint256 healthFactor
     ) {
         uint256 totalLtvWeight = 0;
+        uint256 totalThresholdWeight = 0;
         for (uint256 i = 0; i < allReserves.length; i++) {
             address asset = allReserves[i];
+            uint256 collateralShares = users[user].collateralShares[asset];
+            uint256 debtShares = users[user].debtShares[asset];
+            if (collateralShares == 0 && debtShares == 0) continue; // F-9: no oracle call for unused reserves
+
             uint256 assetPrice = getAssetPrice(asset);
             ReserveData storage reserve = reserves[asset];
-            
-            uint256 collateralShares = users[user].collateralShares[asset];
+
             if (collateralShares > 0) {
                 // Normalize to 18 decimals: (amount * price) / 10^decimals
                 uint256 collateralValue = (collateralShares * reserve.supplyIndex * assetPrice) / (1e18 * (10 ** reserve.decimals));
                 totalCollateralBase += collateralValue;
-                totalLtvWeight += (collateralValue * reserve.liquidationThreshold);
+                totalLtvWeight += collateralValue * reserve.ltv;
+                totalThresholdWeight += collateralValue * reserve.liquidationThreshold;
             }
 
-            uint256 debtShares = users[user].debtShares[asset];
             if (debtShares > 0) {
                 // Normalize to 18 decimals: (amount * price) / 10^decimals
                 uint256 debtValue = (debtShares * reserve.borrowIndex * assetPrice) / (1e18 * (10 ** reserve.decimals));
@@ -364,22 +576,31 @@ contract MagnetaLending is Ownable2Step, Pausable, ReentrancyGuard {
         }
 
         avgLtv = totalCollateralBase == 0 ? 0 : totalLtvWeight / totalCollateralBase;
-        healthFactor = calculateHealthFactor(totalCollateralBase, totalDebtBase, avgLtv);
+        avgLiquidationThreshold = totalCollateralBase == 0 ? 0 : totalThresholdWeight / totalCollateralBase;
+        healthFactor = calculateHealthFactor(totalCollateralBase, totalDebtBase, avgLiquidationThreshold);
     }
 
+    /// @dev `avgFactorBps` is whichever bps figure the caller wants the health
+    /// factor computed against — `calculateUserAccountData` always passes
+    /// `avgLiquidationThreshold` here (F-3).
     function calculateHealthFactor(
         uint256 totalCollateralBase,
         uint256 totalDebtBase,
-        uint256 avgLtv
+        uint256 avgFactorBps
     ) public pure returns (uint256) {
         if (totalDebtBase == 0) return type(uint256).max;
-        return (totalCollateralBase * avgLtv * 1e18) / (totalDebtBase * BPS_DIVISOR);
+        return (totalCollateralBase * avgFactorBps * 1e18) / (totalDebtBase * BPS_DIVISOR);
     }
 
     // --- User Functions ---
 
     /**
-     * @dev Deposit tokens as collateral or for interest
+     * @dev Deposit tokens as collateral or for interest.
+     *
+     * F-8: shares are minted on the amount actually received (post
+     * fee-on-transfer), not the nominal `amount` requested. F-22: shares
+     * round DOWN (protocol-favoring); a deposit too small to mint a whole
+     * share reverts instead of silently donating dust.
      */
     function deposit(address asset, uint256 amount) external nonReentrant whenNotPaused {
         require(msg.sender != address(0), "Invalid sender");
@@ -389,36 +610,52 @@ contract MagnetaLending is Ownable2Step, Pausable, ReentrancyGuard {
 
         _updateReserve(asset);
 
-        uint256 shares = (amount * 1e18) / reserve.supplyIndex;
-        users[msg.sender].collateralShares[asset] += shares;
-        reserve.totalSupplied += amount;
-
+        uint256 balanceBefore = IERC20(asset).balanceOf(address(this));
         IERC20(asset).safeTransferFrom(msg.sender, address(this), amount);
+        uint256 received = IERC20(asset).balanceOf(address(this)) - balanceBefore;
 
-        emit Deposit(asset, msg.sender, amount);
+        uint256 shares = (received * 1e18) / reserve.supplyIndex; // round down
+        require(shares > 0, "Deposit amount too small");
+        users[msg.sender].collateralShares[asset] += shares;
+        reserve.totalSupplyShares += shares;
+        reserve.availableCash += received;
+
+        emit Deposit(asset, msg.sender, received);
     }
 
     /**
-     * @dev Withdraw tokens from collateral
+     * @dev Withdraw tokens from collateral.
+     *
+     * F-7: gated on `availableCash` (real spendable cash), not balanceOf.
+     * F-22: shares burned round UP, capped to the caller's balance — belt
+     * and suspenders, the cap is not reachable given the rounding direction
+     * of the prior mint, but kept explicit for defense in depth.
      */
     function withdraw(address asset, uint256 amount) external nonReentrant whenNotPaused {
         ReserveData storage reserve = reserves[asset];
-        uint256 userBalance = (users[msg.sender].collateralShares[asset] * reserve.supplyIndex) / 1e18;
-        require(userBalance >= amount, "Insufficient balance");
-        
         _updateReserve(asset);
 
-        // Re-read balancing after potential index update
-        userBalance = (users[msg.sender].collateralShares[asset] * reserve.supplyIndex) / 1e18;
-        require(userBalance >= amount, "Insufficient balance after update");
+        uint256 userShares = users[msg.sender].collateralShares[asset];
+        uint256 userBalance = (userShares * reserve.supplyIndex) / 1e18;
+        require(userBalance >= amount, "Insufficient balance");
 
-        uint256 sharesToBurn = (amount * 1e18) / reserve.supplyIndex;
-        users[msg.sender].collateralShares[asset] -= sharesToBurn;
-        reserve.totalSupplied -= amount;
+        uint256 sharesToBurn = _mulDivUp(amount, 1e18, reserve.supplyIndex);
+        if (sharesToBurn > userShares) sharesToBurn = userShares;
+        users[msg.sender].collateralShares[asset] = userShares - sharesToBurn;
+        reserve.totalSupplyShares -= sharesToBurn;
 
-        if (getUserTotalDebt(msg.sender) > 0) {
+        require(reserve.availableCash >= amount, "Insufficient liquidity");
+        reserve.availableCash -= amount;
+
+        // Rescan-15 F-10 (defense-in-depth): gate on the existence of debt
+        // SHARES, not the truncated underlying sum. With borrowIndex >= 1e18
+        // (monotone from init) any nonzero shares already yield >= 1 wei of
+        // underlying, so the truncation-to-zero bypass is not reachable
+        // today — but the shares check is equivalent, cheaper (no division),
+        // and stays correct even if the index invariant ever changes.
+        if (_hasDebtShares(msg.sender)) {
             _refreshLastPrice(asset);
-            (, , , uint256 healthFactor) = calculateUserAccountData(msg.sender);
+            (, , , , uint256 healthFactor) = calculateUserAccountData(msg.sender);
             require(healthFactor >= 1e18, "Health factor too low after withdrawal");
         }
 
@@ -428,23 +665,34 @@ contract MagnetaLending is Ownable2Step, Pausable, ReentrancyGuard {
     }
 
     /**
-     * @dev Borrow tokens against collateral
+     * @dev Borrow tokens against collateral.
+     *
+     * F-7: liquidity gated on `availableCash`, not balanceOf — a direct
+     * ERC20 donation to the contract no longer inflates borrowable liquidity.
+     * F-3: borrow power is gated on `avgLtv` (not the liquidation threshold);
+     * since ltv <= liquidationThreshold always, this implies HF >= 1e18 on
+     * every newly-opened position. F-22: debt shares round UP (protocol
+     * favoring — the borrower owes at least what they took).
      */
     function borrow(address asset, uint256 amount) external nonReentrant whenNotPaused {
         ReserveData storage reserve = reserves[asset];
         require(reserve.isActive, "Reserve not active");
-        // NOTE: Aderyn flags this as a CEI violation. Reading balance here is safe as the function is nonReentrant.
-        require(IERC20(asset).balanceOf(address(this)) >= amount, "Insufficient liquidity");
+        require(reserve.availableCash >= amount, "Insufficient liquidity");
 
         _updateReserve(asset);
 
-        uint256 shares = (amount * 1e18) / reserve.borrowIndex;
+        uint256 shares = _mulDivUp(amount, 1e18, reserve.borrowIndex);
+        require(shares > 0, "Borrow amount too small");
         users[msg.sender].debtShares[asset] += shares;
-        reserve.totalBorrowed += amount;
+        reserve.totalDebtShares += shares;
+        reserve.availableCash -= amount;
 
         _refreshLastPrice(asset);
-        (, , , uint256 healthFactor) = calculateUserAccountData(msg.sender);
-        require(healthFactor >= 1e18, "Health factor too low to borrow");
+        (uint256 totalCollateralBase, uint256 totalDebtBase, uint256 avgLtv, , ) = calculateUserAccountData(msg.sender);
+        require(
+            totalDebtBase <= (totalCollateralBase * avgLtv) / BPS_DIVISOR,
+            "Borrow exceeds LTV limit"
+        );
 
         IERC20(asset).safeTransfer(msg.sender, amount);
 
@@ -452,97 +700,141 @@ contract MagnetaLending is Ownable2Step, Pausable, ReentrancyGuard {
     }
 
     /**
-     * @dev Repay borrowed tokens
+     * @dev Repay borrowed tokens.
+     *
+     * F-8: debt is reduced by the amount actually received (post
+     * fee-on-transfer), capped at the outstanding debt. `type(uint256).max`
+     * still means "repay everything" — it pulls the full nominal debt, then
+     * measures what arrived. F-22: debt shares burned round DOWN.
      */
     function repay(address asset, uint256 amount) external nonReentrant whenNotPaused {
         require(msg.sender != address(0), "Invalid sender");
         ReserveData storage reserve = reserves[asset];
-        
+
         _updateReserve(asset);
-        
+
         uint256 userDebt = (users[msg.sender].debtShares[asset] * reserve.borrowIndex) / 1e18;
-        
+
         if (amount == type(uint256).max) {
             amount = userDebt;
         }
-        
+
         require(userDebt >= amount, "Repay amount exceeds debt");
 
+        uint256 balanceBefore = IERC20(asset).balanceOf(address(this));
+        IERC20(asset).safeTransferFrom(msg.sender, address(this), amount);
+        uint256 received = IERC20(asset).balanceOf(address(this)) - balanceBefore;
+
+        // Fee-on-transfer: only what actually arrived clears debt.
+        uint256 effectiveRepay = received > userDebt ? userDebt : received;
+
         uint256 sharesToBurn;
-        if (amount == userDebt) {
+        if (effectiveRepay == userDebt) {
             sharesToBurn = users[msg.sender].debtShares[asset];
         } else {
-            sharesToBurn = (amount * 1e18) / reserve.borrowIndex;
+            sharesToBurn = (effectiveRepay * 1e18) / reserve.borrowIndex; // round down
         }
-        
+
         users[msg.sender].debtShares[asset] -= sharesToBurn;
-        
-        // Calculate principal portion to subtract from totalBorrowed
-        // Since totalBorrowed tracks principal, we need to subtract the principal portion
-        uint256 principalRepaid = amount <= reserve.totalBorrowed ? amount : reserve.totalBorrowed;
-        reserve.totalBorrowed -= principalRepaid;
+        reserve.totalDebtShares -= sharesToBurn;
+        reserve.availableCash += received;
 
-        IERC20(asset).safeTransferFrom(msg.sender, address(this), amount);
-
-        emit Repay(asset, msg.sender, amount);
+        emit Repay(asset, msg.sender, effectiveRepay);
     }
 
 
     /**
-     * @dev Liquidate a user with health factor < 1.0
+     * @dev Liquidate a user with health factor < 1.0.
      * @param user The address of the user to liquidate
      * @param debtAsset The asset to repay on behalf of the user
      * @param collateralAsset The asset to seize from the user
      * @param amountToRepay The amount of debt to repay
+     *
+     * F-8: the debt asset is pulled first and the actual amount received
+     * drives the seizure math — not the nominal `amountToRepay` — so a
+     * fee-on-transfer debt asset cannot be used to seize more collateral
+     * than was actually repaid. F-7: collateral seizure decrements
+     * `availableCash`, and repayment credits it. F-22: debt shares burn
+     * round DOWN (repay direction), collateral shares burn round UP
+     * (withdraw direction), both protocol-favoring.
      */
     function liquidate(
         address user,
         address debtAsset,
         address collateralAsset,
         uint256 amountToRepay
-    ) external nonReentrant {
+    ) external nonReentrant whenNotPaused {
         _updateReserve(debtAsset);
         _updateReserve(collateralAsset);
 
         _refreshLastPrice(debtAsset);
         _refreshLastPrice(collateralAsset);
 
-        (, , , uint256 healthFactor) = calculateUserAccountData(user);
+        (, , , , uint256 healthFactor) = calculateUserAccountData(user);
         require(healthFactor < HEALTH_FACTOR_THRESHOLD, "User is healthy");
 
-        uint256 userDebt = (users[user].debtShares[debtAsset] * reserves[debtAsset].borrowIndex) / 1e18;
+        ReserveData storage debtReserve = reserves[debtAsset];
+        ReserveData storage collateralReserve = reserves[collateralAsset];
+
+        uint256 userDebt = (users[user].debtShares[debtAsset] * debtReserve.borrowIndex) / 1e18;
         require(amountToRepay <= userDebt, "Repay amount exceeds user debt");
+
+        uint256 balanceBefore = IERC20(debtAsset).balanceOf(address(this));
+        IERC20(debtAsset).safeTransferFrom(msg.sender, address(this), amountToRepay);
+        uint256 received = IERC20(debtAsset).balanceOf(address(this)) - balanceBefore;
 
         // Calculate collateral to seize: (repaidAmount * debtPrice / collateralPrice) * (1 + bonus)
         // Adjusting for decimals: (amount * debtPrice / 10^debtDecimals) / (collateralPrice / 10^collateralDecimals)
         uint256 debtPrice = getAssetPrice(debtAsset);
         uint256 collateralPrice = getAssetPrice(collateralAsset);
-        uint8 debtDecimals = reserves[debtAsset].decimals;
-        uint8 collateralDecimals = reserves[collateralAsset].decimals;
-        
-        uint256 collateralToSeize = (amountToRepay * debtPrice * (10 ** collateralDecimals) * (BPS_DIVISOR + LIQUIDATION_BONUS_BPS)) / 
+        uint8 debtDecimals = debtReserve.decimals;
+        uint8 collateralDecimals = collateralReserve.decimals;
+
+        uint256 collateralToSeize = (received * debtPrice * (10 ** collateralDecimals) * (BPS_DIVISOR + LIQUIDATION_BONUS_BPS)) /
                                    (collateralPrice * (10 ** debtDecimals) * BPS_DIVISOR);
-        
-        uint256 userCollateral = (users[user].collateralShares[collateralAsset] * reserves[collateralAsset].supplyIndex) / 1e18;
+
+        uint256 userCollateralShares = users[user].collateralShares[collateralAsset];
+        uint256 userCollateral = (userCollateralShares * collateralReserve.supplyIndex) / 1e18;
         require(userCollateral >= collateralToSeize, "Insufficient collateral to seize");
 
-        // Execute liquidation
-        uint256 debtSharesToBurn = (amountToRepay * 1e18) / reserves[debtAsset].borrowIndex;
+        // Execute liquidation. Rescan-15 F-8: debt shares burn rounds UP and
+        // must be nonzero — with floor division a dust repayment could burn
+        // zero debt shares while still seizing nonzero collateral, letting
+        // repeated calls strip collateral without reducing debt. Rounding up
+        // over-burns by at most one share-wei (protocol-favoring, borne by
+        // the position being liquidated); the cap keeps the burn within the
+        // user's actual shares.
+        uint256 debtSharesToBurn = _mulDivUp(received, 1e18, debtReserve.borrowIndex);
+        uint256 userDebtShares = users[user].debtShares[debtAsset];
+        if (debtSharesToBurn > userDebtShares) debtSharesToBurn = userDebtShares;
+        require(debtSharesToBurn > 0, "Liquidation amount too small");
         users[user].debtShares[debtAsset] -= debtSharesToBurn;
-        reserves[debtAsset].totalBorrowed -= amountToRepay;
-        
-        uint256 collateralSharesToBurn = (collateralToSeize * 1e18) / reserves[collateralAsset].supplyIndex;
-        users[user].collateralShares[collateralAsset] -= collateralSharesToBurn;
-        reserves[collateralAsset].totalSupplied -= collateralToSeize;
-        
-        IERC20(debtAsset).safeTransferFrom(msg.sender, address(this), amountToRepay);
+        debtReserve.totalDebtShares -= debtSharesToBurn;
+        debtReserve.availableCash += received;
+
+        uint256 collateralSharesToBurn = _mulDivUp(collateralToSeize, 1e18, collateralReserve.supplyIndex);
+        if (collateralSharesToBurn > userCollateralShares) collateralSharesToBurn = userCollateralShares;
+        users[user].collateralShares[collateralAsset] = userCollateralShares - collateralSharesToBurn;
+        collateralReserve.totalSupplyShares -= collateralSharesToBurn;
+        require(collateralReserve.availableCash >= collateralToSeize, "Insufficient liquidity");
+        collateralReserve.availableCash -= collateralToSeize;
+
         IERC20(collateralAsset).safeTransfer(msg.sender, collateralToSeize);
 
-        emit Liquidation(user, debtAsset, collateralAsset, amountToRepay, collateralToSeize, msg.sender);
+        emit Liquidation(user, debtAsset, collateralAsset, received, collateralToSeize, msg.sender);
     }
 
     /**
-     * @dev Simple FlashLoan implementation
+     * @dev Simple FlashLoan implementation.
+     *
+     * F-18: duplicate assets in one call are rejected up front (arrays are
+     * small in practice, O(n^2) is cheap and simple).
+     * F-7: liquidity is drawn from/returned to `availableCash`, not
+     * balanceOf. F-11: the premium is now accounted for — `RESERVE_FACTOR_BPS`
+     * of it goes to `protocolFees` (withdrawable via
+     * {withdrawProtocolFees}), the rest is distributed to suppliers by
+     * bumping `supplyIndex`. If a reserve has no suppliers, the supplier
+     * share is routed to the protocol instead of being lost.
      */
     function flashLoan(
         address receiverAddress,
@@ -555,7 +847,23 @@ contract MagnetaLending is Ownable2Step, Pausable, ReentrancyGuard {
     ) external nonReentrant {
         require(msg.sender != address(0), "Invalid sender");
         require(assets.length == amounts.length, "Array length mismatch");
-        
+        // Rescan-15 F-29: the Aave-shaped `modes` parameter is accepted but
+        // debt-mode semantics are NOT implemented — full repayment is always
+        // required. Reject anything but mode 0 so an integrator assuming
+        // Aave behavior fails loudly here instead of losing funds to a
+        // repayment model it did not expect.
+        require(modes.length == assets.length, "Array length mismatch");
+        for (uint256 i = 0; i < modes.length; i++) {
+            require(modes[i] == 0, "Debt modes not supported");
+        }
+
+        // F-18: reject duplicate assets — small arrays, O(n^2) is fine.
+        for (uint256 i = 0; i < assets.length; i++) {
+            for (uint256 j = i + 1; j < assets.length; j++) {
+                if (assets[i] == assets[j]) revert DuplicateFlashLoanAsset(assets[i]);
+            }
+        }
+
         uint256[] memory premiums = new uint256[](assets.length);
         // Store balances before issuing loans so repayment can be verified without
         // relying on safeTransferFrom(receiverAddress, ...) which Slither flags as
@@ -564,11 +872,13 @@ contract MagnetaLending is Ownable2Step, Pausable, ReentrancyGuard {
 
         for (uint256 i = 0; i < assets.length; i++) {
             uint256 amount = amounts[i];
-            balancesBefore[i] = IERC20(assets[i]).balanceOf(address(this));
-            require(balancesBefore[i] >= amount, "Insufficient liquidity");
+            ReserveData storage reserve = reserves[assets[i]];
+            require(reserve.availableCash >= amount, "Insufficient liquidity");
 
+            balancesBefore[i] = IERC20(assets[i]).balanceOf(address(this));
             premiums[i] = (amount * FLASHLOAN_FEE_BPS) / BPS_DIVISOR;
 
+            reserve.availableCash -= amount;
             IERC20(assets[i]).safeTransfer(receiverAddress, amount);
         }
 
@@ -586,8 +896,49 @@ contract MagnetaLending is Ownable2Step, Pausable, ReentrancyGuard {
                 balanceAfter >= balancesBefore[i] + premiums[i],
                 "Flash loan not repaid"
             );
+
+            ReserveData storage reserve = reserves[assets[i]];
+            // Credit the returned principal plus whatever actually came back on
+            // top of the pre-loan balance (>= premium, verified above).
+            // `balancesBefore` was snapshotted BEFORE the principal left, so the
+            // balance delta alone is only the net gain (premium + any extra) —
+            // the principal that was debited from availableCash when the loan
+            // was issued must be credited back explicitly, otherwise the cash
+            // ledger leaks `amount - premium` on every flash loan and
+            // borrow/withdraw eventually DoS on "Insufficient liquidity".
+            uint256 netGain = balanceAfter - balancesBefore[i];
+            reserve.availableCash += amounts[i] + netGain;
+
+            uint256 protocolCut = (premiums[i] * RESERVE_FACTOR_BPS) / BPS_DIVISOR;
+            uint256 supplierCut = premiums[i] - protocolCut;
+
+            if (supplierCut > 0) {
+                if (reserve.totalSupplyShares > 0) {
+                    reserve.supplyIndex += (supplierCut * 1e18) / reserve.totalSupplyShares;
+                } else {
+                    // No suppliers to credit — route to protocol instead of losing it.
+                    protocolCut += supplierCut;
+                }
+            }
+            protocolFees[assets[i]] += protocolCut;
+
             emit FlashLoan(receiverAddress, assets[i], amounts[i], premiums[i]);
         }
+    }
+
+    /// @notice Withdraw accrued protocol fees (flash-loan reserve-factor cut) for `asset`.
+    function withdrawProtocolFees(address asset, address to) external onlyOwner nonReentrant {
+        require(to != address(0), "Invalid recipient");
+        uint256 amount = protocolFees[asset];
+        require(amount > 0, "No fees to withdraw");
+        protocolFees[asset] = 0;
+
+        ReserveData storage reserve = reserves[asset];
+        require(reserve.availableCash >= amount, "Insufficient liquidity");
+        reserve.availableCash -= amount;
+
+        IERC20(asset).safeTransfer(to, amount);
+        emit ProtocolFeesWithdrawn(asset, to, amount);
     }
 
     // --- Admin Functions ---
@@ -608,10 +959,17 @@ contract MagnetaLending is Ownable2Step, Pausable, ReentrancyGuard {
     }
 
     /// @notice Revoke an address's pauser role. Owner-only.
+    /// @dev Rescan-15 F-26-class: if the removed account is the canonical
+    ///      {pauseGuardian}, clear that view too — otherwise monitoring reads
+    ///      a guardian address that can no longer pause.
     function removePauser(address account) external onlyOwner {
         require(account != address(0), "MagnetaLending: zero pauser");
         isPauser[account] = false;
         emit PauserRemoved(account);
+        if (account == pauseGuardian) {
+            pauseGuardian = address(0);
+            emit PauseGuardianUpdated(account, address(0));
+        }
     }
 
     /// @notice Deprecated single-guardian setter, retained for back-compat.
@@ -639,6 +997,19 @@ contract MagnetaLending is Ownable2Step, Pausable, ReentrancyGuard {
         return (users[user].debtShares[asset] * reserves[asset].borrowIndex) / 1e18;
     }
 
+    /// @dev Cheap oracle-free debt-existence check (Rescan-15 F-10): true iff
+    ///      the user holds nonzero debt shares in any reserve. Used to gate
+    ///      the health-factor check in {withdraw}.
+    function _hasDebtShares(address user) internal view returns (bool) {
+        for (uint256 i = 0; i < allReserves.length; i++) {
+            if (users[user].debtShares[allReserves[i]] != 0) return true;
+        }
+        return false;
+    }
+
+    /// @dev Never touches the oracle (getUserBorrow is index-based only), so F-9's
+    /// "skip unused reserves before pricing" concern does not apply here — kept
+    /// as a plain sum.
     function getUserTotalDebt(address user) public view returns (uint256) {
         uint256 totalDebt = 0;
         for (uint256 i = 0; i < allReserves.length; i++) {

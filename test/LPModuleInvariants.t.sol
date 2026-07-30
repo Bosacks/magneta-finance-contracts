@@ -152,7 +152,8 @@ contract LPModuleHandler is Test {
             caller: address(user),
             originChainId: block.chainid,
             feeVault: feeVault,
-            tokenSource: address(0)
+            tokenSource: address(0),
+            guid: bytes32(0)
         });
     }
 
@@ -308,7 +309,8 @@ contract LPModuleReachabilityTest is LPModuleInvariantTest {
             caller: address(user),
             originChainId: block.chainid,
             feeVault: FEE_VAULT,
-            tokenSource: address(0)
+            tokenSource: address(0),
+            guid: bytes32(0)
         });
 
         vm.deal(address(gw), ethAmount);
@@ -370,7 +372,8 @@ contract LPModuleReachabilityTest is LPModuleInvariantTest {
             caller: address(user),
             originChainId: block.chainid,
             feeVault: FEE_VAULT,
-            tokenSource: address(0)
+            tokenSource: address(0),
+            guid: bytes32(0)
         });
 
         gw.call(
@@ -405,7 +408,8 @@ contract LPModuleReachabilityTest is LPModuleInvariantTest {
             caller: address(user),
             originChainId: block.chainid,
             feeVault: FEE_VAULT,
-            tokenSource: address(0)
+            tokenSource: address(0),
+            guid: bytes32(0)
         });
         vm.deal(address(gw), ethAmount);
         gw.call{value: ethAmount}(

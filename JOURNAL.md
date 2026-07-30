@@ -3,6 +3,37 @@
 > Fil chronologique des sessions. Anti-chronologique (plus récent en haut).
 > Voir `~/CLAUDE.md` pour la règle d'édition.
 
+## 2026-07-30 — 3e passe — Arbitrages design + GUID + harnais hardhat (02d7257, 750a73f)
+
+- Arbitrages Dominique appliqués : BURN_LP officiellement gratuit (doc alignée sur le site), fee-on-transfer non supporté Bundler/LPModule (doc), bridge officiel (DVN + caps entrants) différé à son activation — CCTP+LI.FI en attendant
+- Oracle F-9 : `refreshPrice` = ré-ancrage progressif permissionless (1 pas de maxDeviation par bloc) — un -30 % légitime déverrouille en ~7 appels keeper ; `getAssetPrice` reste strict
+- GUID F-22/31 : `bytes32 guid` dans IModule.Context (LZ guid sur _lzReceive + fulfillValueOp, 0 en local) ; clés de replay LPAtomic/TokenCreation sur le guid — ⚠ **Gateway + TOUS les modules à redéployer EN BLOC** (sélecteur d'execute changé)
+- Harnais hardhat RACINE réparé : cause = chai 5 (ESM) résolu par pnpm pour la racine vs matchers chai ^4 — peer set du toolbox épinglé en dur (chai 4.5.0) ; **511 passing / 0 failing** (chaque fichier échouait avant)
+- Emprunt à exactement LTV : plus atteignable d'un wei d'arrondi (voulu, protocole-favorable, documenté)
+- Suites : forge 268/268, hardhat racine 511/511, tokens/ 189/189
+
+## 2026-07-30 — 2e passe — Re-scans 15+16 traités (125d794)
+
+- Re-scans Dominique post-remédiation : les 27 fixes tiennent, aucun ne réapparaît
+- Corrigé la RÉGRESSION CRITICAL de ma réécriture lending : initReserve ré-initialisable après setReserveActive(false) → garde sur supplyIndex==0
+- Lending aussi : arrondi liquidation (saisie sans burn de dette), whenNotPaused sur liquidate, modes flash-loan rejetés
+- Bridge : bridgeLiquidity créditée à l'envoi (divergence compteur/balance), delta mesuré addBridgeLiquidity, endpointId==localEid, reset fenêtre au ré-armement
+- Modules : validation de paire anti-spoof (getPair canonique), prédicats routage CREATE_LP unifiés, MAX_BATCH=50, sync pauseGuardian ×3, feeVault contrat
+- Cronos : MAX_INTENT_TTL 30j + cancelIntent creator, typehash compile-time (valeur inchangée)
+- 3 findings RÉFUTÉS avec preuve : F-5 (registerByTokenOwner est permissionless), F-10 (borrowIndex≥1e18 rend la troncature inatteignable), F-13 (EndpointV2 rembourse déjà le surplus — vérifié dans les sources LZ)
+- Suites : forge 262/262, tokens/ hardhat 189/189
+- Décisions design en attente : frais BURN_LP (F-7), ré-ancrage oracle après grand mouvement (F-9), plancher DVN du bridge OApp (F-14), politique fee-on-transfer Bundler/LP (F-18), GUID dans IModule.Context (F-22/31), caps entrants bridge (F-20), bornage allReserves (F-27)
+
+## 2026-07-30 — Remédiation audit 13+14 : 27 findings de code corrigés, branche security/audit-13-remediation
+
+- Phase 1 (04e586a) : 15 findings rapport 13 hors lending (DVN re-check à chaque execute, payInLzToken rejeté, validation createDLMMPool, allowances Bundler, nonReentrant rescueETH, pull-payment dust LPModule, clés de replay + msg.value modules, CEI ServiceFee, bounds+pagination CurveFactory, event registration) + 3 findings rapport 14 Cronos
+- BREAKING Cronos : `CREATE_INTENT_TYPEHASH` changé (binding receiver/factory) → `lib/relayer/cronosRelayer.ts` à mettre à jour AVANT redéploiement
+- Phase 2 (b357de1) : réécriture comptabilité MagnetaLending — parts canoniques (F-2), ltv≠threshold (F-3), availableCash interne (F-7), fee-on-transfer mesuré (F-8), skip oracle réserves vides (F-9), primes flash-loan comptabilisées (F-11), + F-18/19/22
+- Bug attrapé en review du travail d'agent : flashLoan re-créditait la prime seule, pas le principal → fuite `amount-premium` du ledger à chaque flash-loan ; corrigé + test de conservation mutation-checké
+- Suite complète : 170 (baseline) → 228 tests, 0 échec ; tokens/ hardhat 183/183
+- Restent OUVERTS : F-1/F-5/F-6/F-12 (dérive de déploiement — seul un redeploy testnet depuis build épinglé les clôt) ; re-scan Sentinelleai à relancer (vérifier crédits OpenRouter d'abord)
+- Harnais hardhat racine cassé (`Invalid Chai property`, pré-existant, tous fichiers) — hors périmètre, à réparer
+
 ## 2026-07-29 — 16:54 — Suite verte à nouveau, routeur Flare mort, garde pré-déploiement
 
 - **`forge` ne construisait plus le repo** : Foundry résout un seul solc et les sources Uniswap vendorisées imposent 0.5.16/0.6.6. Remède : `--skip "contracts/imports/*" --skip "contracts/uniswap/*"`. PIÈGE : `/usr/bin/forge` est un binaire « ZOE » sans rapport qui sort avec le code 0 — utiliser `~/.foundry/bin/forge`

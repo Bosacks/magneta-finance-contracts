@@ -2,6 +2,7 @@
 pragma solidity 0.8.20;
 
 import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
+import { Ownable2Step } from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import { Pausable } from "@openzeppelin/contracts/utils/Pausable.sol";
 import { ReentrancyGuard } from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import { ECDSA } from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
@@ -55,13 +56,59 @@ interface IMagnetaTokenFactory {
 ///         verification time and checks (chainId, gateway) against the
 ///         `trustedSource` whitelist so unknown source chains can't submit
 ///         arbitrary intents.
-contract CronosCreateTokenReceiver is Ownable, ReentrancyGuard, Pausable {
+///
+///         **Receiver/factory binding (Sentinelle audit #14, F-2).** The
+///         EIP-712 *domain* is bound to the source chain, not to this
+///         contract, so on its own it does nothing to stop a validly-signed
+///         intent from being replayed against a DIFFERENT receiver instance
+///         (e.g. a v2 receiver deployed during a migration, with its own
+///         empty `processedIntents` set). To close that gap the signed
+///         *struct* itself carries `destinationReceiver` and
+///         `destinationFactory`, which `executeCreate` requires to equal
+///         `address(this)` and `address(factory)` — a digest computed for
+///         one receiver instance can never validate against another.
+///
+///         ⚠ BREAKING CHANGE: adding these two fields changes
+///         `CREATE_INTENT_TYPEHASH` (see below). Any intent signed under the
+///         OLD typehash will no longer recover the right digest and must be
+///         re-signed. `lib/relayer/cronosRelayer.ts` (magneta-finance-tokens
+///         repo, out of scope for this file) MUST update its
+///         `CREATE_TOKEN_INTENT_TYPES` to match before this contract is
+///         redeployed, or every relayed intent will revert with
+///         `BadSignature`.
+///
+///         **Known, deliberately-deferred limitations (Sentinelle re-scan
+///         #16, F-2/F-4 — documented, not fixed, per that report):**
+///         - **Single relayer, not a set.** `relayer` is one address at a
+///           time (rotatable via {setRelayer}), not a whitelisted set of
+///           gas-payers. A relayer outage stalls all Cronos CREATE_TOKEN
+///           intents until the owner rotates it; this is an accepted
+///           liveness trade-off, not a fund-safety issue (the relayer holds
+///           no minting authority of its own — see the trust-upgrade note
+///           above).
+///         - **EOA-only signers.** Signature verification uses
+///           `ECDSA.recover` (raw ECDSA, EIP-712), not ERC-1271. A creator
+///           whose source-chain wallet is a smart-contract wallet / Safe
+///           cannot produce a signature this contract will accept. Adding
+///           ERC-1271 support is deferred; documented here as an assumed
+///           product decision (creators must sign from an EOA).
+contract CronosCreateTokenReceiver is Ownable2Step, ReentrancyGuard, Pausable {
     // ─── EIP-712 ──────────────────────────────────────────────────────────────
 
     /// @dev Must exactly match lib/relayer/cronosRelayer.ts CREATE_TOKEN_INTENT_TYPES.
-    ///      keccak256("CreateTokenIntent(address creator,string template,string name,string symbol,string tokenURI,uint256 totalSupply,uint256 liquidityToBurn,bool revokeUpdate,bool revokeFreeze,bool revokeMint,uint256 destinationChainId,uint256 nonce,uint256 expiry)")
-    bytes32 public constant CREATE_INTENT_TYPEHASH =
-        0xaf516d335be6edbabf649fddb89d81ac49fb39eec7a5aa554fd4b227fccbda82;
+    ///      ⚠ BREAKING (Sentinelle audit #14, F-2): this typehash changed to
+    ///      add `destinationReceiver`/`destinationFactory` — see contract-level
+    ///      doc comment above. Old signatures no longer verify.
+    ///      (Sentinelle re-scan #16, F-3): expressed as `keccak256(...)` over
+    ///      the canonical type string instead of an opaque bytes32 literal,
+    ///      so the value is verifiably derived at compile time rather than
+    ///      trusted from a comment. This is NOT a value change — the string
+    ///      below hashes to the exact same
+    ///      0x3a18bf21af8814f022a2d9158fca22f47530fba5c97ac36f8478847033f431eb
+    ///      the old literal held (see the regression test asserting this).
+    bytes32 public constant CREATE_INTENT_TYPEHASH = keccak256(
+        "CreateTokenIntent(address creator,string template,string name,string symbol,string tokenURI,uint256 totalSupply,uint256 liquidityToBurn,bool revokeUpdate,bool revokeFreeze,bool revokeMint,uint256 destinationChainId,address destinationReceiver,address destinationFactory,uint256 nonce,uint256 expiry)"
+    );
 
     /// @dev keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)")
     bytes32 internal constant EIP712_DOMAIN_TYPEHASH =
@@ -77,6 +124,19 @@ contract CronosCreateTokenReceiver is Ownable, ReentrancyGuard, Pausable {
     bytes32 internal constant TEMPLATE_STANDARD_HASH      = keccak256(bytes("standard"));
     bytes32 internal constant TEMPLATE_AUTO_LIQUIDITY_HASH = keccak256(bytes("autoLiquidity"));
 
+    /// @notice Maximum remaining lifetime a signed intent may still have AT
+    ///         EXECUTION TIME (Sentinelle re-scan #16, F-1). `expiry` is a
+    ///         signed field chosen by the creator's frontend, not bounded by
+    ///         this contract at signing time — a signer (or a buggy
+    ///         frontend) could set `expiry` decades out, and the intent
+    ///         would then stay executable indefinitely with no way to
+    ///         invalidate it short of {cancelIntent}. This constant caps how
+    ///         far in the future `expiry` may still be when `executeCreate`
+    ///         runs: `require(intent.expiry <= block.timestamp +
+    ///         MAX_INTENT_TTL)`. It bounds the window without requiring a
+    ///         new signed field or breaking the typehash.
+    uint256 public constant MAX_INTENT_TTL = 30 days;
+
     // ─── Storage ──────────────────────────────────────────────────────────────
 
     /// @notice Local Cronos factory that mints the ERC20 token. Set ONCE at
@@ -88,6 +148,11 @@ contract CronosCreateTokenReceiver is Ownable, ReentrancyGuard, Pausable {
     ///         is GAS-PAYER only — it cannot influence the `creator` field,
     ///         which is bound to the EIP-712 signer. Settable so the Magneta
     ///         Safe can rotate the relayer key without redeploying.
+    ///         (Sentinelle re-scan #16, F-2 — documented, not fixed): this is
+    ///         always exactly ONE address, not a whitelisted set. A relayer
+    ///         outage stalls all Cronos intent submission until the owner
+    ///         calls {setRelayer}; accepted as a liveness trade-off since the
+    ///         relayer has no minting authority of its own.
     address public relayer;
 
     /// @notice Allowed (sourceChainId → sourceGateway) pairs for intent
@@ -110,6 +175,9 @@ contract CronosCreateTokenReceiver is Ownable, ReentrancyGuard, Pausable {
         uint256 sourceChainId,
         uint8 templateKind
     );
+    /// @dev Sentinelle re-scan #16, F-1: emitted by {cancelIntent} when a
+    ///      creator invalidates their own not-yet-executed intent.
+    event IntentCancelled(bytes32 indexed digest, address indexed creator);
 
     // ─── Errors ───────────────────────────────────────────────────────────────
 
@@ -118,9 +186,33 @@ contract CronosCreateTokenReceiver is Ownable, ReentrancyGuard, Pausable {
     error UntrustedSource(uint256 sourceChainId, address sourceGateway);
     error IntentReplay(bytes32 digest);
     error IntentExpired(uint256 expiry, uint256 nowTs);
+    /// @dev Sentinelle re-scan #16, F-1: `expiry` is further in the future
+    ///      than MAX_INTENT_TTL allows, evaluated at execution time.
+    error IntentExpiryTooFarInFuture(uint256 expiry, uint256 maxAllowedExpiry);
+    /// @dev Sentinelle re-scan #16, F-1: {cancelIntent} caller is not
+    ///      `intent.creator`.
+    error NotIntentCreator(address caller, address creator);
     error WrongDestinationChain(uint256 expected, uint256 actual);
+    /// @dev F-2: intent signed for a different receiver instance (e.g. a
+    ///      superseded/migrated deployment) — see contract-level doc comment.
+    error WrongDestinationReceiver(address expected, address actual);
+    /// @dev F-2: intent signed for a different factory than the one this
+    ///      receiver is wired to.
+    error WrongDestinationFactory(address expected, address actual);
     error BadSignature(address recovered, address creator);
     error UnknownTemplate();
+    /// @dev F-1: `autoLiquidity` tokens (ERC20TokenAutoLiquidity) have no
+    ///      revocable update/freeze/mint switches at all — there is no way to
+    ///      honour a signed revocation on that template. Rather than silently
+    ///      drop a flag the user cryptographically approved (producing an
+    ///      on-chain result that diverges from the signed intent), refuse to
+    ///      execute intents that assert a non-neutral value.
+    error AutoLiquidityRevokeFlagsUnsupported();
+    /// @dev F-1: `standard` tokens (ERC20Token) have no liquidity-burn concept;
+    ///      `liquidityToBurn` is documented as zero for standard intents but
+    ///      was previously accepted-and-ignored. Reject non-zero values so a
+    ///      signed-but-unapplied field can never diverge from execution.
+    error StandardLiquidityToBurnUnsupported();
 
     // ─── Constructor ──────────────────────────────────────────────────────────
 
@@ -162,6 +254,8 @@ contract CronosCreateTokenReceiver is Ownable, ReentrancyGuard, Pausable {
         bool    revokeFreeze;
         bool    revokeMint;        // ignored for autoLiquidity
         uint256 destinationChainId; // must equal block.chainid (Cronos = 25)
+        address destinationReceiver; // F-2: must equal address(this)
+        address destinationFactory;  // F-2: must equal address(factory)
         uint256 nonce;
         uint256 expiry;
     }
@@ -200,8 +294,32 @@ contract CronosCreateTokenReceiver is Ownable, ReentrancyGuard, Pausable {
             revert WrongDestinationChain(intent.destinationChainId, block.chainid);
         }
 
+        // 3b. Receiver/factory binding guard (F-2). Without this, a digest
+        //     computed for THIS receiver's constants would still recover the
+        //     same signature if replayed against a different receiver
+        //     instance authorized on the same factory (e.g. during a
+        //     migration) — processedIntents is per-contract, not global.
+        //     Requiring these fields to equal our own address(this)/
+        //     address(factory) makes the digest itself instance-specific.
+        if (intent.destinationReceiver != address(this)) {
+            revert WrongDestinationReceiver(intent.destinationReceiver, address(this));
+        }
+        if (intent.destinationFactory != address(factory)) {
+            revert WrongDestinationFactory(intent.destinationFactory, address(factory));
+        }
+
         // 4. Expiry guard
         if (intent.expiry < block.timestamp) revert IntentExpired(intent.expiry, block.timestamp);
+
+        // 4b. TTL guard (Sentinelle re-scan #16, F-1). Evaluated at EXECUTION
+        //     time against `block.timestamp`, not at signing time — bounds
+        //     how far in the future an already-signed `expiry` may still be
+        //     when a relayer actually submits it, independent of whatever
+        //     the signer originally put in that field. Does not require a
+        //     new signed field / does not change the typehash.
+        if (intent.expiry > block.timestamp + MAX_INTENT_TTL) {
+            revert IntentExpiryTooFarInFuture(intent.expiry, block.timestamp + MAX_INTENT_TTL);
+        }
 
         // 5. Compute EIP-712 digest + verify signer
         bytes32 digest = _digest(sourceChainId, sourceGateway, intent);
@@ -218,6 +336,11 @@ contract CronosCreateTokenReceiver is Ownable, ReentrancyGuard, Pausable {
         uint8 templateKind;
         if (templateHash == TEMPLATE_STANDARD_HASH) {
             templateKind = 0;
+            // F-1: `liquidityToBurn` has no meaning for the standard template
+            // (ERC20Token has no liquidity-burn step) and was previously
+            // accepted-and-silently-ignored. Reject non-zero values instead
+            // of letting a signed field diverge from what gets executed.
+            if (intent.liquidityToBurn != 0) revert StandardLiquidityToBurnUnsupported();
             token = factory.createStandardForCreator(
                 intent.creator,
                 intent.name,
@@ -230,6 +353,17 @@ contract CronosCreateTokenReceiver is Ownable, ReentrancyGuard, Pausable {
             );
         } else if (templateHash == TEMPLATE_AUTO_LIQUIDITY_HASH) {
             templateKind = 1;
+            // F-1: ERC20TokenAutoLiquidity has no revokeUpdate/revokeFreeze/
+            // revokeMint concept at all (setTokenURI, pause/unpause, and the
+            // absence of a mint function are permanent regardless of these
+            // flags). Forwarding none of them to the factory used to mean a
+            // user who signed revokeUpdate=true (say) got a token where
+            // metadata updates were still possible forever — an on-chain
+            // result that silently contradicts the signed intent. Refuse to
+            // execute instead.
+            if (intent.revokeUpdate || intent.revokeFreeze || intent.revokeMint) {
+                revert AutoLiquidityRevokeFlagsUnsupported();
+            }
             token = factory.createAutoLiquidityForCreator(
                 intent.creator,
                 intent.name,
@@ -243,6 +377,41 @@ contract CronosCreateTokenReceiver is Ownable, ReentrancyGuard, Pausable {
         }
 
         emit IntentExecuted(digest, intent.creator, token, sourceChainId, templateKind);
+    }
+
+    /// @notice Let the creator of a signed-but-not-yet-executed intent
+    ///         invalidate it (Sentinelle re-scan #16, F-1). Without this, a
+    ///         signed intent is executable by the relayer at any point up to
+    ///         `expiry` (itself now bounded by {MAX_INTENT_TTL} — see
+    ///         {executeCreate}) with no way for the signer to back out, e.g.
+    ///         if they change their mind about the token parameters or
+    ///         suspect the relayer might submit it maliciously-late.
+    ///
+    ///         Recomputes the exact same digest {executeCreate} would use —
+    ///         `sourceChainId`/`sourceGateway` are NOT part of the signed
+    ///         `CreateTokenIntent` struct (they select the EIP-712 domain the
+    ///         creator actually signed against, exactly like the
+    ///         `executeCreate` parameters of the same name), so both must be
+    ///         supplied here to land on the identical `processedIntents` key.
+    ///         Marks that digest processed, so a subsequent
+    ///         `executeCreate` call for the same intent reverts with
+    ///         {IntentReplay} — reusing the existing replay-guard mapping
+    ///         rather than adding a parallel "cancelled" set.
+    /// @dev No signature is required: msg.sender being intent.creator IS the
+    ///      authorization (the creator doesn't need to re-sign anything to
+    ///      cancel their own intent, and nobody else can cancel it for them).
+    function cancelIntent(
+        uint256 sourceChainId,
+        address sourceGateway,
+        CreateTokenIntent calldata intent
+    ) external returns (bytes32 digest) {
+        if (msg.sender != intent.creator) revert NotIntentCreator(msg.sender, intent.creator);
+
+        digest = _digest(sourceChainId, sourceGateway, intent);
+        if (processedIntents[digest]) revert IntentReplay(digest);
+        processedIntents[digest] = true;
+
+        emit IntentCancelled(digest, intent.creator);
     }
 
     // ─── EIP-712 internals ────────────────────────────────────────────────────
@@ -273,6 +442,8 @@ contract CronosCreateTokenReceiver is Ownable, ReentrancyGuard, Pausable {
             i.revokeFreeze,
             i.revokeMint,
             i.destinationChainId,
+            i.destinationReceiver,
+            i.destinationFactory,
             i.nonce,
             i.expiry
         ));

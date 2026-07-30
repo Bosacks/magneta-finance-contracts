@@ -89,7 +89,8 @@ contract SwapHandler is Test {
     function _ctx() internal view returns (IModule.Context memory) {
         return IModule.Context({
             caller: address(user), originChainId: block.chainid,
-            feeVault: feeVault, tokenSource: address(0)
+            feeVault: feeVault, tokenSource: address(0),
+            guid: bytes32(0)
         });
     }
 
@@ -237,7 +238,8 @@ contract SwapReachabilityTest is SwapModuleInvariantTest {
 
         IModule.Context memory ctx = IModule.Context({
             caller: address(user), originChainId: block.chainid,
-            feeVault: FEE_VAULT, tokenSource: address(0)
+            feeVault: FEE_VAULT, tokenSource: address(0),
+            guid: bytes32(0)
         });
 
         // NOT wrapped in try/catch — a revert must fail this test.
