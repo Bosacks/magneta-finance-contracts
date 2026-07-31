@@ -184,7 +184,8 @@ contract LPModuleHardeningTest is Test {
             amountTokenMin: 0,
             amountETHMin: 0,
             usdcFee: 0,
-            deadline: block.timestamp + 1000
+            deadline: block.timestamp + 1000,
+            permit: ""
         });
 
         vm.deal(address(gw), ethAmount);
@@ -295,7 +296,7 @@ contract LPModuleHardeningTest is Test {
 
         LPModule.CreateLPParams memory p = LPModule.CreateLPParams({
             token: address(token), tokenAmount: 1e20, ethAmount: 1 ether,
-            amountTokenMin: 0, amountETHMin: 0, usdcFee: 0, deadline: block.timestamp + 1000
+            amountTokenMin: 0, amountETHMin: 0, usdcFee: 0, deadline: block.timestamp + 1000, permit: ""
         });
         IModule.Context memory ctx = IModule.Context({
             caller: address(recipient), originChainId: block.chainid,

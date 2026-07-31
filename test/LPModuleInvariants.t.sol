@@ -171,7 +171,8 @@ contract LPModuleHandler is Test {
             amountTokenMin: 0,
             amountETHMin: 0,
             usdcFee: 0,
-            deadline: block.timestamp + 1000
+            deadline: block.timestamp + 1000,
+            permit: ""
         });
 
         // A create sweeps any pre-existing donation out with the caller's dust.
@@ -302,7 +303,8 @@ contract LPModuleReachabilityTest is LPModuleInvariantTest {
             amountTokenMin: 0,
             amountETHMin: 0,
             usdcFee: 0,
-            deadline: block.timestamp + 1000
+            deadline: block.timestamp + 1000,
+            permit: ""
         });
 
         IModule.Context memory ctx = IModule.Context({
@@ -402,7 +404,8 @@ contract LPModuleReachabilityTest is LPModuleInvariantTest {
             amountTokenMin: 0,
             amountETHMin: 0,
             usdcFee: 0,
-            deadline: block.timestamp + 1000
+            deadline: block.timestamp + 1000,
+            permit: ""
         });
         IModule.Context memory ctx = IModule.Context({
             caller: address(user),

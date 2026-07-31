@@ -70,6 +70,13 @@ interface IUniswapV2Factory {
     function createPair(address tokenA, address tokenB) external returns (address pair);
 }
 
+/// @dev Minimal EIP-2612 surface — deliberately NOT imported from OpenZeppelin
+///      so an arbitrary token only needs to match this ABI, not inherit any
+///      particular OZ version, to be permit-compatible with this module.
+interface IERC2612Permit {
+    function permit(address owner, address spender, uint256 value, uint256 deadline, uint8 v, bytes32 r, bytes32 s) external;
+}
+
 /// @title LPModule
 /// @notice Handles CREATE_LP / REMOVE_LP / BURN_LP / CREATE_LP_AND_BUY on the
 ///         local chain using a V2-compatible DEX router (BaseSwap on Base,
@@ -237,6 +244,11 @@ contract LPModule is IModule, ReentrancyGuard, Ownable2Step {
         uint256 amountETHMin;
         uint256 usdcFee;         // 0.15% of USD value; pulled from caller in USDC
         uint256 deadline;
+        /// @notice Optional EIP-2612 permit collapsing approve+op into one
+        ///         transaction. Empty = no permit (caller already approved
+        ///         this module the ordinary way). Non-empty =
+        ///         `abi.encode(uint256 value, uint256 deadline, uint8 v, bytes32 r, bytes32 s)`.
+        bytes   permit;
     }
 
     function _createLP(Context calldata ctx, bytes calldata raw) internal returns (bytes memory) {
@@ -253,6 +265,7 @@ contract LPModule is IModule, ReentrancyGuard, Ownable2Step {
         // non-zero usdcFee (and the cross-chain source-side markup) still works.
         _collectFee(ctx, p.usdcFee);
 
+        _applyPermit(ctx, p.token, p.permit);
         _pullToken(ctx, p.token, p.tokenAmount);
         IERC20(p.token).forceApprove(router, p.tokenAmount);
 
@@ -369,6 +382,7 @@ contract LPModule is IModule, ReentrancyGuard, Ownable2Step {
         // kept for any non-zero usdcFee and the cross-chain source-side markup.
         _collectFee(ctx, p.lp.usdcFee);
 
+        _applyPermit(ctx, p.lp.token, p.lp.permit);
         _pullToken(ctx, p.lp.token, p.lp.tokenAmount);
         IERC20(p.lp.token).forceApprove(router, p.lp.tokenAmount);
 
@@ -577,5 +591,42 @@ contract LPModule is IModule, ReentrancyGuard, Ownable2Step {
     function _pullToken(Context calldata ctx, address token, uint256 amount) internal {
         address src = ctx.tokenSource != address(0) ? ctx.tokenSource : ctx.caller;
         IERC20(token).safeTransferFrom(src, address(this), amount);
+    }
+
+    /// @notice One-click LP: consume an off-chain EIP-2612 signature so the
+    ///         caller never has to send a separate `approve` transaction.
+    /// @dev The spender in the permit MUST be this module (`address(this)`),
+    ///      not the underlying router — {_pullToken} always transfers
+    ///      `token` from the owner into LPModule first and only then forwards
+    ///      an allowance to `router` itself, so LPModule is the contract that
+    ///      actually needs the owner's allowance.
+    ///
+    ///      A no-op when `blob` is empty (caller already approved normally)
+    ///      or when `ctx.tokenSource != address(0)` (cross-chain path: funds
+    ///      are staged by the gateway, there is no end-user signature to
+    ///      consume here).
+    ///
+    ///      Wrapped in try/catch and the failure is deliberately swallowed:
+    ///      an EIP-2612 signature is public the moment it's handed to the
+    ///      frontend (it travels in a mempool-visible calldata blob), so
+    ///      anyone can submit it ahead of this call — front-running the
+    ///      permit is harmless (it only sets the allowance the caller
+    ///      already intended) but would otherwise make `permit()` revert
+    ///      here on the now-stale nonce and abort an operation that has
+    ///      every right to succeed. Swallowing the revert falls back to
+    ///      whatever allowance already exists, and {_pullToken}'s
+    ///      `safeTransferFrom` is what actually enforces sufficiency.
+    function _applyPermit(Context calldata ctx, address token, bytes memory blob) internal {
+        if (blob.length == 0) return;
+        if (ctx.tokenSource != address(0)) return;
+
+        (uint256 value, uint256 deadline, uint8 v, bytes32 r, bytes32 s) =
+            abi.decode(blob, (uint256, uint256, uint8, bytes32, bytes32));
+
+        try IERC2612Permit(token).permit(ctx.caller, address(this), value, deadline, v, r, s) {
+            // no-op: allowance now set (or was already sufficient)
+        } catch {
+            // Swallowed on purpose — see NatSpec above.
+        }
     }
 }
