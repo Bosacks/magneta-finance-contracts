@@ -55,9 +55,10 @@ describe("MagnetaERC20OFT — local behaviour", function () {
     let owner: HardhatEthersSigner;
     let alice: HardhatEthersSigner;
     let bob: HardhatEthersSigner;
+    let carol: HardhatEthersSigner;
 
     beforeEach(async function () {
-        [owner, alice, bob] = await ethers.getSigners();
+        [owner, alice, bob, carol] = await ethers.getSigners();
 
         const lzEndpoint = await deployMockEndpoint();
         const Factory = await ethers.getContractFactory("MagnetaERC20OFT");
@@ -104,7 +105,7 @@ describe("MagnetaERC20OFT — local behaviour", function () {
     });
 
     it("rejects taxFee > 25%", async function () {
-        await expect(token.setTaxFee(2501)).to.be.revertedWith("MagnetaERC20OFT: fee > 25%");
+        await expect(token.setTaxFee(2501)).to.be.revertedWithCustomError(token, "FeeTooHigh");
     });
 
     it("blocks blacklisted addresses on send AND receive", async function () {
@@ -112,24 +113,24 @@ describe("MagnetaERC20OFT — local behaviour", function () {
         await token.blacklist(alice.address, true);
         await expect(
             token.connect(alice).transfer(bob.address, ethers.parseEther("10")),
-        ).to.be.revertedWith("MagnetaERC20OFT: blacklisted");
+        ).to.be.revertedWithCustomError(token, "Blacklisted");
         await expect(
             token.transfer(alice.address, ethers.parseEther("10")),
-        ).to.be.revertedWith("MagnetaERC20OFT: blacklisted");
+        ).to.be.revertedWithCustomError(token, "Blacklisted");
     });
 
     it("respects revoke flags (mint, freeze, update)", async function () {
         await token.enableRevokeMint();
-        await expect(token.mint(alice.address, 1n)).to.be.revertedWith(
-            "MagnetaERC20OFT: minting revoked",
+        await expect(token.mint(alice.address, 1n)).to.be.revertedWithCustomError(
+            token, "MintingRevoked",
         );
         await token.enableRevokeFreeze();
-        await expect(token.pause()).to.be.revertedWith(
-            "MagnetaERC20OFT: freezing revoked",
+        await expect(token.pause()).to.be.revertedWithCustomError(
+            token, "FreezingRevoked",
         );
         await token.enableRevokeUpdate();
-        await expect(token.updateMetadata("new")).to.be.revertedWith(
-            "MagnetaERC20OFT: update revoked",
+        await expect(token.updateMetadata("new")).to.be.revertedWithCustomError(
+            token, "UpdateRevoked",
         );
     });
 
@@ -218,7 +219,7 @@ describe("MagnetaERC20OFT — local behaviour", function () {
         it("random caller cannot mint (not owner, not operator)", async function () {
             await expect(
                 tokenWithOps.connect(alice).mint(alice.address, 1n),
-            ).to.be.revertedWith("MagnetaERC20OFT: not authorized");
+            ).to.be.revertedWithCustomError(tokenWithOps, "NotAuthorized");
         });
 
         it("operator can blacklist + updateMetadata + enableRevoke* (full surface)", async function () {
@@ -246,7 +247,7 @@ describe("MagnetaERC20OFT — local behaviour", function () {
             // Bob (former operator) can no longer mint
             await expect(
                 tokenWithOps.connect(bob).mint(alice.address, 1n),
-            ).to.be.revertedWith("MagnetaERC20OFT: not authorized");
+            ).to.be.revertedWithCustomError(tokenWithOps, "NotAuthorized");
 
             // Owner can still mint directly (sovereignty preserved)
             await expect(tokenWithOps.connect(owner).mint(alice.address, 1n)).to.not.be.reverted;
@@ -258,7 +259,7 @@ describe("MagnetaERC20OFT — local behaviour", function () {
             // Even the owner cannot mint anymore (one-way switch)
             await expect(
                 tokenWithOps.connect(owner).mint(alice.address, 1n),
-            ).to.be.revertedWith("MagnetaERC20OFT: minting revoked");
+            ).to.be.revertedWithCustomError(tokenWithOps, "MintingRevoked");
         });
     });
 
@@ -270,6 +271,32 @@ describe("MagnetaERC20OFT — local behaviour", function () {
         beforeEach(async function () {
             // Seed `bob` with > threshold so the freeze-by-relayer path can fire.
             await token.transfer(bob.address, ethers.parseEther("20000"));
+            // report-17 F-1: autoFreeze is no longer permissionless — it is
+            // owner-or-attester. `alice` stands in for the Magneta relayer bot
+            // that watches Transfer events, which is who triggered it in
+            // production all along. The permissionless model let ANY caller
+            // freeze ANY non-whitelisted EOA over the threshold, including
+            // holders who never bought (see the dedicated F-1 tests below).
+            await token.setAutoFreezeCaller(alice.address);
+        });
+
+        it("F-1: refuses a caller that is neither owner nor the named attester", async function () {
+            await token.setAutoFreezeRule(true, THRESHOLD);
+            await expect(
+                token.connect(carol).autoFreeze(bob.address, ethers.parseEther("20000")),
+            ).to.be.revertedWithCustomError(token, "NotAttester");
+            expect(await token.isBlacklisted(bob.address)).to.equal(false);
+        });
+
+        it("F-1: owner-only by default — no attester wired means nobody else can freeze", async function () {
+            await token.setAutoFreezeCaller(ethers.ZeroAddress);
+            await token.setAutoFreezeRule(true, THRESHOLD);
+            await expect(
+                token.connect(alice).autoFreeze(bob.address, ethers.parseEther("20000")),
+            ).to.be.revertedWithCustomError(token, "NotAttester");
+            // The owner still can.
+            await token.autoFreeze(bob.address, ethers.parseEther("20000"));
+            expect(await token.isBlacklisted(bob.address)).to.equal(true);
         });
 
         it("only owner can configure the rule", async function () {
@@ -311,14 +338,14 @@ describe("MagnetaERC20OFT — local behaviour", function () {
             await token.setAutoFreezeRule(false, THRESHOLD);
             await expect(
                 token.connect(alice).autoFreeze(bob.address, ethers.parseEther("20000")),
-            ).to.be.revertedWith("MagnetaERC20OFT: auto-freeze inactive");
+            ).to.be.revertedWithCustomError(token, "AutoFreezeInactive");
         });
 
         it("reverts when buyAmount is below threshold", async function () {
             await token.setAutoFreezeRule(true, THRESHOLD);
             await expect(
                 token.connect(alice).autoFreeze(bob.address, ethers.parseEther("9000")),
-            ).to.be.revertedWith("MagnetaERC20OFT: below threshold");
+            ).to.be.revertedWithCustomError(token, "BelowThreshold");
         });
 
         it("reverts when buyer is whitelisted", async function () {
@@ -326,7 +353,7 @@ describe("MagnetaERC20OFT — local behaviour", function () {
             await token.setAutoFreezeWhitelist([bob.address], true);
             await expect(
                 token.connect(alice).autoFreeze(bob.address, ethers.parseEther("20000")),
-            ).to.be.revertedWith("MagnetaERC20OFT: whitelisted");
+            ).to.be.revertedWithCustomError(token, "Whitelisted");
         });
 
         it("reverts when the target is a CONTRACT (protects the LP pair from a griefing freeze)", async function () {
@@ -336,7 +363,7 @@ describe("MagnetaERC20OFT — local behaviour", function () {
             await token.transfer(pairAddr, ethers.parseEther("20000"));
             await expect(
                 token.connect(alice).autoFreeze(pairAddr, ethers.parseEther("20000")),
-            ).to.be.revertedWith("MagnetaERC20OFT: cannot freeze contract");
+            ).to.be.revertedWithCustomError(token, "CannotFreezeContract");
             expect(await token.isBlacklisted(pairAddr)).to.equal(false);
         });
 
@@ -345,7 +372,7 @@ describe("MagnetaERC20OFT — local behaviour", function () {
             // Owner holds the initial supply (> threshold).
             await expect(
                 token.connect(alice).autoFreeze(owner.address, ethers.parseEther("20000")),
-            ).to.be.revertedWith("MagnetaERC20OFT: cannot freeze owner");
+            ).to.be.revertedWithCustomError(token, "CannotFreezeOwner");
             expect(await token.isBlacklisted(owner.address)).to.equal(false);
         });
 
@@ -356,7 +383,7 @@ describe("MagnetaERC20OFT — local behaviour", function () {
             // Caller passes inflated buyAmount; on-chain check sees real balance.
             await expect(
                 token.connect(alice).autoFreeze(bob.address, ethers.parseEther("20000")),
-            ).to.be.revertedWith("MagnetaERC20OFT: holdings below threshold");
+            ).to.be.revertedWithCustomError(token, "HoldingsBelowThreshold");
         });
 
         it("reverts when buyer is already frozen", async function () {
@@ -364,14 +391,14 @@ describe("MagnetaERC20OFT — local behaviour", function () {
             await token.connect(alice).autoFreeze(bob.address, ethers.parseEther("20000"));
             await expect(
                 token.connect(alice).autoFreeze(bob.address, ethers.parseEther("20000")),
-            ).to.be.revertedWith("MagnetaERC20OFT: already frozen");
+            ).to.be.revertedWithCustomError(token, "AlreadyFrozen");
         });
 
         it("setAutoFreezeRule reverts after enableRevokeFreeze (irreversible)", async function () {
             await token.enableRevokeFreeze();
             await expect(
                 token.setAutoFreezeRule(true, THRESHOLD),
-            ).to.be.revertedWith("MagnetaERC20OFT: freezing revoked");
+            ).to.be.revertedWithCustomError(token, "FreezingRevoked");
         });
 
         it("autoFreeze reverts after enableRevokeFreeze (irreversible)", async function () {
@@ -379,7 +406,7 @@ describe("MagnetaERC20OFT — local behaviour", function () {
             await token.enableRevokeFreeze();
             await expect(
                 token.connect(alice).autoFreeze(bob.address, ethers.parseEther("20000")),
-            ).to.be.revertedWith("MagnetaERC20OFT: freezing revoked");
+            ).to.be.revertedWithCustomError(token, "FreezingRevoked");
         });
     });
 
@@ -389,15 +416,18 @@ describe("MagnetaERC20OFT — local behaviour", function () {
         beforeEach(async function () {
             // bob will be the autofreeze target in some tests
             await token.transfer(bob.address, ethers.parseEther("20000"));
+            // report-17 F-1: autoFreeze is owner-or-attester now; `alice`
+            // stands in for the Magneta relayer bot in these tests.
+            await token.setAutoFreezeCaller(alice.address);
         });
 
         it("blacklist rejects address(0) and address(this)", async function () {
             await expect(
                 token.blacklist(ethers.ZeroAddress, true),
-            ).to.be.revertedWith("MagnetaERC20OFT: zero address");
+            ).to.be.revertedWithCustomError(token, "ZeroAddress");
             await expect(
                 token.blacklist(await token.getAddress(), true),
-            ).to.be.revertedWith("MagnetaERC20OFT: self");
+            ).to.be.revertedWithCustomError(token, "CannotBlacklistSelf");
         });
 
         it("blacklist (value=true) reverts after enableRevokeFreeze; de-blacklist still allowed", async function () {
@@ -406,7 +436,7 @@ describe("MagnetaERC20OFT — local behaviour", function () {
             // Cannot freeze new
             await expect(
                 token.blacklist(bob.address, true),
-            ).to.be.revertedWith("MagnetaERC20OFT: freezing revoked");
+            ).to.be.revertedWithCustomError(token, "FreezingRevoked");
             // Can still unfreeze (relaxation only)
             await expect(token.blacklist(alice.address, false)).to.not.be.reverted;
         });
@@ -427,7 +457,7 @@ describe("MagnetaERC20OFT — local behaviour", function () {
         it("setAutoFreezeRule rejects active rule with threshold=0", async function () {
             await expect(
                 token.setAutoFreezeRule(true, 0),
-            ).to.be.revertedWith("MagnetaERC20OFT: threshold must be > 0 when active");
+            ).to.be.revertedWithCustomError(token, "ThresholdRequiredWhenActive");
             // inactive with threshold=0 is allowed (turning off)
             await expect(token.setAutoFreezeRule(false, 0)).to.not.be.reverted;
         });
@@ -440,7 +470,7 @@ describe("MagnetaERC20OFT — local behaviour", function () {
 
             await expect(
                 token.connect(alice).autoFreeze(bob.address, ethers.parseEther("20000")),
-            ).to.be.revertedWith("MagnetaERC20OFT: auto-freeze window expired");
+            ).to.be.revertedWithCustomError(token, "AutoFreezeWindowExpired");
 
             // Re-arming refreshes the window
             await token.setAutoFreezeRule(true, THRESHOLD);
@@ -452,7 +482,7 @@ describe("MagnetaERC20OFT — local behaviour", function () {
         it("setAutoFreezeWindow caps at 7 days", async function () {
             await expect(
                 token.setAutoFreezeWindow(7 * 24 * 3600 + 1),
-            ).to.be.revertedWith("MagnetaERC20OFT: window too long");
+            ).to.be.revertedWithCustomError(token, "WindowTooLong");
             await expect(token.setAutoFreezeWindow(7 * 24 * 3600)).to.emit(
                 token, "AutoFreezeWindowUpdated",
             );
@@ -462,10 +492,10 @@ describe("MagnetaERC20OFT — local behaviour", function () {
             await token.setAutoFreezeRule(true, THRESHOLD);
             await expect(
                 token.connect(alice).autoFreeze(ethers.ZeroAddress, ethers.parseEther("20000")),
-            ).to.be.revertedWith("MagnetaERC20OFT: invalid buyer");
+            ).to.be.revertedWithCustomError(token, "InvalidBuyer");
             await expect(
                 token.connect(alice).autoFreeze(await token.getAddress(), ethers.parseEther("20000")),
-            ).to.be.revertedWith("MagnetaERC20OFT: invalid buyer");
+            ).to.be.revertedWithCustomError(token, "InvalidBuyer");
         });
 
         it("setAutoFreezeWhitelist caps batch at AUTO_FREEZE_WHITELIST_BATCH_MAX", async function () {
@@ -473,7 +503,7 @@ describe("MagnetaERC20OFT — local behaviour", function () {
             const oversized = Array(max + 1).fill(alice.address);
             await expect(
                 token.setAutoFreezeWhitelist(oversized, true),
-            ).to.be.revertedWith("MagnetaERC20OFT: batch too large");
+            ).to.be.revertedWithCustomError(token, "BatchTooLarge");
             const exactly = Array(max).fill(alice.address);
             await expect(token.setAutoFreezeWhitelist(exactly, true)).to.not.be.reverted;
         });
@@ -497,7 +527,7 @@ describe("MagnetaERC20OFT — local behaviour", function () {
             expect(await token.pendingTaxFee()).to.equal(400n);
 
             // applyTaxFee reverts before timelock elapses
-            await expect(token.applyTaxFee()).to.be.revertedWith("MagnetaERC20OFT: timelock active");
+            await expect(token.applyTaxFee()).to.be.revertedWithCustomError(token, "TimelockActive");
             for (let i = 0; i < Number(delay); i++) await ethers.provider.send("evm_mine", []);
             await token.applyTaxFee();
             expect(await token.taxFee()).to.equal(400n);

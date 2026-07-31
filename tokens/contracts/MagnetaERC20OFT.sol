@@ -68,6 +68,19 @@ contract MagnetaERC20OFT is OFT, ERC20Burnable, ERC20Pausable, MagnetaERC20Permi
     ///         blacklisted by any caller. Default 1 hour, capped at 7 days.
     uint256 public autoFreezeWindowSeconds = 1 hours;
 
+    /// @notice Address authorised to trigger {autoFreeze} besides the owner —
+    ///         in practice the Magneta relayer bot that watches Transfer
+    ///         events (report-17 F-1). address(0) means owner-only, which is
+    ///         the safe default for a token whose owner never wires one.
+    address public autoFreezeCaller;
+
+    /// @notice Bridged amounts that could NOT be credited on arrival because
+    ///         the recipient was blacklisted or the token was paused
+    ///         (report-17 F-2). The value was already burnt on the source
+    ///         chain, so it is held as a claim here rather than lost, and
+    ///         minted by {claimQuarantined} once the block clears.
+    mapping(address => uint256) public quarantined;
+
     /// @notice Hard cap on `setAutoFreezeWhitelist` batch to bound gas usage.
     uint256 public constant AUTO_FREEZE_WHITELIST_BATCH_MAX = 200;
 
@@ -120,9 +133,46 @@ contract MagnetaERC20OFT is OFT, ERC20Burnable, ERC20Pausable, MagnetaERC20Permi
     event AutoFreezeRuleUpdated(bool active, uint256 threshold);
     event AutoFreezeWhitelistUpdated(address indexed account, bool isWhitelisted);
     event AutoFreezeTriggered(address indexed buyer, uint256 buyAmount, address indexed by);
+    event AutoFreezeCallerUpdated(address indexed caller);
+    event BridgeCreditQuarantined(address indexed to, uint256 amount);
+    event BridgeCreditClaimed(address indexed to, uint256 amount);
     event AutoFreezeWindowUpdated(uint256 newWindowSeconds);
     event TokenOpsModuleUpdated(address indexed previous, address indexed current);
     event TaxFeeProposed(uint256 newFee, uint256 applyBlock);
+
+    // ─── Errors ─────────────────────────────────────────────────────────────
+    // Custom errors instead of require(cond, "MagnetaERC20OFT: ...") strings —
+    // this is a BYTECODE BUDGET requirement, not a style preference: the
+    // deployer that embeds this contract's creation code sits 21 bytes under
+    // the EIP-170 24576-byte limit, and revert strings are the cheapest win.
+    error NotAuthorized();
+    error UpdateRevoked();
+    error AlreadyRevoked();
+    error MintingRevoked();
+    error FreezingRevoked();
+    error ZeroAddress();
+    error CannotBlacklistSelf();
+    error FeeTooHigh();
+    error NoPendingFee();
+    error TimelockActive();
+    error ProposalExpired();
+    error NoFees();
+    error ThresholdRequiredWhenActive();
+    error NothingQuarantined();
+    error StillBlacklisted();
+    error WindowTooLong();
+    error BatchTooLarge();
+    error NotAttester();
+    error AutoFreezeInactive();
+    error AutoFreezeWindowExpired();
+    error InvalidBuyer();
+    error CannotFreezeOwner();
+    error CannotFreezeContract();
+    error BelowThreshold();
+    error Whitelisted();
+    error HoldingsBelowThreshold();
+    error AlreadyFrozen();
+    error Blacklisted();
 
     /// @param name_           ERC20 name
     /// @param symbol_         ERC20 symbol
@@ -179,11 +229,10 @@ contract MagnetaERC20OFT is OFT, ERC20Burnable, ERC20Pausable, MagnetaERC20Permi
     ///         keeps the creator sovereign — they can mint/blacklist/etc.
     ///         without paying a Magneta fee or routing through any module.
     modifier onlyOwnerOrOpsModule() {
-        require(
-            msg.sender == owner() ||
-            (tokenOpsModule != address(0) && msg.sender == tokenOpsModule),
-            "MagnetaERC20OFT: not authorized"
-        );
+        if (
+            !(msg.sender == owner() ||
+            (tokenOpsModule != address(0) && msg.sender == tokenOpsModule))
+        ) revert NotAuthorized();
         _;
     }
 
@@ -198,25 +247,25 @@ contract MagnetaERC20OFT is OFT, ERC20Burnable, ERC20Pausable, MagnetaERC20Permi
     // ─── Admin: metadata + revoke switches ──────────────────────────────────
 
     function updateMetadata(string memory newURI) external onlyOwnerOrOpsModule {
-        require(!revokeUpdateEnabled, "MagnetaERC20OFT: update revoked");
+        if (revokeUpdateEnabled) revert UpdateRevoked();
         _tokenURI = newURI;
         emit MetadataUpdated(newURI);
     }
 
     function enableRevokeUpdate() external onlyOwnerOrOpsModule {
-        require(!revokeUpdateEnabled, "MagnetaERC20OFT: already revoked");
+        if (revokeUpdateEnabled) revert AlreadyRevoked();
         revokeUpdateEnabled = true;
         emit RevokeUpdateEnabled();
     }
 
     function enableRevokeFreeze() external onlyOwnerOrOpsModule {
-        require(!revokeFreezeEnabled, "MagnetaERC20OFT: already revoked");
+        if (revokeFreezeEnabled) revert AlreadyRevoked();
         revokeFreezeEnabled = true;
         emit RevokeFreezeEnabled();
     }
 
     function enableRevokeMint() external onlyOwnerOrOpsModule {
-        require(!revokeMintEnabled, "MagnetaERC20OFT: already revoked");
+        if (revokeMintEnabled) revert AlreadyRevoked();
         revokeMintEnabled = true;
         emit RevokeMintEnabled();
     }
@@ -228,12 +277,12 @@ contract MagnetaERC20OFT is OFT, ERC20Burnable, ERC20Pausable, MagnetaERC20Permi
     // ─── Admin: mint, pause, blacklist ──────────────────────────────────────
 
     function mint(address to, uint256 amount) external onlyOwnerOrOpsModule {
-        require(!revokeMintEnabled, "MagnetaERC20OFT: minting revoked");
+        if (revokeMintEnabled) revert MintingRevoked();
         _mint(to, amount);
     }
 
     function pause() external onlyOwner {
-        require(!revokeFreezeEnabled, "MagnetaERC20OFT: freezing revoked");
+        if (revokeFreezeEnabled) revert FreezingRevoked();
         _pause();
     }
 
@@ -263,9 +312,9 @@ contract MagnetaERC20OFT is OFT, ERC20Burnable, ERC20Pausable, MagnetaERC20Permi
     ///         explicitly rejected.
     function blacklist(address account, bool value) external onlyOwnerOrOpsModule {
         if (value) {
-            require(!revokeFreezeEnabled, "MagnetaERC20OFT: freezing revoked");
-            require(account != address(0), "MagnetaERC20OFT: zero address");
-            require(account != address(this), "MagnetaERC20OFT: self");
+            if (revokeFreezeEnabled) revert FreezingRevoked();
+            if (account == address(0)) revert ZeroAddress();
+            if (account == address(this)) revert CannotBlacklistSelf();
         }
         isBlacklisted[account] = value;
         emit BlacklistUpdated(account, value);
@@ -279,7 +328,7 @@ contract MagnetaERC20OFT is OFT, ERC20Burnable, ERC20Pausable, MagnetaERC20Permi
     ///         owner cannot front-run large pending trades by spiking
     ///         the fee in the same mempool window. Cap remains 25%.
     function setTaxFee(uint256 newFee) external onlyOwner {
-        require(newFee <= 2500, "MagnetaERC20OFT: fee > 25%");
+        if (newFee > 2500) revert FeeTooHigh();
         if (newFee <= taxFee) {
             taxFee = newFee;
             pendingTaxFee = 0;
@@ -303,12 +352,9 @@ contract MagnetaERC20OFT is OFT, ERC20Burnable, ERC20Pausable, MagnetaERC20Permi
     ///         Past that, a fresh proposal (and a fresh public delay) is
     ///         required.
     function applyTaxFee() external onlyOwner {
-        require(pendingTaxFeeBlock > 0, "MagnetaERC20OFT: no pending fee");
-        require(block.number >= pendingTaxFeeBlock, "MagnetaERC20OFT: timelock active");
-        require(
-            block.number <= pendingTaxFeeBlock + TAX_FEE_APPLY_WINDOW_BLOCKS,
-            "MagnetaERC20OFT: proposal expired"
-        );
+        if (pendingTaxFeeBlock == 0) revert NoPendingFee();
+        if (block.number < pendingTaxFeeBlock) revert TimelockActive();
+        if (block.number > pendingTaxFeeBlock + TAX_FEE_APPLY_WINDOW_BLOCKS) revert ProposalExpired();
         taxFee = pendingTaxFee;
         emit TaxFeeUpdated(pendingTaxFee);
         pendingTaxFee = 0;
@@ -327,7 +373,7 @@ contract MagnetaERC20OFT is OFT, ERC20Burnable, ERC20Pausable, MagnetaERC20Permi
     ///         NOT swept here. Recover those via off-chain ops only.
     function withdrawFees() external onlyOwner {
         uint256 amount = accumulatedTaxFees;
-        require(amount > 0, "MagnetaERC20OFT: no fees");
+        if (amount == 0) revert NoFees();
         accumulatedTaxFees = 0;
         address recipient = marketingWallet != address(0) ? marketingWallet : owner();
         emit FeesWithdrawn(recipient, amount);
@@ -342,10 +388,10 @@ contract MagnetaERC20OFT is OFT, ERC20Burnable, ERC20Pausable, MagnetaERC20Permi
     /// @param  active     Whether `autoFreeze` is currently armed
     /// @param  threshold  Min `buyAmount` (raw 10**decimals units) to trigger
     function setAutoFreezeRule(bool active, uint256 threshold) external onlyOwner {
-        require(!revokeFreezeEnabled, "MagnetaERC20OFT: freezing revoked");
+        if (revokeFreezeEnabled) revert FreezingRevoked();
         // An active rule with threshold=0 would let anyone autoFreeze every
         // holder (including the LP pair) since every balance >= 0.
-        require(!active || threshold > 0, "MagnetaERC20OFT: threshold must be > 0 when active");
+        if (active && threshold == 0) revert ThresholdRequiredWhenActive();
         autoFreezeRule = AutoFreezeRule({
             active:        active,
             threshold:     threshold,
@@ -354,11 +400,58 @@ contract MagnetaERC20OFT is OFT, ERC20Burnable, ERC20Pausable, MagnetaERC20Permi
         emit AutoFreezeRuleUpdated(active, threshold);
     }
 
+    /// @notice Name the address allowed to trigger {autoFreeze} besides the
+    ///         owner — the Magneta relayer bot in production (report-17 F-1).
+    ///         Pass address(0) to revert to owner-only.
+    function setAutoFreezeCaller(address caller) external onlyOwner {
+        autoFreezeCaller = caller;
+        emit AutoFreezeCallerUpdated(caller);
+    }
+
+    /// @notice Mint a bridged amount that could not be credited on arrival.
+    /// @dev    report-17 F-2: an inbound OFT credit to a blacklisted recipient
+    ///         (or while the token is paused) used to revert AFTER the source
+    ///         chain had already burnt the value, leaving the user with
+    ///         nothing and no contract-level recovery. {_credit} now parks the
+    ///         amount in {quarantined} instead, and this permissionless call
+    ///         releases it once the block clears — anyone may push it, the
+    ///         funds can only ever go to `to`. Still reverts while paused
+    ///         (via _mint -> _update): the claim simply waits for unpause.
+    function claimQuarantined(address to) external {
+        uint256 amount = quarantined[to];
+        if (amount == 0) revert NothingQuarantined();
+        if (isBlacklisted[to]) revert StillBlacklisted();
+        quarantined[to] = 0;
+        _mint(to, amount);
+        emit BridgeCreditClaimed(to, amount);
+    }
+
+    /// @dev Inbound bridge credit. Overrides OFT's default mint-on-arrival so
+    ///      a credit that cannot land is quarantined rather than reverting
+    ///      after the source-side burn (report-17 F-2). Returning `_amountLD`
+    ///      unchanged keeps the LayerZero message successful, which is what
+    ///      makes the value recoverable: a reverting lzReceive would leave the
+    ///      message stuck in retry with the tokens already destroyed.
+    function _credit(address _to, uint256 _amountLD, uint32 /*_srcEid*/)
+        internal
+        override
+        returns (uint256)
+    {
+        if (_to == address(0)) _to = address(0xdead);
+        if (isBlacklisted[_to] || paused()) {
+            quarantined[_to] += _amountLD;
+            emit BridgeCreditQuarantined(_to, _amountLD);
+            return _amountLD;
+        }
+        _mint(_to, _amountLD);
+        return _amountLD;
+    }
+
     /// @notice Adjust the time window during which `autoFreeze` may fire
     ///         after a rule is configured. Capped at 7 days to bound the
     ///         attack surface.
     function setAutoFreezeWindow(uint256 newWindowSeconds) external onlyOwner {
-        require(newWindowSeconds <= 7 days, "MagnetaERC20OFT: window too long");
+        if (newWindowSeconds > 7 days) revert WindowTooLong();
         autoFreezeWindowSeconds = newWindowSeconds;
         emit AutoFreezeWindowUpdated(newWindowSeconds);
     }
@@ -368,7 +461,7 @@ contract MagnetaERC20OFT is OFT, ERC20Burnable, ERC20Pausable, MagnetaERC20Permi
     ///         wallets, and friendly partners should be whitelisted.
     ///         Batch size is capped to bound gas usage.
     function setAutoFreezeWhitelist(address[] calldata accounts, bool value) external onlyOwner {
-        require(accounts.length <= AUTO_FREEZE_WHITELIST_BATCH_MAX, "MagnetaERC20OFT: batch too large");
+        if (accounts.length > AUTO_FREEZE_WHITELIST_BATCH_MAX) revert BatchTooLarge();
         for (uint256 i; i < accounts.length; ++i) {
             isAutoFreezeWhitelisted[accounts[i]] = value;
             emit AutoFreezeWhitelistUpdated(accounts[i], value);
@@ -388,18 +481,32 @@ contract MagnetaERC20OFT is OFT, ERC20Burnable, ERC20Pausable, MagnetaERC20Permi
     ///         tolerates listener race conditions and prevents false-positives
     ///         when the buyer has already partly sold.
     function autoFreeze(address buyer, uint256 buyAmount) external {
-        require(!revokeFreezeEnabled, "MagnetaERC20OFT: freezing revoked");
+        // report-17 F-1: `buyAmount` is caller-supplied and there is no
+        // on-chain proof the buyer ever bought anything — only that they
+        // currently hold >= threshold. While this was permissionless, ANY
+        // caller could blacklist ANY non-whitelisted EOA over the threshold
+        // during the window: an airdrop recipient, a pre-existing holder, an
+        // OTC buyer. Their tokens then became untransferable until the owner
+        // intervened. Recording genuine acquisitions in _update would cost an
+        // SSTORE on every transfer (users pay) plus bytecode this contract
+        // does not have, so the attestation is authenticated instead: the
+        // trusted party that already watches Transfer events — the Magneta
+        // relayer bot — is named in {autoFreezeCaller}. No user private key
+        // moves server-side (the original reason this was permissionless);
+        // only the freeze trigger is authenticated. Default is owner-only,
+        // so a token whose owner never wires a relayer is safe by default.
+        if (
+            !(msg.sender == owner() || (autoFreezeCaller != address(0) && msg.sender == autoFreezeCaller))
+        ) revert NotAttester();
+        if (revokeFreezeEnabled) revert FreezingRevoked();
         AutoFreezeRule memory rule = autoFreezeRule;
-        require(rule.active, "MagnetaERC20OFT: auto-freeze inactive");
+        if (!rule.active) revert AutoFreezeInactive();
         // Time-window guard: autoFreeze auto-disarms after the configured
         // window expires. Defends against the grief vector where any whale
         // crossing the threshold weeks/months after launch could be frozen
         // by any caller. Owner must re-arm via setAutoFreezeRule.
-        require(
-            block.timestamp <= uint256(rule.configuredAt) + autoFreezeWindowSeconds,
-            "MagnetaERC20OFT: auto-freeze window expired"
-        );
-        require(buyer != address(0) && buyer != address(this), "MagnetaERC20OFT: invalid buyer");
+        if (block.timestamp > uint256(rule.configuredAt) + autoFreezeWindowSeconds) revert AutoFreezeWindowExpired();
+        if (buyer == address(0) || buyer == address(this)) revert InvalidBuyer();
         // Never freeze the owner or a CONTRACT. The DEX pair/router that holds the
         // bulk of the liquidity is a contract and crosses the threshold at launch,
         // so without this guard any caller could `autoFreeze(pair)` and blacklist
@@ -407,12 +514,12 @@ contract MagnetaERC20OFT is OFT, ERC20Burnable, ERC20Pausable, MagnetaERC20Permi
         // EOAs (code.length == 0), so the anti-bot purpose is preserved; a
         // contract-based sniper escaping the freeze is a far smaller harm than a
         // frozen pool. Excluding the owner protects the deployer's own holdings.
-        require(buyer != owner(), "MagnetaERC20OFT: cannot freeze owner");
-        require(buyer.code.length == 0, "MagnetaERC20OFT: cannot freeze contract");
-        require(buyAmount >= rule.threshold, "MagnetaERC20OFT: below threshold");
-        require(!isAutoFreezeWhitelisted[buyer], "MagnetaERC20OFT: whitelisted");
-        require(balanceOf(buyer) >= rule.threshold, "MagnetaERC20OFT: holdings below threshold");
-        require(!isBlacklisted[buyer], "MagnetaERC20OFT: already frozen");
+        if (buyer == owner()) revert CannotFreezeOwner();
+        if (buyer.code.length != 0) revert CannotFreezeContract();
+        if (buyAmount < rule.threshold) revert BelowThreshold();
+        if (isAutoFreezeWhitelisted[buyer]) revert Whitelisted();
+        if (balanceOf(buyer) < rule.threshold) revert HoldingsBelowThreshold();
+        if (isBlacklisted[buyer]) revert AlreadyFrozen();
 
         isBlacklisted[buyer] = true;
         emit BlacklistUpdated(buyer, true);
@@ -434,7 +541,7 @@ contract MagnetaERC20OFT is OFT, ERC20Burnable, ERC20Pausable, MagnetaERC20Permi
         internal
         override(ERC20, ERC20Pausable)
     {
-        require(!isBlacklisted[from] && !isBlacklisted[to], "MagnetaERC20OFT: blacklisted");
+        if (isBlacklisted[from] || isBlacklisted[to]) revert Blacklisted();
 
         uint256 finalValue = value;
         if (

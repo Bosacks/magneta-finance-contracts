@@ -122,6 +122,91 @@ describe("report-17 remediation — factory/deployer split", function () {
     });
 });
 
+describe("report-17 remediation — bridge credit quarantine (F-2)", function () {
+    let token: any;
+    let owner: HardhatEthersSigner;
+    let victim: HardhatEthersSigner;
+    const AMOUNT = ethers.parseEther("500");
+
+    beforeEach(async function () {
+        [owner, victim] = await ethers.getSigners();
+        const EndpointMock = await ethers.getContractFactory("MockLZEndpoint");
+        const ep = await EndpointMock.deploy();
+        await ep.waitForDeployment();
+
+        const T = await ethers.getContractFactory("MagnetaERC20OFTCreditHarness");
+        token = await T.deploy(
+            "Bridged", "BRG", "ipfs://x", ethers.parseEther("1000"), owner.address,
+            false, false, false, await ep.getAddress(), ethers.ZeroAddress,
+        );
+        await token.waitForDeployment();
+    });
+
+    it("credits normally when nothing blocks the recipient", async function () {
+        await token.exposedCredit(victim.address, AMOUNT);
+        expect(await token.balanceOf(victim.address)).to.equal(AMOUNT);
+        expect(await token.quarantined(victim.address)).to.equal(0n);
+    });
+
+    it("quarantines instead of reverting when the recipient is blacklisted", async function () {
+        await token.blacklist(victim.address, true);
+
+        // Pre-fix this reverted — AFTER the source chain had already burnt the
+        // tokens, so the user simply lost them.
+        await expect(token.exposedCredit(victim.address, AMOUNT))
+            .to.emit(token, "BridgeCreditQuarantined")
+            .withArgs(victim.address, AMOUNT);
+        expect(await token.balanceOf(victim.address)).to.equal(0n);
+        expect(await token.quarantined(victim.address)).to.equal(AMOUNT);
+
+        // Still unclaimable while blacklisted...
+        await expect(token.claimQuarantined(victim.address)).to.be.revertedWithCustomError(
+            token, "StillBlacklisted",
+        );
+
+        // ...and recoverable — by anyone — once the block clears. The funds can
+        // only ever land on `to`, so a permissionless push is safe.
+        await token.blacklist(victim.address, false);
+        await expect(token.connect(victim).claimQuarantined(victim.address))
+            .to.emit(token, "BridgeCreditClaimed")
+            .withArgs(victim.address, AMOUNT);
+        expect(await token.balanceOf(victim.address)).to.equal(AMOUNT);
+        expect(await token.quarantined(victim.address)).to.equal(0n);
+    });
+
+    it("quarantines while paused, and releases after unpause", async function () {
+        await token.pause();
+        await token.exposedCredit(victim.address, AMOUNT);
+        expect(await token.quarantined(victim.address)).to.equal(AMOUNT);
+
+        // _mint still routes through the pause guard, so the claim waits.
+        await expect(token.claimQuarantined(victim.address)).to.be.revertedWithCustomError(
+            token, "EnforcedPause",
+        );
+
+        await token.unpause();
+        await token.claimQuarantined(victim.address);
+        expect(await token.balanceOf(victim.address)).to.equal(AMOUNT);
+    });
+
+    it("accumulates repeated blocked credits and releases them in one claim", async function () {
+        await token.blacklist(victim.address, true);
+        await token.exposedCredit(victim.address, AMOUNT);
+        await token.exposedCredit(victim.address, AMOUNT);
+        expect(await token.quarantined(victim.address)).to.equal(AMOUNT * 2n);
+
+        await token.blacklist(victim.address, false);
+        await token.claimQuarantined(victim.address);
+        expect(await token.balanceOf(victim.address)).to.equal(AMOUNT * 2n);
+    });
+
+    it("refuses a claim when nothing is quarantined", async function () {
+        await expect(token.claimQuarantined(victim.address)).to.be.revertedWithCustomError(
+            token, "NothingQuarantined",
+        );
+    });
+});
+
 describe("report-17 remediation — tax-fee proposal expiry (F-3)", function () {
     let token: any;
     let owner: HardhatEthersSigner;
@@ -155,12 +240,12 @@ describe("report-17 remediation — tax-fee proposal expiry (F-3)", function () 
         await ethers.provider.send("hardhat_mine", [
             "0x" + (delay + window + 10n).toString(16),
         ]);
-        await expect(token.applyTaxFee()).to.be.revertedWith("MagnetaERC20OFT: proposal expired");
+        await expect(token.applyTaxFee()).to.be.revertedWithCustomError(token, "ProposalExpired");
         expect(await token.taxFee()).to.equal(0n);
     });
 
     it("still refuses to apply before the delay elapses", async function () {
         await token.setTaxFee(1000);
-        await expect(token.applyTaxFee()).to.be.revertedWith("MagnetaERC20OFT: timelock active");
+        await expect(token.applyTaxFee()).to.be.revertedWithCustomError(token, "TimelockActive");
     });
 });
