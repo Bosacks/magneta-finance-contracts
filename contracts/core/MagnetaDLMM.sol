@@ -112,6 +112,16 @@ contract MagnetaDLMM is Ownable2Step, Pausable, ReentrancyGuard {
         require(uint256(_lpFeeBps) + _protocolFeeBps <= 1000,"DLMM: total fee > 10%");
         require(_feeRecipient != address(0),                 "DLMM: zero fee recipient");
         require(_owner != address(0),                        "DLMM: zero owner");
+        // Free-scan 2026-07-31 (C-1): `_initialActiveId` was the one
+        // constructor parameter nobody validated — not here, not in
+        // MagnetaFactory.createDLMMPool, which is permissionless. Seeded far
+        // enough below BASE_ID, BinHelper's price floors to exactly 0 and
+        // swap() then swallows the entire input for zero output while passing
+        // its own slippage check. Pricing the starting bin here is the whole
+        // validation: BinHelper reverts (BinTooFar / PriceUnderflow / overflow
+        // panic) for every id whose price is not representable at this
+        // binStep, so an unusable pool can no longer be born.
+        BinHelper.getPriceFromId(_initialActiveId, _binStep);
 
         tokenX         = IERC20(_tokenX);
         tokenY         = IERC20(_tokenY);
