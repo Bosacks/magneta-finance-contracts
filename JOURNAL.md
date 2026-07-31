@@ -3,6 +3,16 @@
 > Fil chronologique des sessions. Anti-chronologique (plus récent en haut).
 > Voir `~/CLAUDE.md` pour la règle d'édition.
 
+## 2026-07-31 — Rapport 18, durcissement Bex, décommissionnement Gnosis
+
+- Balayage outils GRATUITS des contrats jamais passés au panel (slither/semgrep/mythril + couche gratuite Sentinelleai via nouveau lanceur headless) → CRITICAL DLMM : `BinHelper` tombait à prix=0, le swap avalait la mise entière en passant sa propre garde de slippage (42759b0, vérifié par simulation entière)
+- 1-clic création de pool : LPModule consomme une signature EIP-2612 (cad897b) + SDK/UI côté site — repli 2-tx intact pour les jetons sans permit
+- Portage Testsites→main (0db79b7) : TaxClaim durci, garde domaine CCTP (domaine 0 = Ethereum, une entrée non configurée le signifiait en silence), verrou rotation USDC ; puis resynchro inverse (a8ba8809)
+- Rapport 18 (panel, 12 findings) : DLMM F-1 remplissage partiel + F-2 échange déguisé sans frais — VÉRIFIÉS à la main, défauts de modèle → refonte, différée avec le plan produit
+- Bex durci (b529f44) : réentrance en lecture seule Balancer (le panel l'avait MANQUÉE, le gratuit l'avait trouvée), validation setPair contre le Vault, minLiquidity sur les joins (signature 6→7 args), fee-on-transfer mesuré
+- DÉCOUVERTE : `MagnetaXChainLpReceiver` VIVANT sur Gnosis (`0xeca6092e…`) absent de TOUS les manifestes — lot Safe de décommissionnement prêt (7cb7639), à signer ; `setKeeper(0)` est rejeté par le contrat, d'où l'adresse de burn
+- Suites : forge 274 → 314, hardhat racine 511, tokens 189
+
 ## 2026-07-30 — 19:55 — Vague testnet Base Sepolia : dérive close, money paths validés (715a05b)
 
 - Merge security/audit-13-remediation → main (c769d5f) puis redeploy atomique complet sur Base Sepolia (Gateway + TOUS les modules en bloc — imposé par le changement de Context)
