@@ -5,6 +5,7 @@ import { IERC20 }            from "@openzeppelin/contracts/token/ERC20/IERC20.so
 import { SafeERC20 }         from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { ReentrancyGuard }   from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import { Ownable2Step, Ownable } from "@openzeppelin/contracts/access/Ownable2Step.sol";
+import "./AdapterPull.sol";
 
 /// @title  BexBerachainAdapter
 /// @notice Uniswap V2 router facade over BEX (Berachain's Balancer V2 fork).
@@ -84,6 +85,101 @@ interface IBexVault {
 
     function getPoolTokens(bytes32 poolId)
         external view returns (address[] memory tokens, uint256[] memory balances, uint256 lastChangeBlock);
+
+    // ── Read-only reentrancy guard plumbing ──
+    // Balancer V2's own `nonReentrant` modifier lives on `manageUserBalance`,
+    // among other entrypoints. We never actually move funds through it — the
+    // shape here exists solely so `VaultReentrancyLib` (below) can compute
+    // the correct 4-byte selector and trigger that modifier from the outside.
+    // See `VaultReentrancyLib.ensureNotInVaultContext` for why.
+    enum UserBalanceOpKind { DEPOSIT_INTERNAL, WITHDRAW_INTERNAL, TRANSFER_INTERNAL, TRANSFER_EXTERNAL }
+    struct UserBalanceOp {
+        UserBalanceOpKind kind;
+        address asset;
+        uint256 amount;
+        address sender;
+        address payable recipient;
+    }
+    function manageUserBalance(UserBalanceOp[] memory ops) external payable;
+}
+
+/// @title  VaultReentrancyLib
+/// @notice Local reimplementation of Balancer's own
+///         `VaultReentrancyLib.ensureNotInVaultContext` (from
+///         `balancer-labs`' `v2-pool-utils/contracts/lib/VaultReentrancyLib.sol`).
+///         Not imported directly because the `balancer-labs` npm scope is
+///         not a dependency of this repo (checked: absent from
+///         `node_modules/`) — reproduced
+///         here byte-for-byte in intent, ported and verified against the
+///         upstream source on 2026-07-31.
+/// @dev    THE READ-ONLY REENTRANCY PROBLEM THIS CLOSES:
+///         Balancer V2's Vault has a documented read-only reentrancy issue
+///         (https://forum.balancer.fi/t/reentrancy-vulnerability-scope-expanded/4345).
+///         A `nonReentrant` modifier on *this* adapter only blocks a SECOND
+///         call into THIS adapter while the first is still executing. It does
+///         NOT block a FIRST call into this adapter that happens to occur
+///         while some OTHER party's Vault operation (e.g. their own
+///         `exitPool` sending them native ETH mid-callback) is still
+///         in-flight. During that window the Vault's own internal balances
+///         are mid-update, so `vault.getPoolTokens(poolId)` can return
+///         transiently-inconsistent reserves — enough to skew this adapter's
+///         ratio math in `_getReservesSorted` / the delta accounting in
+///         `removeLiquidity`.
+///
+///         THE FIX: ask the Vault itself whether it is currently executing.
+///         `manageUserBalance` carries the Vault's own `nonReentrant` guard.
+///         Calling it (with a deliberately empty/degenerate op list, cost
+///         `0` as calldata — decodes as a zero-length array since the value
+///         doubles as both the array's offset AND, read at that offset, its
+///         length) via a gas-capped `staticcall` produces exactly one of two
+///         outcomes:
+///           1. Vault is idle: the guard's `_require(status != ENTERED)`
+///              passes, but the very next line (`status = ENTERED`) is a
+///              storage write, which STATICCALL forbids outright — the call
+///              reverts with EMPTY revertData (a low-level STATICCALL
+///              violation, not a Solidity `revert`/`require`).
+///           2. Vault is mid-operation (reentrant): the guard's `_require`
+///              fails FIRST, before any storage write, producing a normal
+///              `Error(string)`-encoded revert ("BAL#400" in the real Vault)
+///              whose data survives the staticcall (REVERT-with-data is
+///              permitted under STATICCALL; only writes are not).
+///         So: empty revertData == Vault idle == safe to trust reads.
+///         Non-empty revertData == Vault mid-operation == reads are
+///         untrustworthy == revert.
+///
+///         CORRECTION vs. the task brief that requested this fix: it warned
+///         "the official pattern is NOT a staticcall". That is incorrect —
+///         verified directly against
+///         github.com/balancer/balancer-v2-monorepo/blob/master/pkg/pool-utils/contracts/lib/VaultReentrancyLib.sol
+///         on 2026-07-31, and it IS a `staticcall` (with a 10_000 gas cap,
+///         reproduced below). Documenting the discrepancy rather than
+///         silently following the (wrong) brief, per this repo's own
+///         "verify against real sources, don't code from memory" rule.
+library VaultReentrancyLib {
+    /// @dev Mirrors Balancer's own VaultReentrancyLib. The probe is a
+    ///      gas-capped staticcall to `manageUserBalance` with an empty op
+    ///      array, and the verdict is the IDENTITY of the revert reason, not
+    ///      whether it reverted:
+    ///        - inside a Vault callback, the Vault's own reentrancy guard
+    ///          fires first and returns Error("BAL#400");
+    ///        - outside, the call either succeeds (empty ops mutate nothing)
+    ///          or fails for an unrelated reason.
+    ///      Testing `revertData.length == 0` instead — the shape this file
+    ///      first shipped with — would treat ANY other Vault revert (paused
+    ///      vault, upgraded error set, out-of-gas with data) as reentrancy and
+    ///      permanently refuse to trade: a liveness bug wearing a safety
+    ///      costume. The hash is derived here rather than hardcoded so a
+    ///      transcription slip cannot silently disable the check.
+    function ensureNotInVaultContext(IBexVault vault) internal view {
+        bytes32 reentrancyErrorHash = keccak256(abi.encodeWithSignature("Error(string)", "BAL#400"));
+        (, bytes memory revertData) = address(vault).staticcall{gas: 10_000}(
+            abi.encodeWithSelector(vault.manageUserBalance.selector, 0)
+        );
+        require(
+            keccak256(revertData) != reentrancyErrorHash,
+            "BexAdapter: vault reentrancy detected"
+        );
+    }
 }
 
 interface IBexWeightedPoolFactory {
@@ -116,6 +212,7 @@ interface IWETH {
 
 contract BexBerachainAdapter is ReentrancyGuard, Ownable2Step {
     using SafeERC20 for IERC20;
+    using AdapterPull for IERC20;
 
     // BEX endpoints (immutable on mainnet, settable in constructor for
     // Bepolia testnet reuse).
@@ -262,11 +359,30 @@ contract BexBerachainAdapter is ReentrancyGuard, Ownable2Step {
     ///            Protect, MEV-Share, or Berachain's equivalent)
     ///          - Surface the slippage risk in the LP-create UX so users
     ///            can opt into private-mempool submission
+    ///
+    /// @dev F-8 MEDIUM (report 18, fixed): the non-init join used to encode
+    ///        `minBPTOut = 0`, reasoning that `amountTokenMin`/`amountETHMin`
+    ///        already bounded the INPUT side. They don't bound the OUTPUT
+    ///        side: the token/ETH split is itself derived from spot reserves
+    ///        (see the MEV-risk note above), so a manipulated ratio can pass
+    ///        the input-side checks while still handing back far less BPT
+    ///        than the true pre-manipulation price implied. Added a caller-
+    ///        supplied `minLiquidity` floor, threaded into the Vault's own
+    ///        `minBPTOut` for non-init joins (authoritative — the Vault
+    ///        reverts before returning if unmet) AND independently checked
+    ///        against the actual `balanceOf(to)` delta after the join, so an
+    ///        INIT join (which has no native minBPTOut slot in Balancer's
+    ///        userData layout) is covered too.
+    ///        NOTE — PUBLIC SIGNATURE CHANGE: adds `minLiquidity` as a new
+    ///        parameter (between `amountETHMin` and `to`). This contract is
+    ///        not deployed anywhere, so there is no live caller to migrate;
+    ///        any future LPModule/router wiring must pass this parameter.
     function addLiquidityETH(
         address token,
         uint256 amountTokenDesired,
         uint256 amountTokenMin,
         uint256 amountETHMin,
+        uint256 minLiquidity,
         address to,
         uint256 deadline
     ) external payable nonReentrant returns (uint256 amountToken, uint256 amountETH, uint256 liquidity) {
@@ -309,9 +425,19 @@ contract BexBerachainAdapter is ReentrancyGuard, Ownable2Step {
             }
         }
 
-        // ── Wrap exact native amount + pull exact token amount ──
+        // ── Wrap exact native amount + pull the token leg ──
         IWETH(WETH).deposit{value: amountETH}();
-        IERC20(token).safeTransferFrom(msg.sender, address(this), amountToken);
+        // F-fee-on-transfer (economic module finding, fixed): don't assume
+        // the transfer delivered `amountToken`. Measure what actually
+        // arrived — a fee-on-transfer token delivers less, and approving /
+        // joining against the pre-fee figure would have the Vault try to
+        // pull more than this adapter actually holds. Mirrors the
+        // `AdapterPull.pullMeasured` pattern already used by
+        // UbeswapCeloAdapter / DragonSwapSeiAdapter / MoeRouterAdapter /
+        // TraderJoeAvaxAdapter for the same reason. Reassigning the named
+        // return keeps every downstream use (approve, join amounts, the
+        // LPAdded event) consistent with what was really pulled.
+        amountToken = IERC20(token).pullMeasured(msg.sender, amountToken);
 
         // Pool: lazy create (after amount calc so first join doesn't pay
         // factory gas for a tx that would have reverted on slippage).
@@ -327,13 +453,16 @@ contract BexBerachainAdapter is ReentrancyGuard, Ownable2Step {
 
         bytes memory userData;
         if (IBexPool(pool).totalSupply() == 0) {
-            // First-ever join: INIT
+            // First-ever join: INIT. Balancer's INIT userData layout has no
+            // minBPTOut slot — the post-join balance-delta check below is
+            // this join's only BPT floor.
             userData = abi.encode(JOIN_KIND_INIT, amounts);
         } else {
-            // Subsequent: EXACT_TOKENS_IN_FOR_BPT_OUT. minBPTOut = 0
-            // because we've already enforced slippage at the amounts
-            // layer above (the ratio is locked to the pool's current state).
-            userData = abi.encode(JOIN_KIND_EXACT_TOKENS_IN_FOR_BPT_OUT, amounts, uint256(0));
+            // Subsequent: EXACT_TOKENS_IN_FOR_BPT_OUT. F-8 fix: minBPTOut is
+            // now the caller-supplied `minLiquidity`, not a hardcoded 0 — the
+            // Vault enforces it authoritatively and reverts before returning
+            // if unmet, closing the "manipulated ratio ⇒ starved BPT" gap.
+            userData = abi.encode(JOIN_KIND_EXACT_TOKENS_IN_FOR_BPT_OUT, amounts, minLiquidity);
         }
 
         IBexVault.JoinPoolRequest memory request = IBexVault.JoinPoolRequest({
@@ -346,6 +475,11 @@ contract BexBerachainAdapter is ReentrancyGuard, Ownable2Step {
         uint256 bptBefore = IBexPool(pool).balanceOf(to);
         vault.joinPool(poolId, address(this), to, request);
         liquidity = IBexPool(pool).balanceOf(to) - bptBefore;
+
+        // F-8 fix, second layer: enforce the floor on what was ACTUALLY
+        // received regardless of join kind (covers INIT, which has no
+        // Vault-level minBPTOut, and double-checks the non-init path).
+        if (liquidity < minLiquidity) revert InsufficientOutput();
 
         emit LPAdded(token, pool, amountToken, amountETH, liquidity);
 
@@ -360,9 +494,19 @@ contract BexBerachainAdapter is ReentrancyGuard, Ownable2Step {
     /// @dev Read pool reserves and map them to (tokenA, WETH) order
     ///      regardless of Balancer's internal sort. Used by addLiquidityETH
     ///      for partial-fill ratio computation.
+    /// @dev F-VaultReentrancy (verified, HIGH): `vault.getPoolTokens` is a
+    ///      READ, and Balancer V2's read-only reentrancy issue means it can
+    ///      return transiently-inconsistent balances if called while the
+    ///      Vault is mid-operation for someone else (see
+    ///      `VaultReentrancyLib` for the full mechanism). `nonReentrant` on
+    ///      `addLiquidityETH` does not catch this — it guards against a
+    ///      SECOND call into this adapter, not a FIRST call that happens to
+    ///      land mid-callback of an unrelated Vault operation. Guard here,
+    ///      immediately before the read.
     function _getReservesSorted(bytes32 poolId, address token)
         private view returns (uint256 reserveToken, uint256 reserveWeth)
     {
+        VaultReentrancyLib.ensureNotInVaultContext(vault);
         (address[] memory tokens, uint256[] memory balances,) = vault.getPoolTokens(poolId);
         require(tokens.length == 2, "BexAdapter: pool not 2-asset");
         if (tokens[0] == token) {
@@ -384,7 +528,9 @@ contract BexBerachainAdapter is ReentrancyGuard, Ownable2Step {
     ///        - SC02 (balanceOf delta): we still use balanceOf delta to
     ///          measure ACTUAL received, but it is structurally safe in
     ///          this adapter:
-    ///            (1) nonReentrant precludes concurrent calls
+    ///            (1) nonReentrant precludes a SECOND call into this same
+    ///                adapter while the first is still executing — see the
+    ///                CORRECTION below for what it does NOT cover.
     ///            (2) receive() rejects native from any sender != WBERA
     ///            (3) Balancer V2 has no ERC20 transfer callbacks; the
     ///                Vault is the only inflow source during exitPool
@@ -398,6 +544,19 @@ contract BexBerachainAdapter is ReentrancyGuard, Ownable2Step {
     ///          and protected by nonReentrant. No state mutation in this
     ///          adapter occurs after the vault call except the LPRemoved
     ///          event emission.
+    ///        - CORRECTION (verified, HIGH — the three claims above that
+    ///          `nonReentrant` alone makes the `getPoolTokens` reads below
+    ///          safe were WRONG and have been fixed, not just reworded):
+    ///          `nonReentrant` blocks re-ENTERING this adapter; it does not
+    ///          block a FIRST entry into this adapter's `getPoolTokens`
+    ///          reads while the Vault is mid-operation for some UNRELATED
+    ///          caller (e.g. that caller's own `exitPool` sending them
+    ///          native ETH mid-callback, from which they call back into
+    ///          Magneta). During that window the Vault's balances are
+    ///          transiently inconsistent, so the `balancesBefore` read two
+    ///          lines below could be skewed before this function's own
+    ///          `nonReentrant` lock is even relevant. `VaultReentrancyLib`
+    ///          is now called immediately before that read to close the gap.
     function removeLiquidity(
         address tokenA, address tokenB,
         uint256 liquidity,
@@ -432,10 +591,16 @@ contract BexBerachainAdapter is ReentrancyGuard, Ownable2Step {
         // Authoritative `amountA` / `amountB` come from the Balancer Vault's
         // own pool-balance tracking via the `getPoolTokens` deltas below.
         // The Vault's internal accounting is the source of truth for "how
-        // much did the pool send to us", and is atomic within this
-        // transaction (nonReentrant precludes interleaving). Any token
-        // dust ERC20-transferred directly to the adapter is EXCLUDED from
-        // the delta and stays as residue — donor self-griefs, user gets
+        // much did the pool send to us". CORRECTION (verified, HIGH): this
+        // comment used to claim the read below was "atomic within this
+        // transaction (nonReentrant precludes interleaving)" — that is only
+        // true against a SECOND call into THIS adapter. It does not stop a
+        // FIRST call into this adapter's `getPoolTokens` read landing while
+        // the Vault is mid-operation for an unrelated caller (read-only
+        // reentrancy — see `VaultReentrancyLib`), which is exactly the
+        // window where "before" could already be stale. Guarded below. Any
+        // token dust ERC20-transferred directly to the adapter is EXCLUDED
+        // from the delta and stays as residue — donor self-griefs, user gets
         // exactly what the Vault sent. Owner can sweep accumulated dust
         // via `sweep()` (housekeeping, not load-bearing).
         //
@@ -445,6 +610,7 @@ contract BexBerachainAdapter is ReentrancyGuard, Ownable2Step {
         // Protocol 2026-03 vulnerability ($2M+). The vault delta below is
         // the ONLY correct accounting source for this code path.
         {
+            VaultReentrancyLib.ensureNotInVaultContext(vault);
             (, uint256[] memory balancesBefore,) = vault.getPoolTokens(poolId);
 
             vault.exitPool(poolId, address(this), payable(address(this)), request);
@@ -489,16 +655,18 @@ contract BexBerachainAdapter is ReentrancyGuard, Ownable2Step {
         if (pool == address(0)) revert PoolMissing(path[0], path[1]);
         bytes32 poolId = IBexPool(pool).getPoolId();
 
-        // Pull amountIn from msg.sender
-        IERC20(path[0]).safeTransferFrom(msg.sender, address(this), amountIn);
-        IERC20(path[0]).forceApprove(address(vault), amountIn);
+        // F-fee-on-transfer (economic module finding, fixed): pull-then-
+        // measure instead of assuming the transfer delivered `amountIn`.
+        // Same rationale and library as `addLiquidityETH` above.
+        uint256 gotIn = IERC20(path[0]).pullMeasured(msg.sender, amountIn);
+        IERC20(path[0]).forceApprove(address(vault), gotIn);
 
         IBexVault.SingleSwap memory singleSwap = IBexVault.SingleSwap({
             poolId: poolId,
             kind: IBexVault.SwapKind.GIVEN_IN,
             assetIn: path[0],
             assetOut: path[1],
-            amount: amountIn,
+            amount: gotIn,
             userData: ""
         });
 
@@ -512,7 +680,7 @@ contract BexBerachainAdapter is ReentrancyGuard, Ownable2Step {
         uint256 amountOut = vault.swap(singleSwap, funds, amountOutMin, deadline);
 
         amounts = new uint256[](2);
-        amounts[0] = amountIn;
+        amounts[0] = gotIn;
         amounts[1] = amountOut;
     }
 
@@ -578,10 +746,30 @@ contract BexBerachainAdapter is ReentrancyGuard, Ownable2Step {
     ///      off-chain monitors (magneta-listener) can alert on suspicious
     ///      admin activity even if the multisig+timelock migration is not
     ///      yet in place.
+    /// @dev F-7 HIGH (report 18, fixed): this used to accept ANY non-zero
+    ///      `pool` address with no relationship check to `tokenA`/`tokenB`
+    ///      or this adapter's configured `vault`. A misconfiguration (wrong
+    ///      chain's pool, typo'd address, or a malicious pool crafted to
+    ///      answer `getPoolId()`/`getPoolTokens()` favorably) would
+    ///      PERMANENTLY bind the pair — write-once (SC01 above) makes that
+    ///      unrecoverable, so the earlier lack of validation turned a config
+    ///      error into a permanent one. Now requires: (1) `pool` resolves a
+    ///      `getPoolId()`, (2) that poolId is registered with THIS adapter's
+    ///      `vault` (a pool the Vault doesn't recognize reverts inside
+    ///      `getPoolTokens`), and (3) the Vault reports it holds EXACTLY
+    ///      `{tokenA, tokenB}` in Balancer's sorted order — not a superset,
+    ///      subset, or different pair entirely.
     function setPair(address tokenA, address tokenB, address pool) external onlyOwner {
         if (tokenA == address(0) || tokenB == address(0) || pool == address(0)) revert ZeroAddress();
         require(pairOf[tokenA][tokenB] == address(0), "BexAdapter: pair exists");
         require(pairOf[tokenB][tokenA] == address(0), "BexAdapter: pair exists");
+
+        bytes32 poolId = IBexPool(pool).getPoolId();
+        (address[] memory tokens,,) = vault.getPoolTokens(poolId);
+        require(tokens.length == 2, "BexAdapter: pool not 2-asset");
+        (address t0, address t1) = _sort(tokenA, tokenB);
+        require(tokens[0] == t0 && tokens[1] == t1, "BexAdapter: pool token mismatch");
+
         pairOf[tokenA][tokenB] = pool;
         pairOf[tokenB][tokenA] = pool;
         emit PairRegistered(tokenA, tokenB, pool, msg.sender);

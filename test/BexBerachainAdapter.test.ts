@@ -86,7 +86,7 @@ describe("BexBerachainAdapter — Balancer V2 fork facade", function () {
     it("reverts on past deadline", async function () {
       await expect(
         adapter.connect(user).addLiquidityETH(
-          await token.getAddress(), TOKEN_AMOUNT, 0, 0, user.address, DEADLINE_PAST,
+          await token.getAddress(), TOKEN_AMOUNT, 0, 0, 0, user.address, DEADLINE_PAST,
           { value: ETH_AMOUNT },
         ),
       ).to.be.revertedWithCustomError(adapter, "DeadlinePassed");
@@ -95,7 +95,7 @@ describe("BexBerachainAdapter — Balancer V2 fork facade", function () {
     it("reverts on zero token address", async function () {
       await expect(
         adapter.connect(user).addLiquidityETH(
-          ethers.ZeroAddress, TOKEN_AMOUNT, 0, 0, user.address, DEADLINE_FUTURE,
+          ethers.ZeroAddress, TOKEN_AMOUNT, 0, 0, 0, user.address, DEADLINE_FUTURE,
           { value: ETH_AMOUNT },
         ),
       ).to.be.revertedWithCustomError(adapter, "ZeroAddress");
@@ -104,7 +104,7 @@ describe("BexBerachainAdapter — Balancer V2 fork facade", function () {
     it("reverts on zero recipient", async function () {
       await expect(
         adapter.connect(user).addLiquidityETH(
-          await token.getAddress(), TOKEN_AMOUNT, 0, 0, ethers.ZeroAddress, DEADLINE_FUTURE,
+          await token.getAddress(), TOKEN_AMOUNT, 0, 0, 0, ethers.ZeroAddress, DEADLINE_FUTURE,
           { value: ETH_AMOUNT },
         ),
       ).to.be.revertedWithCustomError(adapter, "ZeroAddress");
@@ -113,13 +113,13 @@ describe("BexBerachainAdapter — Balancer V2 fork facade", function () {
     it("reverts on zero amounts", async function () {
       await expect(
         adapter.connect(user).addLiquidityETH(
-          await token.getAddress(), 0, 0, 0, user.address, DEADLINE_FUTURE,
+          await token.getAddress(), 0, 0, 0, 0, user.address, DEADLINE_FUTURE,
           { value: ETH_AMOUNT },
         ),
       ).to.be.revertedWithCustomError(adapter, "ZeroAmount");
       await expect(
         adapter.connect(user).addLiquidityETH(
-          await token.getAddress(), TOKEN_AMOUNT, 0, 0, user.address, DEADLINE_FUTURE,
+          await token.getAddress(), TOKEN_AMOUNT, 0, 0, 0, user.address, DEADLINE_FUTURE,
           { value: 0 },
         ),
       ).to.be.revertedWithCustomError(adapter, "ZeroAmount");
@@ -130,7 +130,7 @@ describe("BexBerachainAdapter — Balancer V2 fork facade", function () {
       const fakeToken = "0x000000000000000000000000000000000000dEaD";
       await expect(
         adapter.connect(user).addLiquidityETH(
-          fakeToken, TOKEN_AMOUNT, 0, 0, user.address, DEADLINE_FUTURE,
+          fakeToken, TOKEN_AMOUNT, 0, 0, 0, user.address, DEADLINE_FUTURE,
           { value: ETH_AMOUNT },
         ),
       ).to.be.revertedWithCustomError(adapter, "TokenNotDeployed");
@@ -142,7 +142,7 @@ describe("BexBerachainAdapter — Balancer V2 fork facade", function () {
       expect(await adapter.getPair(await token.getAddress(), await weth.getAddress())).to.equal(ethers.ZeroAddress);
 
       const tx = await adapter.connect(user).addLiquidityETH(
-        await token.getAddress(), TOKEN_AMOUNT, 0, 0, user.address, DEADLINE_FUTURE,
+        await token.getAddress(), TOKEN_AMOUNT, 0, 0, 0, user.address, DEADLINE_FUTURE,
         { value: ETH_AMOUNT },
       );
       await expect(tx).to.emit(adapter, "PairCreated");
@@ -156,7 +156,7 @@ describe("BexBerachainAdapter — Balancer V2 fork facade", function () {
     it("creates pool with sorted assets + 50/50 weights + 0.30% fee", async function () {
       await token.connect(user).approve(await adapter.getAddress(), TOKEN_AMOUNT);
       await adapter.connect(user).addLiquidityETH(
-        await token.getAddress(), TOKEN_AMOUNT, 0, 0, user.address, DEADLINE_FUTURE,
+        await token.getAddress(), TOKEN_AMOUNT, 0, 0, 0, user.address, DEADLINE_FUTURE,
         { value: ETH_AMOUNT },
       );
 
@@ -182,7 +182,7 @@ describe("BexBerachainAdapter — Balancer V2 fork facade", function () {
       await token.connect(user).approve(await adapter.getAddress(), TOKEN_AMOUNT);
       await expect(
         adapter.connect(user).addLiquidityETH(
-          await token.getAddress(), TOKEN_AMOUNT, 0, 0, user.address, DEADLINE_FUTURE,
+          await token.getAddress(), TOKEN_AMOUNT, 0, 0, 0, user.address, DEADLINE_FUTURE,
           { value: ETH_AMOUNT },
         ),
       ).to.emit(adapter, "LPAdded");
@@ -191,7 +191,7 @@ describe("BexBerachainAdapter — Balancer V2 fork facade", function () {
     it("mints BPT to recipient (not msg.sender)", async function () {
       await token.connect(user).approve(await adapter.getAddress(), TOKEN_AMOUNT);
       await adapter.connect(user).addLiquidityETH(
-        await token.getAddress(), TOKEN_AMOUNT, 0, 0, other.address, DEADLINE_FUTURE,
+        await token.getAddress(), TOKEN_AMOUNT, 0, 0, 0, other.address, DEADLINE_FUTURE,
         { value: ETH_AMOUNT },
       );
 
@@ -205,7 +205,7 @@ describe("BexBerachainAdapter — Balancer V2 fork facade", function () {
       // First add
       await token.connect(user).approve(await adapter.getAddress(), TOKEN_AMOUNT);
       await adapter.connect(user).addLiquidityETH(
-        await token.getAddress(), TOKEN_AMOUNT, 0, 0, user.address, DEADLINE_FUTURE,
+        await token.getAddress(), TOKEN_AMOUNT, 0, 0, 0, user.address, DEADLINE_FUTURE,
         { value: ETH_AMOUNT },
       );
       const pool1 = await adapter.getPair(await token.getAddress(), await weth.getAddress());
@@ -213,7 +213,7 @@ describe("BexBerachainAdapter — Balancer V2 fork facade", function () {
       // Second add — same pool
       await token.connect(user).approve(await adapter.getAddress(), TOKEN_AMOUNT);
       const tx = await adapter.connect(user).addLiquidityETH(
-        await token.getAddress(), TOKEN_AMOUNT, 0, 0, user.address, DEADLINE_FUTURE,
+        await token.getAddress(), TOKEN_AMOUNT, 0, 0, 0, user.address, DEADLINE_FUTURE,
         { value: ETH_AMOUNT },
       );
       await expect(tx).to.not.emit(adapter, "PairCreated");
@@ -228,7 +228,7 @@ describe("BexBerachainAdapter — Balancer V2 fork facade", function () {
       const seedEth = ethers.parseEther("10");
       await token.connect(user).approve(await adapter.getAddress(), seedTok);
       await adapter.connect(user).addLiquidityETH(
-        await token.getAddress(), seedTok, 0, 0, user.address, DEADLINE_FUTURE,
+        await token.getAddress(), seedTok, 0, 0, 0, user.address, DEADLINE_FUTURE,
         { value: seedEth },
       );
 
@@ -239,7 +239,7 @@ describe("BexBerachainAdapter — Balancer V2 fork facade", function () {
       await token.connect(user).approve(await adapter.getAddress(), desiredTok);
       const balBefore = await ethers.provider.getBalance(user.address);
       const tx = await adapter.connect(user).addLiquidityETH(
-        await token.getAddress(), desiredTok, 0, 0, user.address, DEADLINE_FUTURE,
+        await token.getAddress(), desiredTok, 0, 0, 0, user.address, DEADLINE_FUTURE,
         { value: surplusEth },
       );
       const r = await tx.wait();
@@ -256,7 +256,7 @@ describe("BexBerachainAdapter — Balancer V2 fork facade", function () {
       // Seed pool at 1000 tok : 10 ETH
       await token.connect(user).approve(await adapter.getAddress(), TOKEN_AMOUNT);
       await adapter.connect(user).addLiquidityETH(
-        await token.getAddress(), TOKEN_AMOUNT, 0, 0, user.address, DEADLINE_FUTURE,
+        await token.getAddress(), TOKEN_AMOUNT, 0, 0, 0, user.address, DEADLINE_FUTURE,
         { value: ETH_AMOUNT },
       );
 
@@ -266,7 +266,7 @@ describe("BexBerachainAdapter — Balancer V2 fork facade", function () {
       await expect(
         adapter.connect(user).addLiquidityETH(
           await token.getAddress(), TOKEN_AMOUNT, 0, ethers.parseEther("50"),
-          user.address, DEADLINE_FUTURE,
+          0, user.address, DEADLINE_FUTURE,
           { value: ethers.parseEther("100") },
         ),
       ).to.be.revertedWithCustomError(adapter, "InsufficientOutput");
@@ -281,7 +281,7 @@ describe("BexBerachainAdapter — Balancer V2 fork facade", function () {
     beforeEach(async function () {
       await token.connect(user).approve(await adapter.getAddress(), TOKEN_AMOUNT);
       await adapter.connect(user).addLiquidityETH(
-        await token.getAddress(), TOKEN_AMOUNT, 0, 0, user.address, DEADLINE_FUTURE,
+        await token.getAddress(), TOKEN_AMOUNT, 0, 0, 0, user.address, DEADLINE_FUTURE,
         { value: ETH_AMOUNT },
       );
       pool = await adapter.getPair(await token.getAddress(), await weth.getAddress());
@@ -408,7 +408,7 @@ describe("BexBerachainAdapter — Balancer V2 fork facade", function () {
       // Seed pool via addLiquidityETH (only way to register a pair in our mock setup)
       await token.connect(user).approve(await adapter.getAddress(), TOKEN_AMOUNT);
       await adapter.connect(user).addLiquidityETH(
-        await token.getAddress(), TOKEN_AMOUNT, 0, 0, user.address, DEADLINE_FUTURE,
+        await token.getAddress(), TOKEN_AMOUNT, 0, 0, 0, user.address, DEADLINE_FUTURE,
         { value: ETH_AMOUNT },
       );
       pool = await adapter.getPair(await token.getAddress(), await weth.getAddress());
@@ -494,7 +494,7 @@ describe("BexBerachainAdapter — Balancer V2 fork facade", function () {
     beforeEach(async function () {
       await token.connect(user).approve(await adapter.getAddress(), TOKEN_AMOUNT);
       await adapter.connect(user).addLiquidityETH(
-        await token.getAddress(), TOKEN_AMOUNT, 0, 0, user.address, DEADLINE_FUTURE,
+        await token.getAddress(), TOKEN_AMOUNT, 0, 0, 0, user.address, DEADLINE_FUTURE,
         { value: ETH_AMOUNT },
       );
       pool = await adapter.getPair(await token.getAddress(), await weth.getAddress());
@@ -566,27 +566,68 @@ describe("BexBerachainAdapter — Balancer V2 fork facade", function () {
       await expect(adapter.setPair(await token.getAddress(), await weth.getAddress(), ethers.ZeroAddress))
         .to.be.revertedWithCustomError(adapter, "ZeroAddress");
     });
+    // F-7 fix (report 18): setPair now requires the pool to be recognized
+    // by the configured Vault AND to hold exactly {tokenA, tokenB}. An EOA
+    // (no getPoolId()) or a pool the Vault has never seen no longer works
+    // as a stand-in "fake pool" — register a real one via the factory +
+    // a direct joinPool (mirrors how the real Vault learns a pool's token
+    // list at init).
+    async function registerRealPool(tokenX: string, tokenY: string) {
+      const [t0, t1] = tokenX.toLowerCase() < tokenY.toLowerCase() ? [tokenX, tokenY] : [tokenY, tokenX];
+      const pool = await poolFactory.create.staticCall(
+        "L", "L", [t0, t1], [ethers.parseEther("0.5"), ethers.parseEther("0.5")],
+        [ethers.ZeroAddress, ethers.ZeroAddress], 3000000000000000n, deployer.address, ethers.ZeroHash,
+      );
+      await poolFactory.create(
+        "L", "L", [t0, t1], [ethers.parseEther("0.5"), ethers.parseEther("0.5")],
+        [ethers.ZeroAddress, ethers.ZeroAddress], 3000000000000000n, deployer.address, ethers.ZeroHash,
+      );
+      const Pool = await ethers.getContractAt("MockBexPool", pool);
+      const poolId = await Pool.getPoolId();
+      // Mint (if needed) + approve + join so the mock Vault records this
+      // pool's token list. `deployer` already holds an initial supply of
+      // `token` (and of any freshly-deployed MockERC20, incl. `otherToken`
+      // in the mismatch test below) from construction, so the explicit
+      // mints here are only strictly needed for WETH (must be wrapped).
+      const wethAddr = await weth.getAddress();
+      const tokenAddr = await token.getAddress();
+      if (t0 === tokenAddr) await token.mint(deployer.address, ethers.parseEther("1"));
+      if (t1 === tokenAddr) await token.mint(deployer.address, ethers.parseEther("1"));
+      if (t0 === wethAddr) await weth.deposit({ value: ethers.parseEther("1") });
+      if (t1 === wethAddr) await weth.deposit({ value: ethers.parseEther("1") });
+      await (await ethers.getContractAt("@openzeppelin/contracts/token/ERC20/IERC20.sol:IERC20", t0)).approve(await vault.getAddress(), ethers.parseEther("1"));
+      await (await ethers.getContractAt("@openzeppelin/contracts/token/ERC20/IERC20.sol:IERC20", t1)).approve(await vault.getAddress(), ethers.parseEther("1"));
+      await vault.joinPool(poolId, deployer.address, deployer.address, {
+        assets: [t0, t1],
+        maxAmountsIn: [ethers.parseEther("1"), ethers.parseEther("1")],
+        userData: "0x",
+        fromInternalBalance: false,
+      });
+      return pool;
+    }
+
     it("sets pair in both orderings", async function () {
-      const fakePool = other.address;
-      await adapter.setPair(await token.getAddress(), await weth.getAddress(), fakePool);
-      expect(await adapter.getPair(await token.getAddress(), await weth.getAddress())).to.equal(fakePool);
-      expect(await adapter.getPair(await weth.getAddress(), await token.getAddress())).to.equal(fakePool);
+      const realPool = await registerRealPool(await token.getAddress(), await weth.getAddress());
+      await adapter.setPair(await token.getAddress(), await weth.getAddress(), realPool);
+      expect(await adapter.getPair(await token.getAddress(), await weth.getAddress())).to.equal(realPool);
+      expect(await adapter.getPair(await weth.getAddress(), await token.getAddress())).to.equal(realPool);
     });
 
     // Sentinelle v7 MEDIUM SC01 admin transparency: setPair MUST emit
     // PairRegistered so off-chain monitors (magneta-listener) can alert.
     it("emits PairRegistered with the registrar address", async function () {
-      const fakePool = other.address;
-      const tx = adapter.setPair(await token.getAddress(), await weth.getAddress(), fakePool);
+      const realPool = await registerRealPool(await token.getAddress(), await weth.getAddress());
+      const tx = adapter.setPair(await token.getAddress(), await weth.getAddress(), realPool);
       await expect(tx)
         .to.emit(adapter, "PairRegistered")
-        .withArgs(await token.getAddress(), await weth.getAddress(), fakePool, deployer.address);
+        .withArgs(await token.getAddress(), await weth.getAddress(), realPool, deployer.address);
     });
 
     // Sentinelle v3 fix (LOW SC01): mappings are write-once
     it("reverts when overwriting an existing pair", async function () {
-      const pool1 = other.address;
-      const pool2 = deployer.address; // any non-zero
+      const pool1 = await registerRealPool(await token.getAddress(), await weth.getAddress());
+      const pool2 = deployer.address; // any non-zero — "pair exists" fires
+      // before pool validation would even run, so this can stay an EOA.
       await adapter.setPair(await token.getAddress(), await weth.getAddress(), pool1);
       await expect(
         adapter.setPair(await token.getAddress(), await weth.getAddress(), pool2),
@@ -594,6 +635,36 @@ describe("BexBerachainAdapter — Balancer V2 fork facade", function () {
       await expect(
         adapter.setPair(await weth.getAddress(), await token.getAddress(), pool2),
       ).to.be.revertedWith("BexAdapter: pair exists");
+    });
+
+    // F-7 fix (report 18): the core new behaviour — a pool that doesn't
+    // actually hold {tokenA, tokenB} must be rejected, not permanently
+    // bound.
+    it("reverts when the pool's tokens don't match tokenA/tokenB", async function () {
+      const otherToken = await (await ethers.getContractFactory("MockERC20")).deploy("Other", "OTH", 18, ethers.parseEther("1000"));
+      const mismatchedPool = await registerRealPool(await otherToken.getAddress(), await weth.getAddress());
+      await expect(
+        adapter.setPair(await token.getAddress(), await weth.getAddress(), mismatchedPool),
+      ).to.be.revertedWith("BexAdapter: pool token mismatch");
+    });
+
+    it("reverts when the pool is unknown to the Vault", async function () {
+      const tokenAddr = await token.getAddress();
+      const wethAddr = await weth.getAddress();
+      const [t0, t1] = tokenAddr.toLowerCase() < wethAddr.toLowerCase() ? [tokenAddr, wethAddr] : [wethAddr, tokenAddr];
+      // Created via the factory (valid getPoolId()) but never joined, so
+      // the mock Vault never recorded its token list.
+      const neverJoinedPool = await poolFactory.create.staticCall(
+        "L", "L", [t0, t1], [ethers.parseEther("0.5"), ethers.parseEther("0.5")],
+        [ethers.ZeroAddress, ethers.ZeroAddress], 3000000000000000n, deployer.address, ethers.ZeroHash,
+      );
+      await poolFactory.create(
+        "L", "L", [t0, t1], [ethers.parseEther("0.5"), ethers.parseEther("0.5")],
+        [ethers.ZeroAddress, ethers.ZeroAddress], 3000000000000000n, deployer.address, ethers.ZeroHash,
+      );
+      await expect(
+        adapter.setPair(await token.getAddress(), await weth.getAddress(), neverJoinedPool),
+      ).to.be.revertedWith("BexAdapter: pool not 2-asset");
     });
   });
 

@@ -108,6 +108,58 @@ contract MockBexVault {
     ///         pool registers itself here on creation via this Vault.
     mapping(bytes32 => address) public poolByPoolId;
 
+    /// @notice Test hook for BexBerachainAdapter's read-only reentrancy guard
+    ///         (`VaultReentrancyLib.ensureNotInVaultContext`). When true,
+    ///         `manageUserBalance` reverts with a non-empty `Error(string)`
+    ///         payload ("BAL#400"), mirroring the real Balancer Vault's
+    ///         behaviour when its `nonReentrant` guard's `_require` fires
+    ///         because a Vault operation is already in progress. When false
+    ///         (default), it reverts with EMPTY data, mirroring the real
+    ///         Vault's behaviour when idle (the guard passes, but the
+    ///         subsequent storage write is illegal under the adapter's
+    ///         staticcall). See `VaultReentrancyLib` in
+    ///         BexBerachainAdapter.sol for why these two outcomes are the
+    ///         adapter's only signal.
+    bool public simulateVaultReentrancy;
+
+    function setSimulateVaultReentrancy(bool v) external {
+        simulateVaultReentrancy = v;
+    }
+
+    enum UserBalanceOpKind { DEPOSIT_INTERNAL, WITHDRAW_INTERNAL, TRANSFER_INTERNAL, TRANSFER_EXTERNAL }
+    struct UserBalanceOp {
+        UserBalanceOpKind kind;
+        address asset;
+        uint256 amount;
+        address sender;
+        address payable recipient;
+    }
+
+    /// @dev Selector-compatible with `IBexVault.manageUserBalance` in
+    ///      BexBerachainAdapter.sol (same canonical parameter shape), so the
+    ///      adapter's `staticcall{gas: 10_000}` finds this function.
+    /// @notice When true, the probe reverts with an Error(string) that is NOT
+    ///         the reentrancy code — a paused vault, say. The guard must let
+    ///         this through: treating any revert-with-data as reentrancy would
+    ///         freeze the adapter for an unrelated Vault condition.
+    bool public simulateVaultOtherError;
+
+    function setSimulateVaultOtherError(bool v) external {
+        simulateVaultOtherError = v;
+    }
+
+    function manageUserBalance(UserBalanceOp[] memory) external payable {
+        if (simulateVaultReentrancy) {
+            revert("BAL#400");
+        }
+        if (simulateVaultOtherError) {
+            revert("BAL#402"); // vault paused — unrelated to reentrancy
+        }
+        assembly {
+            revert(0, 0)
+        }
+    }
+
     /// @notice Per-pool token balances tracked by the mock (for exitPool).
     mapping(address => mapping(address => uint256)) public poolBalance;
 
