@@ -19,6 +19,8 @@ interface IMagnetaManagedTokenTax {
 
 interface IV2RouterSwapper {
     function WETH() external pure returns (address);
+    function getAmountsOut(uint amountIn, address[] calldata path)
+        external view returns (uint[] memory amounts);
     function swapExactTokensForTokens(
         uint amountIn,
         uint amountOutMin,
@@ -58,6 +60,18 @@ contract TaxClaimModule is IModule, ReentrancyGuard, Ownable2Step {
     uint16  public constant FEE_BPS = 15;       // 0.15%
     uint256 public minUsdc = 20_000_000;         // $20.00 default threshold (6 decimals)
 
+    /// @notice Fraction of the router's own quote the swap must actually
+    ///         return, in bps. 9700 = at most 3% slippage.
+    ///
+    /// @dev    `minUsdc` is an ABSOLUTE $20 floor and bounds nothing
+    ///         proportionally: a claim worth $50,000 sandwiched down to $21
+    ///         passes it. That mattered because the client cannot compute a
+    ///         sensible `amountOutMin` — it cannot read this module's router,
+    ///         its path, or the fee amount before `withdrawFees()` runs — so
+    ///         the production UI hard-codes `amountOutMin: 0`. The bound has to
+    ///         live here or it does not exist.
+    uint16 public maxSlippageBps = 9_700;
+
     address public immutable gateway;
     address public immutable router;
     address public immutable usdc;
@@ -70,6 +84,15 @@ contract TaxClaimModule is IModule, ReentrancyGuard, Ownable2Step {
 
     /// @notice Magneta treasury mint recipient on the destination domain (bytes32-padded).
     bytes32 public treasuryRecipient;
+
+    /// @notice CCTP domains this deployment will burn to.
+    ///
+    /// @dev    `depositForBurn` accepts any uint32. A domain Circle does not
+    ///         operate is never attested, so the USDC is burned here and minted
+    ///         nowhere — an unrecoverable loss, and the caller picks the number.
+    ///         An allow-list is the only thing standing between a typo and a
+    ///         destroyed claim.
+    mapping(uint32 => bool) public cctpDomainEnabled;
 
     /// @notice token => user admin (same semantics as TokenOpsModule.tokenAdmin).
     mapping(address => address) public tokenAdmin;
@@ -94,12 +117,20 @@ contract TaxClaimModule is IModule, ReentrancyGuard, Ownable2Step {
     event CctpRouteSet(address messenger, uint32 domain, bytes32 recipient);
     event MinUsdcUpdated(uint256 previous, uint256 current);
     event TrustedRegistrarUpdated(address indexed registrar, bool trusted);
+    event TokenUnregistered(address indexed token);
+    event MaxSlippageUpdated(uint16 previous, uint16 current);
+    event Rescued(address indexed token, address indexed to, uint256 amount);
+    event CctpDomainUpdated(uint32 indexed domain, bool enabled);
 
     error OnlyGateway();
     error NotRegistered();
     error NotAdmin();
     error BelowThreshold(uint256 gross);
     error NothingToClaim();
+    error SlippageExceeded(uint256 got, uint256 floorOut);
+    error BurnDidNotConsumeApproval();
+    error NotAContract(address addr);
+    error DomainNotEnabled(uint32 domain);
 
     /// @notice Minimum attested DVN quorum the gateway must surface for this
     ///         module to wire up. Mitigates Kelp-DAO-class single-validator
@@ -148,11 +179,57 @@ contract TaxClaimModule is IModule, ReentrancyGuard, Ownable2Step {
 
     function setCctpRoute(address messenger, uint32 domain, bytes32 recipient) external onlyOwner {
         require(messenger != address(0), "TaxClaim: zero messenger");
+        if (messenger.code.length == 0) revert NotAContract(messenger);
         require(recipient != bytes32(0), "TaxClaim: zero recipient");
         cctpMessenger = messenger;
         treasuryDomain = domain;
         treasuryRecipient = recipient;
         emit CctpRouteSet(messenger, domain, recipient);
+    }
+
+    /// @notice Undo a registration. TokenOpsModule has always had this; this
+    ///         module did not, so a single wrong `admin` bricked that token's
+    ///         tax revenue permanently — `registerToken` refuses to overwrite
+    ///         and `execute` demands `ctx.caller == admin`.
+    function unregisterToken(address token) external onlyOwner {
+        delete tokenAdmin[token];
+        emit TokenUnregistered(token);
+    }
+
+    /// @notice Bound on how far below the router's own quote a claim may land.
+    function setMaxSlippageBps(uint16 bps) external onlyOwner {
+        require(bps > 0 && bps <= 10_000, "TaxClaim: bps range");
+        emit MaxSlippageUpdated(maxSlippageBps, bps);
+        maxSlippageBps = bps;
+    }
+
+    /// @notice Recover assets sitting on this module.
+    ///
+    /// @dev The code used to state that donated tokens "can be rescued
+    ///      separately by governance". No such function existed. Every claim is
+    ///      atomic — the module holds nothing between calls — so anything here
+    ///      is a donation, dust, or the residue of a failed flow, and without
+    ///      this it was locked for good on all 19 chains. The comment is now
+    ///      true instead of reassuring.
+    function rescueERC20(address token, address to, uint256 amount) external onlyOwner {
+        require(to != address(0), "TaxClaim: zero to");
+        IERC20(token).safeTransfer(to, amount);
+        emit Rescued(token, to, amount);
+    }
+
+    /// @notice Recover native currency. `execute` now refuses non-zero
+    ///         msg.value, but anything already trapped needs a way out.
+    function rescueNative(address payable to, uint256 amount) external onlyOwner {
+        require(to != address(0), "TaxClaim: zero to");
+        (bool ok, ) = to.call{value: amount}("");
+        require(ok, "TaxClaim: native transfer failed");
+        emit Rescued(address(0), to, amount);
+    }
+
+    /// @notice Enable or disable a CCTP destination domain.
+    function setCctpDomain(uint32 domain, bool enabled) external onlyOwner {
+        cctpDomainEnabled[domain] = enabled;
+        emit CctpDomainUpdated(domain, enabled);
     }
 
     function setMinUsdc(uint256 newMin) external onlyOwner {
@@ -167,6 +244,12 @@ contract TaxClaimModule is IModule, ReentrancyGuard, Ownable2Step {
         uint256 amountOutMin;    // USDC slippage floor the caller accepts
         uint256 deadline;
         bool    bridgeToTreasury; // true = CCTP burn, false = keep on local chain
+        /// @dev CCTP domain to receive the proceeds. The point of the bridge is
+        ///      that an admin claims revenue accrued on THIS chain and takes
+        ///      delivery on the chain they actually work from, so the choice is
+        ///      theirs, not a per-deployment constant. Must be allow-listed.
+        ///      Ignored when `bridgeToTreasury` is false.
+        uint32  destinationDomain;
     }
 
     /// @inheritdoc IModule
@@ -178,6 +261,13 @@ contract TaxClaimModule is IModule, ReentrancyGuard, Ownable2Step {
         nonReentrant
         returns (bytes memory result)
     {
+        // The Gateway skims its service fee and forwards the REST as
+        // `opValue`, documenting that "the module asserts msg.value == <op
+        // amount>". This module has no native amount of its own, so that
+        // assertion is `== 0`. It was missing: any overpayment landed here,
+        // and with no rescue path it stayed here forever.
+        require(msg.value == 0, "TaxClaim: no native value expected");
+
         ClaimParams memory p = abi.decode(params, (ClaimParams));
         address admin = tokenAdmin[p.token];
         if (admin == address(0)) revert NotRegistered();
@@ -190,8 +280,10 @@ contract TaxClaimModule is IModule, ReentrancyGuard, Ownable2Step {
         // before this call is captured in `beforeBal` and therefore
         // EXCLUDED from `tokensWithdrawn`. No alternative source exists
         // because the token's `withdrawFees()` is non-returning. Donated
-        // tokens linger on this module and can be rescued separately by
-        // governance — they cannot influence the fee/burn math here.
+        // tokens linger on this module and are recoverable through
+        // `rescueERC20` — they cannot influence the fee/burn math here.
+        // (That rescue function did not exist when this comment was first
+        // written; the claim was false for the whole life of the deployment.)
         uint256 beforeBal = IERC20(p.token).balanceOf(address(this));
         IMagnetaManagedTokenTax(p.token).withdrawFees();
         uint256 tokensWithdrawn = IERC20(p.token).balanceOf(address(this)) - beforeBal;
@@ -211,14 +303,26 @@ contract TaxClaimModule is IModule, ReentrancyGuard, Ownable2Step {
         path[1] = IV2RouterSwapper(router).WETH();
         path[2] = usdc;
 
+        // Proportional floor derived from the router's OWN quote, taken in the
+        // same call. The caller's `amountOutMin` still applies when it is
+        // stricter; it is never allowed to be laxer than this bound.
+        uint256 quoted = IV2RouterSwapper(router).getAmountsOut(tokensWithdrawn, path)[path.length - 1];
+        uint256 floorOut = (quoted * maxSlippageBps) / 10_000;
+        if (p.amountOutMin > floorOut) floorOut = p.amountOutMin;
+
         uint256[] memory amounts = IV2RouterSwapper(router).swapExactTokensForTokens(
             tokensWithdrawn,
-            p.amountOutMin,
+            floorOut,
             path,
             address(this),
             p.deadline
         );
         uint256 usdcGross = amounts[amounts.length - 1];
+
+        // The router already enforced `floorOut`, but a non-standard router
+        // could report an output it did not deliver. Assert against the balance
+        // actually gained rather than trusting the return value alone.
+        if (usdcGross < floorOut) revert SlippageExceeded(usdcGross, floorOut);
 
         // 3. Enforce $20 threshold.
         if (usdcGross < minUsdc) revert BelowThreshold(usdcGross);
@@ -233,13 +337,40 @@ contract TaxClaimModule is IModule, ReentrancyGuard, Ownable2Step {
 
         bool bridged = false;
         if (p.bridgeToTreasury && cctpMessenger != address(0)) {
+            // Mint to the ADMIN on the destination domain, not to a global
+            // recipient. `adminNet` is the token owner's revenue — the
+            // protocol's cut is `magnetaFee`, already sent above. Burning the
+            // remainder to `treasuryRecipient` moved a user's funds to Magneta
+            // with no per-admin ledger, no claim function and nothing on chain
+            // but an event; the UI exposes the flag as a plain checkbox.
+            // The admin's own address on the chain THEY chose. Two separate
+            // decisions, both previously taken away from them: the recipient
+            // was a global Magneta address, and the destination was whatever
+            // `treasuryDomain` the owner had configured for this deployment.
+            //
+            // NOTE: CCTP mints to the same 20-byte address on the destination
+            // chain. That is correct for an EOA; an admin using a smart-contract
+            // wallet may not control the identical address elsewhere. Surface
+            // this in the UI before offering the bridge.
+            uint32 dstDomain = p.destinationDomain;
+            if (!cctpDomainEnabled[dstDomain]) revert DomainNotEnabled(dstDomain);
+            bytes32 mintRecipient = bytes32(uint256(uint160(admin)));
+
             IERC20(usdc).forceApprove(cctpMessenger, adminNet);
             ICCTPTokenMessenger(cctpMessenger).depositForBurn(
                 adminNet,
-                treasuryDomain,
-                treasuryRecipient,
+                dstDomain,
+                mintRecipient,
                 usdc
             );
+
+            // A messenger that accepts the call without burning would leave
+            // `bridged = true` emitted, the USDC still here and a live
+            // allowance standing. Same defect as CctpV2Adapter, same fix.
+            if (IERC20(usdc).allowance(address(this), cctpMessenger) != 0) {
+                IERC20(usdc).forceApprove(cctpMessenger, 0);
+                revert BurnDidNotConsumeApproval();
+            }
             bridged = true;
         } else {
             IERC20(usdc).safeTransfer(admin, adminNet);

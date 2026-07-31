@@ -95,6 +95,23 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
     /// @notice Destination LZ EID → CCTP domain mapping.
     mapping(uint32 => uint32) public eidToCctpDomain;
 
+    /// @notice Whether `eidToCctpDomain[eid]` was ever set.
+    ///
+    /// @dev A Solidity mapping answers 0 for an absent key, and CCTP domain 0
+    ///      is ETHEREUM — a real, live destination. So an EID with no mapping
+    ///      burned USDC toward Ethereum while the LayerZero message travelled
+    ///      to the intended chain, leaving the destination operation pending
+    ///      with no funds and the USDC minted to the sibling gateway on a chain
+    ///      nobody was watching. "Unset" has to be distinguishable from "zero".
+    mapping(uint32 => bool) public cctpDomainConfigured;
+
+    /// @dev Read a CCTP domain, refusing an unconfigured EID rather than
+    ///      silently burning to Ethereum. See `cctpDomainConfigured`.
+    function cctpDomainOf(uint32 eid) public view returns (uint32) {
+        if (!cctpDomainConfigured[eid]) revert CctpDomainNotConfigured(eid);
+        return eidToCctpDomain[eid];
+    }
+
     /// @notice Pending cross-chain value ops waiting for CCTP token arrival.
     struct PendingValueOp {
         OpType op;
@@ -105,6 +122,10 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
         uint256 createdAt;
     }
     mapping(bytes32 => PendingValueOp) public pendingValueOps;
+
+    /// @notice How many value ops are recorded and not yet fulfilled or
+    ///         cancelled. Guards USDC rotation — see `setUsdc`.
+    uint256 public pendingValueOpCount;
 
     /// @notice Total USDC earmarked for pending value ops (prevents double-spend).
     uint256 public totalEarmarked;
@@ -117,6 +138,8 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
     error NoPendingOp();
     error TokensNotArrived();
     error CctpNotConfigured();
+    error CctpDomainNotConfigured(uint32 eid);
+    error UsdcRotationWithPendingOps(uint256 pending);
 
     /// @notice Canonical human guardian (back-compat view). Kept in sync with
     ///         {isPauser} by {setPauseGuardian}. Prefer {addPauser}/{removePauser}.
@@ -235,6 +258,18 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
         );
         guid = receipt.guid;
 
+        // Refund the native overpayment. `_payNative` accepts msg.value above
+        // the quoted fee — deliberately, so a quote that drifts between
+        // simulation and inclusion does not revert — and returns only the fee
+        // to the endpoint. The fan-out paths already refund the difference;
+        // these two did not, so every ordinary user who over-sent left the
+        // remainder here, recoverable only by the owner through rescueETH.
+        uint256 overpaid = msg.value - fee.nativeFee;
+        if (overpaid > 0) {
+            (bool refunded, ) = payable(msg.sender).call{value: overpaid}("");
+            require(refunded, "MagnetaGateway: refund failed");
+        }
+
         emit CrossChainOpSent(dstEid, op, msg.sender, guid);
     }
 
@@ -271,7 +306,7 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
         usdc.forceApprove(address(cctpMessenger), usdcAmount);
         cctpMessenger.depositForBurn(
             usdcAmount,
-            eidToCctpDomain[dstEid],
+            cctpDomainOf(dstEid),
             mintRecipient,
             address(usdc)
         );
@@ -287,6 +322,18 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
             dstEid, payload, lzOptions, fee, payable(msg.sender)
         );
         guid = receipt.guid;
+
+        // Refund the native overpayment. `_payNative` accepts msg.value above
+        // the quoted fee — deliberately, so a quote that drifts between
+        // simulation and inclusion does not revert — and returns only the fee
+        // to the endpoint. The fan-out paths already refund the difference;
+        // these two did not, so every ordinary user who over-sent left the
+        // remainder here, recoverable only by the owner through rescueETH.
+        uint256 overpaid = msg.value - fee.nativeFee;
+        if (overpaid > 0) {
+            (bool refunded, ) = payable(msg.sender).call{value: overpaid}("");
+            require(refunded, "MagnetaGateway: refund failed");
+        }
 
         emit CrossChainOpSent(dstEid, op, msg.sender, guid);
     }
@@ -333,6 +380,7 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
 
         totalEarmarked -= p.bridgedAmount;
         delete pendingValueOps[_guid];
+        pendingValueOpCount -= 1;
 
         // Approve module to pull bridged tokens from this gateway
         IERC20(p.bridgedToken).forceApprove(module, p.bridgedAmount);
@@ -354,6 +402,12 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
         });
 
         bytes memory result = IModule(module).execute(ctx, p.params);
+
+        // Clear whatever the module did not spend. forceApprove granted it the
+        // FULL bridged amount; a module that consumed less left a standing
+        // allowance against this gateway's balance — which includes USDC
+        // earmarked for other pending operations.
+        IERC20(p.bridgedToken).forceApprove(module, 0);
 
         emit ValueOpFulfilled(_guid, p.op, p.caller);
         emit OperationExecuted(p.op, module, p.caller, 0, keccak256(result));
@@ -444,7 +498,7 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
 
             cctpMessenger.depositForBurn(
                 usdcAmountsPerChain[i],
-                eidToCctpDomain[dstEids[i]],
+                cctpDomainOf(dstEids[i]),
                 peer,
                 address(usdc)
             );
@@ -570,6 +624,7 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
              /* address payloadBridgedToken */, uint256 bridgedAmount) =
                 abi.decode(_payload, (uint8, OpType, address, bytes, address, uint256));
 
+            pendingValueOpCount += 1;
             pendingValueOps[_guid] = PendingValueOp({
                 op: op,
                 caller: caller,
@@ -659,6 +714,12 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
     /// @notice Set the USDC token used for cross-chain fee collection.
     function setUsdc(address _usdc) external onlyOwner {
         require(_usdc != address(0), "MagnetaGateway: zero usdc");
+        // A pending op stores the token address that was live when its LZ
+        // message arrived, but `totalEarmarked` is a single counter and
+        // rescueERC20 only guards it for the CURRENT usdc. Rotating while ops
+        // are pending makes the old token fully rescuable — including funds
+        // owed to those ops — and reserves the new one against them instead.
+        if (pendingValueOpCount > 0) revert UsdcRotationWithPendingOps(pendingValueOpCount);
         usdc = IERC20(_usdc);
         emit UsdcSet(_usdc);
     }
@@ -701,6 +762,7 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
     /// @notice Map a destination LZ EID to its CCTP domain.
     function setEidCctpDomain(uint32 eid, uint32 cctpDomain) external onlyOwner {
         eidToCctpDomain[eid] = cctpDomain;
+        cctpDomainConfigured[eid] = true;
         emit EidCctpDomainSet(eid, cctpDomain);
     }
 
@@ -712,6 +774,7 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
         if (eids.length != domains.length) revert ArrayLengthMismatch();
         for (uint256 i; i < eids.length; ++i) {
             eidToCctpDomain[eids[i]] = domains[i];
+            cctpDomainConfigured[eids[i]] = true;
             emit EidCctpDomainSet(eids[i], domains[i]);
         }
     }
@@ -831,6 +894,7 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
         require(p.bridgedAmount > 0, "MagnetaGateway: no pending op");
         totalEarmarked -= p.bridgedAmount;
         delete pendingValueOps[guid];
+        pendingValueOpCount -= 1;
         emit ValueOpFulfilled(guid, p.op, p.caller);
     }
 

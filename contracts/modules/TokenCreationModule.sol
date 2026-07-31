@@ -134,6 +134,19 @@ contract TokenCreationModule is IModule, ReentrancyGuard, Ownable2Step {
         // Factories CAN be zero at deploy time — owner sets them post-wiring
         // to break the circular dependency: factory needs the module address
         // (via setCrossChainCreator) and the module needs the factory address.
+        // The setters enforce `address(0) || code.length > 0`; the constructor
+        // assigned straight through, so a non-zero EOA, an undeployed CREATE2
+        // address or a self-destructed contract could be wired in at deploy
+        // time and only surface later as an opaque CREATE_TOKEN failure.
+        // address(0) stays legal — that is the documented "not wired yet".
+        require(
+            _standardFactory == address(0) || _standardFactory.code.length > 0,
+            "TokenCreation: standardFactory not a contract"
+        );
+        require(
+            _autoLiquidityFactory == address(0) || _autoLiquidityFactory.code.length > 0,
+            "TokenCreation: autoLiquidityFactory not a contract"
+        );
         gateway = _gateway;
         standardFactory = _standardFactory;
         autoLiquidityFactory = _autoLiquidityFactory;
@@ -224,7 +237,14 @@ contract TokenCreationModule is IModule, ReentrancyGuard, Ownable2Step {
 
         if (params.length == 0) revert InvalidPayload();
 
-        TemplateKind kind = TemplateKind(uint8(params[0]));
+        // `TemplateKind(uint8(params[0]))` panics with 0x21 above the last enum
+        // member, so UnsupportedTemplate below was unreachable for exactly the
+        // inputs it names — and a panic reads as a contract bug rather than a
+        // bad request, which matters when triaging a cross-chain failure.
+        uint8 selector = uint8(params[0]);
+        if (selector > uint8(type(TemplateKind).max)) revert UnsupportedTemplate();
+
+        TemplateKind kind = TemplateKind(selector);
         bytes calldata inner = params[1:];
 
         // F-24 / F-22 / F-31: module-level replay guard, defense-in-depth
