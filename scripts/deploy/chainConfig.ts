@@ -42,6 +42,51 @@ export interface ChainConfig {
   router: "uniV2" | "solidly" | "v3" | "orderbook" | "magnetaV2" | null;
 }
 
+/**
+ * Assert that every contract address this chain's config points at actually
+ * holds bytecode, before anything is deployed against it.
+ *
+ * Nothing checked this, and it cost a live chain: Flare's `defaultRouter` was
+ * committed with a bare `// SparkDEX` comment and no verification, unlike the
+ * `usdc` line above it which carries "verified on-chain". The address has no
+ * code, the deploy proceeded anyway, and `LPModule.router()` and
+ * `SwapModule.router()` on Flare now both point at it — so every LP and swap
+ * call there reverts. `router` is `immutable`, so the only remedy is a redeploy
+ * (confirmed on-chain 2026-07-29).
+ *
+ * Called at the start of deployAll: a wrong address must stop the run, not
+ * become an immutable constructor argument.
+ */
+export async function assertConfigAddressesHaveCode(
+  provider: { getCode(address: string): Promise<string> },
+  chainId: number,
+  cfg: ChainConfig,
+): Promise<void> {
+  // 31337 is a fresh local node: the mocks it references do not exist yet.
+  if (chainId === 31337) return;
+
+  const toCheck: Array<[string, string | null]> = [
+    ["lzEndpoint", cfg.lzEndpoint],
+    ["usdc", cfg.usdc],
+    ["defaultRouter", cfg.defaultRouter],
+  ];
+
+  const dead: string[] = [];
+  for (const [field, address] of toCheck) {
+    if (!address) continue; // null is a deliberate "not available on this chain"
+    const code = await provider.getCode(address);
+    if (!code || code === "0x") dead.push(`${field}=${address}`);
+  }
+
+  if (dead.length > 0) {
+    throw new Error(
+      `chainConfig for chainId ${chainId} points at ${dead.length} address(es) with no bytecode on this chain: ` +
+      `${dead.join(", ")}. Deploying would bake a dead address into an immutable constructor argument. ` +
+      `Verify each address on the target chain (cast code <addr> --rpc-url <rpc>) and fix chainConfig.ts before retrying.`,
+    );
+  }
+}
+
 export const CHAIN_CONFIG: Record<number, ChainConfig> = {
   // Hardhat (local testing only — uses mock addresses)
   31337: {
@@ -117,7 +162,17 @@ export const CHAIN_CONFIG: Record<number, ChainConfig> = {
     lzEid: 30295,
     cctpDomain: null,
     usdc: "0xFbDa5F676cB37624f28265A144A48B0d6e87d3b6", // USDC.e (Stargate bridged) — verified on-chain 2026-04-23
-    defaultRouter: "0x0ECAA0096be73528Def68248e53B7C4C0CF923e8", // SparkDEX
+    // SparkDEX UniswapV2Router02 — verified on-chain 2026-07-29 (flare-api.flare.network):
+    //   code present (17 763 bytes); factory() → 0x16b619B0…80A89, which matches
+    //   the V2Factory in SparkDEX's own docs; WETH() → 0x1d80c49b…f783d, symbol WFLR.
+    //
+    // Replaces 0x0ECAA0096be73528Def68248e53B7C4C0CF923e8, which had NO CODE on
+    // Flare and was committed with only a `// SparkDEX` comment. That dead value
+    // is baked into the `immutable router` of the already deployed LPModule
+    // (0x19fde032…224D) and SwapModule (0x984A1C2b…7eCC), so LP and swap on
+    // Flare revert until BOTH are redeployed with this address and re-registered
+    // in the Gateway. Fixing this line only fixes future deploys.
+    defaultRouter: "0x4a1E5A90e9943467FAd1acea1E7F0e5e88472a1e",
     router: "uniV2",
   },
   5000: { // Mantle

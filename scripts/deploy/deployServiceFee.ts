@@ -38,8 +38,15 @@ async function main() {
   if (!feeVault || !ethers.isAddress(feeVault)) throw new Error(`feeVault not set in ${depPath}`);
 
   // Safe is stored under `gnosisSafe` (string) on the mainnet deployments.
+  // Testnets have no Safe — ownership stays with the deployer EOA there.
+  const isTestnet = net.toLowerCase().includes("sepolia") || net.toLowerCase().includes("testnet");
   const safeRaw = dep.gnosisSafe;
-  const safe: string | undefined = typeof safeRaw === "string" ? safeRaw : safeRaw?.address;
+  let safe: string | undefined = typeof safeRaw === "string" ? safeRaw : safeRaw?.address;
+  if ((!safe || !ethers.isAddress(safe)) && isTestnet) {
+    const [d] = await ethers.getSigners();
+    safe = d.address;
+    console.log(`⚠ Testnet: no gnosisSafe recorded — ownership stays with the deployer ${safe}`);
+  }
   if (!safe || !ethers.isAddress(safe)) throw new Error(`gnosisSafe not set/invalid in ${depPath}`);
 
   if (dep.contracts?.MagnetaServiceFee) {

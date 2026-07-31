@@ -100,10 +100,22 @@ contract TokenOpsModule is IModule, ReentrancyGuard, Ownable2Step {
     // ───────────────────── registration ─────────────────────
 
     /// @notice Record the EOA allowed to command this token.
-    /// @dev Callable once by the token's current owner OR by the factory
-    ///      (owner of this module is the deployer/admin who also owns factory).
-    ///      Typical flow: token deployed with initialOwner = this module;
-    ///      factory (or creator) calls registerToken(token, creatorEoa).
+    /// @dev Callable once by this module's owner OR by an allow-listed trusted
+    ///      registrar (see `setTrustedRegistrar`).
+    ///
+    ///      This is the OUT-OF-BAND path, for tokens Magneta did not deploy or
+    ///      that need a different admin than their `owner()`. The normal path
+    ///      is `registerByTokenOwner`, called by the factory in the same
+    ///      transaction as the deployment.
+    ///
+    ///      NOT the flow: "token deployed with initialOwner = this module".
+    ///      That is what this comment used to claim and it has been wrong since
+    ///      the factory was written — `MagnetaOFTStandardFactory` constructs
+    ///      `MagnetaERC20OFT` with `Ownable(creatorAddr)`, so a freshly created
+    ///      token is owned by the creator's EOA and never by this module.
+    ///      The stale text cost a 2026-07-27 panel a HIGH finding built entirely
+    ///      on it (permissionless registration bricking module-owned tokens):
+    ///      the reasoning was sound, the premise was this comment.
     /// @dev `nonReentrant` is defense-in-depth — exploitation is benign because
     ///      the function only ever stores `IMagnetaManagedToken(token).owner()`
     ///      (immutable per-call), but auditors flag the external-call-then-state
@@ -142,6 +154,19 @@ contract TokenOpsModule is IModule, ReentrancyGuard, Ownable2Step {
     ///         owner, (2) first registration wins (see require), (3) if the
     ///         owner is zero/contract by accident, the call is a no-op or
     ///         reverts cleanly.
+    ///
+    ///         (1) is what makes front-running pointless: an attacker who
+    ///         registers first still registers the token's real owner, not
+    ///         themselves. The property this relies on is that a Magneta token
+    ///         is never owned by a Magneta contract — `Ownable(creatorAddr)` in
+    ///         `MagnetaERC20OFT`'s constructor. If that ever changes, this
+    ///         function becomes a griefing vector: `tokenAdmin` would be set to
+    ///         a contract address that no gateway `ctx.caller` can ever equal,
+    ///         `_assertAdmin` would reject every MINT/FREEZE/UPDATE/REVOKE, and
+    ///         only the module owner could unstick it via `unregisterToken`
+    ///         (re-registration being front-runnable again). Do not deploy a
+    ///         template whose initial owner is a module without first gating
+    ///         this function on `admin.code.length == 0`.
     function registerByTokenOwner(address token) external nonReentrant {
         require(token != address(0), "zero address");
         require(tokenAdmin[token] == address(0), "already registered");

@@ -95,7 +95,7 @@ describe("MagnetaGateway", function () {
         it("module.execute rejects callers other than the gateway", async () => {
             await expect(
                 lpModule.execute(
-                    { caller: alice.address, originChainId: 1, feeVault: feeVault.address, tokenSource: ethers.ZeroAddress },
+                    { caller: alice.address, originChainId: 1, feeVault: feeVault.address, tokenSource: ethers.ZeroAddress, guid: ethers.ZeroHash },
                     "0x00"
                 )
             ).to.be.revertedWithCustomError(lpModule, "OnlyGateway");

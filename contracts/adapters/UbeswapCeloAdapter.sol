@@ -4,6 +4,7 @@ pragma solidity ^0.8.20;
 import { IERC20 }            from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { SafeERC20 }         from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { ReentrancyGuard }   from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import "./AdapterPull.sol";
 
 /// @title UbeswapCeloAdapter
 /// @notice Uniswap V2 router facade over Ubeswap on Celo. Ubeswap is a V2 fork but
@@ -45,6 +46,7 @@ interface IUbeswapRouter {
 
 contract UbeswapCeloAdapter is ReentrancyGuard {
     using SafeERC20 for IERC20;
+    using AdapterPull for IERC20;
 
     /// @notice CELO native token, exposed as an ERC20 via the GoldToken precompile.
     address public constant CELO = 0x471EcE3750Da237f93B8E339c536989b8978a438;
@@ -67,15 +69,19 @@ contract UbeswapCeloAdapter is ReentrancyGuard {
         uint256 amountAMin, uint256 amountBMin,
         address to, uint256 deadline
     ) external nonReentrant returns (uint256 amountA, uint256 amountB, uint256 liquidity) {
-        IERC20(tokenA).safeTransferFrom(msg.sender, address(this), amountADesired);
-        IERC20(tokenB).safeTransferFrom(msg.sender, address(this), amountBDesired);
-        IERC20(tokenA).forceApprove(address(ube), amountADesired);
-        IERC20(tokenB).forceApprove(address(ube), amountBDesired);
+        // Forward what actually ARRIVED, not what was asked for: a
+        // fee-on-transfer token delivers less, and approving the requested
+        // figure would have the router pull more than this call brought in.
+        uint256 gotA = IERC20(tokenA).pullMeasured(msg.sender, amountADesired);
+        uint256 gotB = IERC20(tokenB).pullMeasured(msg.sender, amountBDesired);
+        IERC20(tokenA).forceApprove(address(ube), gotA);
+        IERC20(tokenB).forceApprove(address(ube), gotB);
         (amountA, amountB, liquidity) = ube.addLiquidity(
-            tokenA, tokenB, amountADesired, amountBDesired, amountAMin, amountBMin, to, deadline
+            tokenA, tokenB, gotA, gotB, amountAMin, amountBMin, to, deadline
         );
-        if (amountADesired > amountA) IERC20(tokenA).safeTransfer(msg.sender, amountADesired - amountA);
-        if (amountBDesired > amountB) IERC20(tokenB).safeTransfer(msg.sender, amountBDesired - amountB);
+        // Refund against what was received, so the adapter stays balance-neutral.
+        if (gotA > amountA) IERC20(tokenA).safeTransfer(msg.sender, gotA - amountA);
+        if (gotB > amountB) IERC20(tokenB).safeTransfer(msg.sender, gotB - amountB);
         IERC20(tokenA).forceApprove(address(ube), 0);
         IERC20(tokenB).forceApprove(address(ube), 0);
     }
@@ -87,16 +93,20 @@ contract UbeswapCeloAdapter is ReentrancyGuard {
         uint256 amountTokenMin, uint256 amountETHMin,
         address to, uint256 deadline
     ) external payable nonReentrant returns (uint256 amountToken, uint256 amountETH, uint256 liquidity) {
-        IERC20(token).safeTransferFrom(msg.sender, address(this), amountTokenDesired);
-        IERC20(token).forceApprove(address(ube), amountTokenDesired);
+        // Token leg: same measured-pull rule as addLiquidity — the native leg
+
+        // is msg.value and needs no measuring.
+
+        uint256 gotToken = IERC20(token).pullMeasured(msg.sender, amountTokenDesired);
+        IERC20(token).forceApprove(address(ube), gotToken);
         IERC20(CELO).forceApprove(address(ube), msg.value);
         (amountToken, amountETH, liquidity) = ube.addLiquidity(
             token, CELO,
-            amountTokenDesired, msg.value,
+            gotToken, msg.value,
             amountTokenMin, amountETHMin,
             to, deadline
         );
-        if (amountTokenDesired > amountToken) IERC20(token).safeTransfer(msg.sender, amountTokenDesired - amountToken);
+        if (gotToken > amountToken) IERC20(token).safeTransfer(msg.sender, gotToken - amountToken);
         IERC20(token).forceApprove(address(ube), 0);
         IERC20(CELO).forceApprove(address(ube), 0);
 
@@ -129,9 +139,14 @@ contract UbeswapCeloAdapter is ReentrancyGuard {
         uint256 amountIn, uint256 amountOutMin,
         address[] calldata path, address to, uint256 deadline
     ) external nonReentrant returns (uint256[] memory amounts) {
-        IERC20(path[0]).safeTransferFrom(msg.sender, address(this), amountIn);
-        IERC20(path[0]).forceApprove(address(ube), amountIn);
-        amounts = ube.swapExactTokensForTokens(amountIn, amountOutMin, path, to, deadline);
+        // Same measured-pull rule as the liquidity paths. Approving and
+        // instructing the router to spend amountIn when a fee-on-transfer
+        // token delivered less lets the router take the shortfall out of any
+        // residual balance this adapter holds — the remediation applied to
+        // addLiquidity but originally missed here (Sentinelleai F-1).
+        uint256 gotIn = IERC20(path[0]).pullMeasured(msg.sender, amountIn);
+        IERC20(path[0]).forceApprove(address(ube), gotIn);
+        amounts = ube.swapExactTokensForTokens(gotIn, amountOutMin, path, to, deadline);
         IERC20(path[0]).forceApprove(address(ube), 0);
     }
 
@@ -155,9 +170,14 @@ contract UbeswapCeloAdapter is ReentrancyGuard {
         address[] calldata path, address to, uint256 deadline
     ) external nonReentrant returns (uint256[] memory amounts) {
         require(path.length >= 2 && path[path.length - 1] == CELO, "path must end with CELO");
-        IERC20(path[0]).safeTransferFrom(msg.sender, address(this), amountIn);
-        IERC20(path[0]).forceApprove(address(ube), amountIn);
-        amounts = ube.swapExactTokensForTokens(amountIn, amountOutMin, path, address(this), deadline);
+        // Same measured-pull rule as the liquidity paths. Approving and
+        // instructing the router to spend amountIn when a fee-on-transfer
+        // token delivered less lets the router take the shortfall out of any
+        // residual balance this adapter holds — the remediation applied to
+        // addLiquidity but originally missed here (Sentinelleai F-1).
+        uint256 gotIn = IERC20(path[0]).pullMeasured(msg.sender, amountIn);
+        IERC20(path[0]).forceApprove(address(ube), gotIn);
+        amounts = ube.swapExactTokensForTokens(gotIn, amountOutMin, path, address(this), deadline);
         IERC20(path[0]).forceApprove(address(ube), 0);
 
         uint256 out = amounts[amounts.length - 1];

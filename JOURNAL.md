@@ -3,6 +3,67 @@
 > Fil chronologique des sessions. Anti-chronologique (plus récent en haut).
 > Voir `~/CLAUDE.md` pour la règle d'édition.
 
+## 2026-07-30 — 19:55 — Vague testnet Base Sepolia : dérive close, money paths validés (715a05b)
+
+- Merge security/audit-13-remediation → main (c769d5f) puis redeploy atomique complet sur Base Sepolia (Gateway + TOUS les modules en bloc — imposé par le changement de Context)
+- 12 contrats + LPAtomic stack (helper/registry/module, jamais présent sur ce testnet) + ServiceFee + CurveFactory ; ~0,0004 ETH de gas total
+- Contrôle de dérive : 12/12 longueurs bytecode on-chain == artefacts ; tous les sélecteurs que l'audit signalait absents répondent ; multiPool gate fermé, DVN=2, MAX_BATCH=50
+- Smoke on-chain : payFee → FeeVault +montant exact ; Lending deposit 100 USDC → withdraw complet (scénario F-2), état final 0/0/0
+- arbitrumSepolia.json marqué DEPRECATED (aucune chainConfig 421614, adresses pré-audit)
+- Scripts : deployLpAtomicStack.ts + smokeTestnetStack.ts nouveaux ; fallback testnet sans Safe dans deployTokenCreation/deployServiceFee ; chemin OFT post-centralisation corrigé
+- ⚠ BLOQUÉ op 13 (CREATE_TOKEN) : factories OFT testnet orphelines (owner = clé 0x7900 rotationnée/disparue) ET la factory actuelle fait 24 615 o > limite EIP-170 (déjà runs:1+viaIR) → toute future factory passe par le split factory/deployeur de la branche feat/erc20-permit-onesig (non auditée) — décision à prendre
+- Pièges vécus : RPC public Base Sepolia sert des blocs rassis juste après une tx (retry obligatoire dans les scripts de vérification)
+
+## 2026-07-30 — 3e passe — Arbitrages design + GUID + harnais hardhat (02d7257, 750a73f)
+
+- Arbitrages Dominique appliqués : BURN_LP officiellement gratuit (doc alignée sur le site), fee-on-transfer non supporté Bundler/LPModule (doc), bridge officiel (DVN + caps entrants) différé à son activation — CCTP+LI.FI en attendant
+- Oracle F-9 : `refreshPrice` = ré-ancrage progressif permissionless (1 pas de maxDeviation par bloc) — un -30 % légitime déverrouille en ~7 appels keeper ; `getAssetPrice` reste strict
+- GUID F-22/31 : `bytes32 guid` dans IModule.Context (LZ guid sur _lzReceive + fulfillValueOp, 0 en local) ; clés de replay LPAtomic/TokenCreation sur le guid — ⚠ **Gateway + TOUS les modules à redéployer EN BLOC** (sélecteur d'execute changé)
+- Harnais hardhat RACINE réparé : cause = chai 5 (ESM) résolu par pnpm pour la racine vs matchers chai ^4 — peer set du toolbox épinglé en dur (chai 4.5.0) ; **511 passing / 0 failing** (chaque fichier échouait avant)
+- Emprunt à exactement LTV : plus atteignable d'un wei d'arrondi (voulu, protocole-favorable, documenté)
+- Suites : forge 268/268, hardhat racine 511/511, tokens/ 189/189
+
+## 2026-07-30 — 2e passe — Re-scans 15+16 traités (125d794)
+
+- Re-scans Dominique post-remédiation : les 27 fixes tiennent, aucun ne réapparaît
+- Corrigé la RÉGRESSION CRITICAL de ma réécriture lending : initReserve ré-initialisable après setReserveActive(false) → garde sur supplyIndex==0
+- Lending aussi : arrondi liquidation (saisie sans burn de dette), whenNotPaused sur liquidate, modes flash-loan rejetés
+- Bridge : bridgeLiquidity créditée à l'envoi (divergence compteur/balance), delta mesuré addBridgeLiquidity, endpointId==localEid, reset fenêtre au ré-armement
+- Modules : validation de paire anti-spoof (getPair canonique), prédicats routage CREATE_LP unifiés, MAX_BATCH=50, sync pauseGuardian ×3, feeVault contrat
+- Cronos : MAX_INTENT_TTL 30j + cancelIntent creator, typehash compile-time (valeur inchangée)
+- 3 findings RÉFUTÉS avec preuve : F-5 (registerByTokenOwner est permissionless), F-10 (borrowIndex≥1e18 rend la troncature inatteignable), F-13 (EndpointV2 rembourse déjà le surplus — vérifié dans les sources LZ)
+- Suites : forge 262/262, tokens/ hardhat 189/189
+- Décisions design en attente : frais BURN_LP (F-7), ré-ancrage oracle après grand mouvement (F-9), plancher DVN du bridge OApp (F-14), politique fee-on-transfer Bundler/LP (F-18), GUID dans IModule.Context (F-22/31), caps entrants bridge (F-20), bornage allReserves (F-27)
+
+## 2026-07-30 — Remédiation audit 13+14 : 27 findings de code corrigés, branche security/audit-13-remediation
+
+- Phase 1 (04e586a) : 15 findings rapport 13 hors lending (DVN re-check à chaque execute, payInLzToken rejeté, validation createDLMMPool, allowances Bundler, nonReentrant rescueETH, pull-payment dust LPModule, clés de replay + msg.value modules, CEI ServiceFee, bounds+pagination CurveFactory, event registration) + 3 findings rapport 14 Cronos
+- BREAKING Cronos : `CREATE_INTENT_TYPEHASH` changé (binding receiver/factory) → `lib/relayer/cronosRelayer.ts` à mettre à jour AVANT redéploiement
+- Phase 2 (b357de1) : réécriture comptabilité MagnetaLending — parts canoniques (F-2), ltv≠threshold (F-3), availableCash interne (F-7), fee-on-transfer mesuré (F-8), skip oracle réserves vides (F-9), primes flash-loan comptabilisées (F-11), + F-18/19/22
+- Bug attrapé en review du travail d'agent : flashLoan re-créditait la prime seule, pas le principal → fuite `amount-premium` du ledger à chaque flash-loan ; corrigé + test de conservation mutation-checké
+- Suite complète : 170 (baseline) → 228 tests, 0 échec ; tokens/ hardhat 183/183
+- Restent OUVERTS : F-1/F-5/F-6/F-12 (dérive de déploiement — seul un redeploy testnet depuis build épinglé les clôt) ; re-scan Sentinelleai à relancer (vérifier crédits OpenRouter d'abord)
+- Harnais hardhat racine cassé (`Invalid Chai property`, pré-existant, tous fichiers) — hors périmètre, à réparer
+
+## 2026-07-29 — 16:54 — Suite verte à nouveau, routeur Flare mort, garde pré-déploiement
+
+- **`forge` ne construisait plus le repo** : Foundry résout un seul solc et les sources Uniswap vendorisées imposent 0.5.16/0.6.6. Remède : `--skip "contracts/imports/*" --skip "contracts/uniswap/*"`. PIÈGE : `/usr/bin/forge` est un binaire « ZOE » sans rapport qui sort avec le code 0 — utiliser `~/.foundry/bin/forge`
+- **151→152 tests, 0 échec** (10 étaient rouges). `MagnetaProxy.t.sol` : le durcissement `ce701c6` avait ajouté les allowlists spender/target sans mettre à jour la fixture ; +3 tests couvrant la propriété réelle (spender quelconque non inscrit, pas seulement l'adresse zéro)
+- `MagnetaPool.t.sol` : l'invariant n'avait **aucune cible déclarée**, le fuzzer usurpait l'adresse du pool pour appeler `TokenB.transfer` et sortir 2077 wei sans toucher aux réserves. `targetContract` + `targetSender` (sinon campagne verte sans rien exercer)
+- **DÉFAUT PRODUCTION : `defaultRouter` de Flare n'a aucun code** (`0x0ECAA009…23e8`, vérifié on-chain avec USDC.e en contrôle positif). Les `LPModule` et `SwapModule` déployés le retournent tous deux depuis `router()`, qui est `immutable` → **LP et swap sur Flare échouent aujourd'hui**, seul un redéploiement corrige
+- `deployAll` refuse désormais de déployer si une adresse de la config n'a pas de bytecode sur la chaîne cible (vérifié : Flare bloqué, Base passe) — la valeur devient un argument de constructeur permanent, pas un réglage corrigeable
+- Bonne adresse Flare écrite : `UniswapV2Router02` `0x4a1E5A90…72a1e` (doc SparkDEX fournie par Dominique), vérifiée on-chain — code présent, `factory()` = le V2Factory de la doc, `WETH()` de symbole WFLR. **Ne corrige que les déploiements futurs**
+- `_refundDust` : le volet token de REMOVE_LP remboursait le **solde entier** là où le volet natif est borné par `nativeBefore` ; borné par instantané, test validé en replantant l'ancienne ligne (échec `0 != 7e17`)
+- Actions GitHub pinnées par SHA (4 repos)
+
+## 2026-07-27 — 17:02 — Rescan Sentinelleai : F-1 (ma remédiation incomplète) + 20→0 Dependabot
+- Rescan des 4 adaptateurs UniV2 (audit `2693bb55`) : le panel a trouvé que le correctif fee-on-transfer du matin n'avait été posé que sur les chemins liquidité, **pas sur les swaps** — `swapExactTokensForTokens`/`ForETH` pullaient encore `amountIn` brut (F-1 HIGH)
+- `pullMeasured` étendu aux 5 points d'entrée des 4 adaptateurs ; plafonné à `amount` (F-4) contre les tokens réflexifs qui créditent en cours d'appel
+- 2 tests ajoutés, chacun **vérifié en échec correctif retiré** (100e18≠95e18 ; 1100e18>1000e18) ; 49/49 invariants + 8 durcissement verts (`f401f9a`)
+- Dependabot 20→0 en deux passes (`9e69a78`, `f1a93ef`) : tar 7.5.22 (critique patchée seulement en .19), axios, adm-zip, fast-uri, immutable, puis brace-expansion 1.x/2.x — nouveaux avis publiés **pendant** la session, contre les copies que le premier override laissait volontairement de côté
+- adm-zip est sur le chemin de téléchargement de solc → vérifié en compile cache vidé, pas incrémental (124 fichiers, 511+171 tests)
+- Constat : le rescan servait à valider le pipeline ; il a surtout relu du code neuf jamais relu — et y a trouvé un vrai trou
+
 ## 2026-07-22 — 14:16 — Chantier B TERMINÉ : cutover frontends + frais on-chain actifs 20/20
 - Cutover Tokens (`765a9557`) + DEX (`4aa9365`) déployés prod → couche B (Gateway skim durci), smoke tests verts (bundles + on-chain owner=Safe + HTTP 200)
 - Batches `scripts/safe/b-setopfeenative/` (20 chaînes) : setMax=50×U + 11 frais d'op (poids : LP create 2.5U, remove/burn/mint/claim 1U, admin 0.5U) — unités U identiques au chantier A

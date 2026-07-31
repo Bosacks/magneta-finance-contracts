@@ -1,0 +1,49 @@
+# Echidna configuration for the Magneta property harnesses.
+#
+# testMode: property — Echidna calls the harness's public functions at random and
+# checks every `echidna_*` view after each call. Assertion mode is useless here:
+# production contracts contain zero `assert()` (verified 2026-07-29), so it would
+# have nothing to look for.
+testMode: property
+
+# The harness is the only actor. It holds both tokens and grants its own
+# allowances, so restricting the sender to the harness address keeps every call
+# meaningful — Echidna's default senders hold no balance and would only ever
+# produce reverts.
+#
+# 0x00a329c0648769a73afac7f9381e08fb43dbea72 is Echidna's default deployer, which
+# is the address the harness contract ends up owning tokens as.
+sender: ["0x00a329c0648769a73afac7f9381e08fb43dbea72"]
+deployer: "0x00a329c0648769a73afac7f9381e08fb43dbea72"
+
+# Sequence length matters more than raw call count for an AMM: value drift shows
+# up over a chain of swaps, not in one call.
+seqLen: 60
+testLimit: 50000
+
+# Keep the corpus so successive runs deepen coverage instead of restarting cold.
+corpusDir: "test/echidna/corpus"
+
+# The harness needs no ether; refusing to send any removes a whole class of
+# uninteresting reverts.
+balanceContract: 0
+balanceAddr: 0
+
+# No framework forcing: crytic-compile handles this single file with plain solc.
+# Forcing Hardhat makes it treat the .sol path as a project directory and fail,
+# and Hardhat only compiles ./contracts anyway (hardhat.config.ts paths.sources).
+#
+# TWO THINGS THE RUN NEEDS, both learned the hard way on 2026-07-30:
+#
+#   PATH="$HOME/.foundry/bin:$PATH"
+#     crytic-compile sees foundry.toml and runs `forge config --json`. On this
+#     machine /usr/bin/forge is an unrelated program called ZOE which fails that
+#     call, aborting compilation. The real Foundry must come first in PATH.
+#
+#   SOLC_VERSION=0.8.20
+#     The machine default is 0.4.25, which compiles nothing here.
+#
+# Full command:
+#   PATH="$HOME/.foundry/bin:$PATH" SOLC_VERSION=0.8.20 \
+#     echidna test/echidna/EchidnaMagnetaPool.sol \
+#       --contract EchidnaMagnetaPool --config test/echidna/config.yaml

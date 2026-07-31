@@ -1,6 +1,7 @@
 import { ethers } from "hardhat";
 import * as fs from "fs";
 import * as path from "path";
+import { verifyOnDeploy } from "./lib/verifyOnDeploy";
 
 /**
  * Chainlink native/USD price-feed addresses per chain.
@@ -69,6 +70,7 @@ async function main() {
     await factory.waitForDeployment();
 
     const address = await factory.getAddress();
+    await verifyOnDeploy("MagnetaETFFactory", address, [treasuryAddress, priceFeedAddress]);
     console.log("\nMagnetaETFFactory deployed at:", address);
 
     // If no price feed, queue the fallback fee (timelock: 24 h before it activates).

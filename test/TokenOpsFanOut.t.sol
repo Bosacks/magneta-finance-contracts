@@ -38,7 +38,8 @@ contract MockGatewayLite {
             caller: caller,
             originChainId: originChainId,
             feeVault: feeVault,
-            tokenSource: address(0)
+            tokenSource: address(0),
+            guid: bytes32(0)
         });
         bytes memory params = abi.encodePacked(uint8(op), inner);
         return module.execute(ctx, params);
@@ -222,7 +223,8 @@ contract TokenOpsFanOutTest is Test {
             caller: admin,
             originChainId: LOCAL_CHAIN,
             feeVault: feeVault,
-            tokenSource: address(0)
+            tokenSource: address(0),
+            guid: bytes32(0)
         });
         vm.expectRevert(TokenOpsModule.OnlyGateway.selector);
         module.execute(ctx, params);

@@ -38,6 +38,7 @@ import { ethers, network } from "hardhat";
 import fs from "node:fs";
 import path from "node:path";
 import { CHAIN_CONFIG } from "./chainConfig";
+import { verifyOnDeploy } from "./lib/verifyOnDeploy";
 
 const REPO_ROOT = path.join(__dirname, "..");
 const OFT_DIR = path.join(REPO_ROOT, "deployments-oft");
@@ -161,6 +162,7 @@ async function main() {
   const factory = await Factory.deploy(cfg.treasury, cfg.lzEndpoint);
   await factory.waitForDeployment();
   const newFactory = await factory.getAddress();
+  await verifyOnDeploy("MagnetaOFTStandardFactory", newFactory, [cfg.treasury, cfg.lzEndpoint]);
   console.log(`   ✓ New factory deployed: ${newFactory}`);
 
   // ─── Transfer ownership to Safe ───────────────────────────────────────

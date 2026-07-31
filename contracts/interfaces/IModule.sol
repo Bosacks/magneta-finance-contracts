@@ -13,11 +13,30 @@ interface IModule {
     /// @param feeVault       Address that must receive the Magneta markup
     /// @param tokenSource    For cross-chain value ops: address holding bridged
     ///                       tokens (typically the gateway). Zero = pull from caller.
+    /// @param guid           Unique identifier of the authenticated message that
+    ///                       produced this dispatch (F-22/F-31 — audit-13
+    ///                       re-scan-15 remediation). Populated as follows:
+    ///                         - LZ-bridged command/value ops: the LayerZero
+    ///                           GUID of the message (`_guid` in `_lzReceive`,
+    ///                           or the same GUID carried through to
+    ///                           `fulfillValueOp` for the keeper/fulfill path
+    ///                           — it was already verified once at receipt
+    ///                           time and is unique per LZ spec).
+    ///                         - Keeper/relayer paths without a native LZ GUID:
+    ///                           a synthetic identifier that is unique and
+    ///                           authenticated for that flow (e.g. an already-
+    ///                           verified EIP-712 intent hash).
+    ///                         - Local direct calls (`executeOperation`):
+    ///                           `bytes32(0)` — there is no cross-chain message
+    ///                           to identify; modules fall back to the
+    ///                           composite (originChainId, caller, op, inner)
+    ///                           replay key for this case.
     struct Context {
         address caller;
         uint256 originChainId;
         address feeVault;
         address tokenSource;
+        bytes32 guid;
     }
 
     /// @notice Run the module's operation.

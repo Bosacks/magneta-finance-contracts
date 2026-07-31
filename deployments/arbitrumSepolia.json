@@ -1,4 +1,5 @@
 {
+  "DEPRECATED": "2026-07-30 \u2014 stale pre-audit-13 deployment. chainId 421614 has no chainConfig entry and was never redeployed with the remediated contracts; every address below predates the audit fixes (Sentinelle rescan-15 F-3/F-5/F-6). Do NOT use. The validated testnet stack lives on baseSepolia.json.",
   "network": "arbitrumSepolia",
   "chainId": "421614",
   "deployer": "0x7900F22d8d6b234E87499F1d5b59e868963387EB",

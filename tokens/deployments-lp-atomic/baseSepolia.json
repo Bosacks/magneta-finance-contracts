@@ -1,0 +1,9 @@
+{
+  "network": "baseSepolia",
+  "chainId": 84532,
+  "contract": "MagnetaLpAtomicHelper",
+  "address": "0x51A36718a610ae7e9D2b867FF30ABfc83FA147D5",
+  "deployer": "0x620684F822da9adF36F41e3554791D889947e25E",
+  "safe": null,
+  "timestamp": "2026-07-30T23:45:46.626Z"
+}

@@ -1,5 +1,6 @@
 import { ethers } from "hardhat";
 import { FEE_VAULT } from "./chainConfig";
+import { verifyOnDeploy } from "./lib/verifyOnDeploy";
 
 async function main() {
     const [deployer] = await ethers.getSigners();
@@ -19,6 +20,7 @@ async function main() {
     await multisender.waitForDeployment();
 
     const address = await multisender.getAddress();
+    await verifyOnDeploy("Multisender", address, [feeRecipient]);
 
     console.log("Multisender deployed to:", address);
 

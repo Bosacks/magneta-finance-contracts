@@ -11,6 +11,7 @@
 import { ethers, network, run } from "hardhat";
 import * as fs from "fs";
 import * as path from "path";
+import { verifyOnDeploy } from "./lib/verifyOnDeploy";
 
 const TREASURY_BY_CHAIN: Record<number, string> = {
   42161: "0x68109132Ecf7540A0A983e1Aaa7DebC469d9d68b", // Arbitrum FeeVault
@@ -39,6 +40,7 @@ async function main() {
   const factory = await Factory.deploy(treasury);
   await factory.waitForDeployment();
   const address = await factory.getAddress();
+  await verifyOnDeploy("MagnetaTokenFactory", address, [treasury]);
 
   const deployTx = factory.deploymentTransaction();
   const receipt = deployTx ? await deployTx.wait() : null;

@@ -47,6 +47,15 @@ interface IUniswapV2Router02 {
  *           sellAndBundleBuy(sellToken, sellAmount, minEthFromSell, buyToken,
  *                            minTokensPerBuy[], recipients[], buyAmounts[], deadline)
  *           setRouter(addr) → proposeRouter(addr) + applyRouter() + cancelRouterChange()
+ *
+ * @dev    TOKEN SUPPORT (Sentinelle rescan-15 F-18, assumed decision
+ *         2026-07-30): fee-on-transfer / rebasing tokens are NOT supported.
+ *         The bundling legs pull, approve, and refund based on nominal /
+ *         router-reported amounts; a transfer-taxed token receives less than
+ *         requested and can revert a whole batch or strand dust. Magneta's
+ *         own token templates carry no transfer tax (the 2% auto-liquidity
+ *         template was retired 2026-06). Frontends must not route taxed
+ *         third-party tokens through the bundler.
  */
 contract MagnetaBundler is ReentrancyGuard, Pausable, Ownable2Step {
     using SafeERC20 for IERC20;
@@ -64,6 +73,25 @@ contract MagnetaBundler is ReentrancyGuard, Pausable, Ownable2Step {
     ///         owner can adjust per-chain since 1 unit denominates
     ///         differently across deployments.
     uint256 public maxFeePerTx = 1 ether;
+
+    /// @notice Hard cap on the length of any per-recipient/per-leg array
+    ///         accepted by bundleBuy / bundleSell / sellAndBundleBuy /
+    ///         disperseEther (Sentinelle rescan-15 F-25). Each leg does at
+    ///         least one external call (a router swap, or a raw native
+    ///         transfer) plus SSTOREs for bookkeeping; on an L1-class gas
+    ///         limit (~30M) a single leg realistically costs well under
+    ///         500k gas even through an unfamiliar router, so 50 legs stays
+    ///         comfortably inside one block (<=~25M gas) with headroom for
+    ///         the fixed overhead, while still covering every legitimate
+    ///         bundling use case (wallet funding, multi-wallet buys). Without
+    ///         a bound, an oversized array either reverts client-side with an
+    ///         opaque out-of-gas, or — worse — partially executes and then
+    ///         runs out of gas contract-side after some legs already landed,
+    ///         which for `bundleBuy`/`sellAndBundleBuy` would strand ETH mid
+    ///         batch (never actually observed here because Solidity aborts
+    ///         atomically, but the failure mode is still an unbounded, wallet
+    ///         -draining gas estimate for the caller).
+    uint256 public constant MAX_BATCH = 50;
 
     /// @notice Optional fast-pause role. When set, can pause the contract
     ///         without going through the owner Safe (consistent with the
@@ -195,6 +223,7 @@ contract MagnetaBundler is ReentrancyGuard, Pausable, Ownable2Step {
             recipients.length == ethAmounts.length && recipients.length == amountOutMins.length,
             "Arrays length mismatch"
         );
+        require(recipients.length <= MAX_BATCH, "MagnetaBundler: batch too large");
         require(token != address(0), "Invalid token");
 
         uint256 totalRequired = 0;
@@ -252,6 +281,7 @@ contract MagnetaBundler is ReentrancyGuard, Pausable, Ownable2Step {
     ) external payable nonReentrant whenNotPaused ensure(deadline) {
         require(msg.sender != address(0), "Invalid sender");
         require(tokens.length == amounts.length && amounts.length == amountsOutMin.length, "Arrays length mismatch");
+        require(tokens.length <= MAX_BATCH, "MagnetaBundler: batch too large");
 
         // Forward the service fee (any native sent with the call) to FeeVault.
         _forwardFee(msg.value);
@@ -275,6 +305,10 @@ contract MagnetaBundler is ReentrancyGuard, Pausable, Ownable2Step {
                 msg.sender, // Send ETH directly to user
                 deadline
             ) returns (uint[] memory resultAmounts) {
+                // F15: clear the allowance on the successful leg too — the router
+                // only pulls what it needs, so an unconsumed remainder would
+                // otherwise stay approved until the next call touches this token.
+                IERC20(tokens[i]).forceApprove(router, 0);
                 totalEthReceived += resultAmounts[resultAmounts.length - 1];
                 successCount++;
             } catch {
@@ -337,6 +371,11 @@ contract MagnetaBundler is ReentrancyGuard, Pausable, Ownable2Step {
             deadline
         );
 
+        // F15: clear the sell-leg allowance now that the router has pulled what
+        // it needed — a router that consumes less than tokenAmount would
+        // otherwise leave a standing approval after a successful call.
+        IERC20(token).forceApprove(router, 0);
+
         emit BundleSell(msg.sender, token, returnAmounts[1], 1);
     }
 
@@ -367,6 +406,7 @@ contract MagnetaBundler is ReentrancyGuard, Pausable, Ownable2Step {
             recipients.length == buyAmounts.length && recipients.length == minTokensPerBuy.length,
             "Arrays length mismatch"
         );
+        require(recipients.length <= MAX_BATCH, "MagnetaBundler: batch too large");
 
         _forwardFee(msg.value);
 
@@ -386,6 +426,10 @@ contract MagnetaBundler is ReentrancyGuard, Pausable, Ownable2Step {
             deadline
         );
         uint256 ethProceeds = amounts[1];
+
+        // F15: clear the sell-leg allowance now that the router has pulled what
+        // it needed — mirrors bundleSell / atomicVolumeBrush.
+        IERC20(sellToken).forceApprove(router, 0);
 
         // 2. Bundle buy with the proceeds.
         uint256 totalRequired = 0;
@@ -433,6 +477,7 @@ contract MagnetaBundler is ReentrancyGuard, Pausable, Ownable2Step {
     ) external payable nonReentrant whenNotPaused {
         require(msg.sender != address(0), "Invalid sender");
         require(recipients.length == values.length, "Arrays length mismatch");
+        require(recipients.length <= MAX_BATCH, "MagnetaBundler: batch too large");
 
         uint256 total = 0;
         for (uint256 i = 0; i < recipients.length; i++) total += values[i];
@@ -501,8 +546,12 @@ contract MagnetaBundler is ReentrancyGuard, Pausable, Ownable2Step {
     }
 
     /// @notice Rescue idle native — bounded so it can never dip into funds owed
-    ///         to pull-payment claimants (pendingWithdrawals).
-    function rescueETH() external onlyOwner {
+    ///         to pull-payment claimants (pendingWithdrawals). F16: nonReentrant
+    ///         so an owner that is a callback-capable contract cannot reenter
+    ///         this from the recipient side of disperseEther / _forwardFee /
+    ///         _refundOrCredit and rescue ETH before it is credited to
+    ///         pendingWithdrawals (treating in-flight liabilities as idle).
+    function rescueETH() external onlyOwner nonReentrant {
         uint256 rescuable = address(this).balance - totalPendingWithdrawals;
         require(rescuable > 0, "MagnetaBundler: nothing to rescue");
         (bool success, ) = msg.sender.call{value: rescuable}("");
@@ -525,10 +574,18 @@ contract MagnetaBundler is ReentrancyGuard, Pausable, Ownable2Step {
     }
 
     /// @notice Revoke an address's pauser role. Owner-only.
+    /// @dev Sentinelle rescan-15 F-26: if the removed account is the
+    ///      canonical {pauseGuardian}, clear that view too — otherwise
+    ///      monitoring reads a guardian address that can no longer pause.
+    ///      Mirrors the pattern already applied in MagnetaLending.
     function removePauser(address account) external onlyOwner {
         require(account != address(0), "MagnetaBundler: zero pauser");
         isPauser[account] = false;
         emit PauserRemoved(account);
+        if (account == pauseGuardian) {
+            pauseGuardian = address(0);
+            emit PauseGuardianUpdated(account, address(0));
+        }
     }
 
     /// @notice Deprecated single-guardian setter, retained for back-compat.

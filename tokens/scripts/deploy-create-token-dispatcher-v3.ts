@@ -23,6 +23,7 @@ import { ethers, network } from "hardhat";
 import * as fs from "fs";
 import * as path from "path";
 import { CHAIN_CONFIG } from "./chainConfig";
+import { verifyOnDeploy } from "./lib/verifyOnDeploy";
 
 const FEE_VAULT_EVM = "0x68109132Ecf7540A0A983e1Aaa7DebC469d9d68b";
 
@@ -123,6 +124,14 @@ async function main() {
   await dispatcher.waitForDeployment();
   const dispatcherAddr = await dispatcher.getAddress();
   console.log(`  → ${dispatcherAddr}`);
+
+  await verifyOnDeploy("CreateTokenDispatcherV3", dispatcherAddr, [
+    cfg.lzEndpoint,
+    deployer.address,
+    stdFactoryAddr,
+    alFactoryAddr,
+    FEE_VAULT_EVM,
+  ]);
 
   // Sequential nonce-explicit sender (fast L2 RPCs race the built-in nonce
   // manager — same fix as Sprint 9.6 v2 deploy script).

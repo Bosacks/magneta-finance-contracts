@@ -137,6 +137,14 @@ contract MagnetaCurveFactory is Ownable2Step, ReentrancyGuard {
 
     function proposeFeeVault(address _feeVault) external onlyOwner {
         require(_feeVault != address(0), "zero vault");
+        // F-33 (Sentinelle rescan-15): proposeRouter already required the
+        // proposed value to be a contract; proposeFeeVault only excluded
+        // address(0), so an EOA could be programmed as the sink for every
+        // future pool's 1% per-trade fee — plausible but easy-to-miss
+        // misconfiguration (typo'd address, wrong key). A vault MUST be a
+        // contract (even a trivial receive()-only forwarder) so the intent
+        // is unambiguous at propose time, mirroring proposeRouter's guard.
+        require(_feeVault.code.length > 0, "vault not a contract");
         pendingFeeVault = _feeVault;
         pendingFeeVaultTime = block.timestamp + CRITICAL_SETTER_DELAY;
         emit FeeVaultProposed(_feeVault, pendingFeeVaultTime);
@@ -163,11 +171,37 @@ contract MagnetaCurveFactory is Ownable2Step, ReentrancyGuard {
         require(_maxTotalSupply > 0, "zero supply max");
         require(_minGraduationThreshold > 0, "zero threshold min");
         require(_maxGraduationThreshold >= _minGraduationThreshold, "bad threshold bounds");
+        // F-26: cross-field satisfiability. createCurveToken requires
+        // graduationThreshold > virtualNativeReserve, and the smallest legal
+        // virtualNativeReserve is _minVirtualNativeReserve. If
+        // _maxGraduationThreshold does not exceed that floor, NO
+        // graduationThreshold in [_minGraduationThreshold,
+        // _maxGraduationThreshold] can ever be strictly greater than any
+        // legal virtualNativeReserve — every future createCurveToken call
+        // reverts on "threshold below virtual" or "threshold too large",
+        // bricking the launchpad until the owner fixes the bounds again.
+        // This is necessary AND sufficient given the check above already
+        // guarantees _minGraduationThreshold <= _maxGraduationThreshold: pick
+        // graduationThreshold = max(_minGraduationThreshold,
+        // _minVirtualNativeReserve + 1) and virtualNativeReserve =
+        // _minVirtualNativeReserve; both per-creation requirements hold.
+        require(_maxGraduationThreshold > _minVirtualNativeReserve, "bounds unsatisfiable");
         minVirtualNativeReserve = _minVirtualNativeReserve;
         maxTotalSupply          = _maxTotalSupply;
         minGraduationThreshold  = _minGraduationThreshold;
         maxGraduationThreshold  = _maxGraduationThreshold;
         emit ParameterBoundsUpdated(_minVirtualNativeReserve, _maxTotalSupply, _minGraduationThreshold, _maxGraduationThreshold);
+    }
+
+    /// @notice F-26: true if the currently-stored bounds admit at least one
+    ///         (virtualNativeReserve, graduationThreshold) tuple satisfying
+    ///         createCurveToken's requirements. `setParameterBounds` already
+    ///         enforces this at write time (see the require above), so this
+    ///         view exists for external monitoring / integrators that want to
+    ///         re-check live state without re-deriving the condition.
+    function boundsSatisfiable() external view returns (bool) {
+        return maxGraduationThreshold >= minGraduationThreshold
+            && maxGraduationThreshold > minVirtualNativeReserve;
     }
 
     /**
@@ -259,11 +293,16 @@ contract MagnetaCurveFactory is Ownable2Step, ReentrancyGuard {
         address[] storage arr = userTokens[user];
         uint256 len = arr.length;
         if (offset >= len) return new address[](0);
-        uint256 end = offset + limit;
-        if (end > len) end = len;
-        slice = new address[](end - offset);
-        for (uint256 i = offset; i < end; ++i) {
-            slice[i - offset] = arr[i];
+        // F-27: `offset + limit` overflows (Panic 0x11) when a caller passes
+        // a very large `limit` (e.g. type(uint256).max), reverting a
+        // read-only pagination call that should instead just clamp to the
+        // array's remaining length. `len - offset` cannot underflow — the
+        // guard above already ensures offset < len.
+        uint256 remaining = len - offset;
+        uint256 count = limit < remaining ? limit : remaining;
+        slice = new address[](count);
+        for (uint256 i = 0; i < count; ++i) {
+            slice[i] = arr[offset + i];
         }
     }
 
@@ -273,11 +312,12 @@ contract MagnetaCurveFactory is Ownable2Step, ReentrancyGuard {
     {
         uint256 len = allTokens.length;
         if (offset >= len) return new address[](0);
-        uint256 end = offset + limit;
-        if (end > len) end = len;
-        slice = new address[](end - offset);
-        for (uint256 i = offset; i < end; ++i) {
-            slice[i - offset] = allTokens[i];
+        // F-27: same overflow-safe clamp as getUserTokensPaginated.
+        uint256 remaining = len - offset;
+        uint256 count = limit < remaining ? limit : remaining;
+        slice = new address[](count);
+        for (uint256 i = 0; i < count; ++i) {
+            slice[i] = allTokens[offset + i];
         }
     }
 
