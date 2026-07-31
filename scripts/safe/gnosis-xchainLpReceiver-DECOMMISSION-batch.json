@@ -1,0 +1,29 @@
+{
+  "version": "1.0",
+  "chainId": "100",
+  "createdAt": 1754000000000,
+  "meta": {
+    "name": "Magneta — DECOMMISSION XChainLpReceiver (Gnosis)",
+    "description": "Neutralise the dormant MagnetaXChainLpReceiver at 0xeca6092e37E9d0692C21294473aDD604D9331fA9 by pointing its keeper at the burn address, so nobody can call fulfillSigned again. Sentinelleai report 18 F-3 (CRITICAL): fulfillSigned only checks that address(this).balance >= intent.amountNative — it never attributes the bridged native to a depositor or a bridge message, so a signer can claim more than they bridged, spending native that belongs to other pending intents. The panel's own remediation is 'do not redeploy or fund this path; confirm the dormant deployment has zero balance and disable its keeper'. Balance verified at 0 on 2026-07-31. setKeeper(address(0)) is rejected by the contract (ZeroAddress), hence the burn address. NOTE: the permissionless addLiquidityNative path stays callable, which is acceptable — it spends only the caller's own msg.value and cannot touch pooled funds. This contract was a 2026-05-27 pilot that the 2026-07-05 journal already flagged for decommissioning; it appears in no deployment manifest.",
+    "txBuilderVersion": "1.17.0",
+    "createdFromSafeAddress": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a",
+    "createdFromOwnerAddress": ""
+  },
+  "transactions": [
+    {
+      "to": "0xeca6092e37E9d0692C21294473aDD604D9331fA9",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [
+          { "internalType": "address", "name": "newKeeper", "type": "address" }
+        ],
+        "name": "setKeeper",
+        "payable": false
+      },
+      "contractInputsValues": {
+        "newKeeper": "0x000000000000000000000000000000000000dEaD"
+      }
+    }
+  ]
+}
