@@ -78,6 +78,11 @@ contract MagnetaERC20OFT is OFT, ERC20Burnable, ERC20Pausable, MagnetaERC20Permi
     // the fee instantly. DECREASES are still applied immediately because
     // they are strictly user-favourable.
     uint256 public constant TAX_FEE_INCREASE_DELAY_BLOCKS = 100; // ~20 min on Ethereum
+    /// @notice How long a matured tax-fee increase stays executable before it
+    ///         expires (report-17 F-3). 300 blocks ≈ 1h on Ethereum, far
+    ///         longer on L2s — ample for an honest owner to act, short enough
+    ///         that a proposal cannot be held indefinitely as a loaded gun.
+    uint256 public constant TAX_FEE_APPLY_WINDOW_BLOCKS = 300;
     uint256 public pendingTaxFee;
     uint256 public pendingTaxFeeBlock;
 
@@ -288,9 +293,22 @@ contract MagnetaERC20OFT is OFT, ERC20Burnable, ERC20Pausable, MagnetaERC20Permi
     }
 
     /// @notice Activate a pending tax-fee increase after the timelock elapses.
+    /// @dev    report-17 F-3: the delay alone did not preserve the anti
+    ///         front-running intent. A matured proposal used to stay
+    ///         executable forever, so the owner could park a 25% increase and
+    ///         fire it at a chosen moment — e.g. right before a large trade —
+    ///         which is exactly what the delay exists to prevent. The
+    ///         proposal now also EXPIRES: it is only executable inside
+    ///         [pendingTaxFeeBlock, pendingTaxFeeBlock + TAX_FEE_APPLY_WINDOW_BLOCKS].
+    ///         Past that, a fresh proposal (and a fresh public delay) is
+    ///         required.
     function applyTaxFee() external onlyOwner {
         require(pendingTaxFeeBlock > 0, "MagnetaERC20OFT: no pending fee");
         require(block.number >= pendingTaxFeeBlock, "MagnetaERC20OFT: timelock active");
+        require(
+            block.number <= pendingTaxFeeBlock + TAX_FEE_APPLY_WINDOW_BLOCKS,
+            "MagnetaERC20OFT: proposal expired"
+        );
         taxFee = pendingTaxFee;
         emit TaxFeeUpdated(pendingTaxFee);
         pendingTaxFee = 0;

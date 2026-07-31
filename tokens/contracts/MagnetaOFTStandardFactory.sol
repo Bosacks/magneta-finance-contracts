@@ -1,14 +1,28 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.24;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/access/Ownable2Step.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+
+/// @dev Minimal view of the TokenOps registry, used so the registration call
+///      is built from a compiler-checked selector instead of a hand-written
+///      literal (report-17 F-6). Declared inline for the same
+///      bytecode-budget reason as IMagnetaOFTTokenDeployer below.
+interface ITokenOpsRegister {
+    function registerByTokenOwner(address token) external;
+}
 
 /// @dev Declared inline rather than imported from MagnetaOFTTokenDeployer.sol
 ///      on purpose: importing that file would drag MagnetaERC20OFT's creation
 ///      code back into this factory's bytecode, which is the exact weight the
 ///      split exists to remove.
 interface IMagnetaOFTTokenDeployer {
+    /// @notice The one factory this deployer will accept calls from. Used by
+    ///         {MagnetaOFTStandardFactory-setTokenDeployer} to prove the
+    ///         deployer is bound to THIS factory before latching it forever
+    ///         (report-17 F-4).
+    function factory() external view returns (address);
+
     function deployToken(
         string memory name_,
         string memory symbol_,
@@ -33,7 +47,11 @@ interface IMagnetaOFTTokenDeployer {
  * factory above the Spurious Dragon 24576-byte deployable limit. Each
  * factory now deploys cleanly under that limit.
  */
-contract MagnetaOFTStandardFactory is Ownable, ReentrancyGuard {
+/// @dev Ownable2Step (report-17 F-8): ownership moves to a multisig/timelock
+///      on every chain, and a single-step transfer to a mistyped address
+///      would strand `withdraw()` and every future module/deployer setter
+///      with no recovery. The destination must now call acceptOwnership().
+contract MagnetaOFTStandardFactory is Ownable2Step, ReentrancyGuard {
     // createFee bake-in: was a mutable `uint256 public` with `setCreateFee`,
     // dropped to fit Spurious Dragon. The fee was 0.01 ETH-equivalent across
     // all 19 EVM deploys for ~6 months and never changed; if a future fee
@@ -111,6 +129,21 @@ contract MagnetaOFTStandardFactory is Ownable, ReentrancyGuard {
     error NoFees();
     error DeployerAlreadySet();
     error DeployerNotSet();
+    /// @dev report-17 F-4 — candidate deployer has no code.
+    error DeployerNotContract();
+    /// @dev report-17 F-4 — candidate deployer is bound to another factory.
+    error DeployerFactoryMismatch();
+
+    /// @notice Gas forwarded to the best-effort TokenOps registration call.
+    ///         Bounded so a malicious or buggy module cannot grief token
+    ///         creation by consuming the entire call (report-17 F-7 asked for
+    ///         a named, documented budget rather than a magic number).
+    ///         Measured worst case for registerByTokenOwner across supported
+    ///         TokenOpsModule versions is ~60k (one SLOAD-guard, one external
+    ///         owner() call, one SSTORE, two events); 200k leaves >3x headroom
+    ///         for gas repricing. Registration failure never blocks creation —
+    ///         it emits RegistrationFailed for off-chain retry.
+    uint256 private constant REGISTRATION_GAS_BUDGET = 200000;
 
     constructor(address _treasury, address _lzEndpoint) Ownable(msg.sender) {
         if (_treasury == address(0) || _lzEndpoint == address(0)) revert ZeroAddress();
@@ -140,9 +173,22 @@ contract MagnetaOFTStandardFactory is Ownable, ReentrancyGuard {
     ///         the frontend trusts this factory address, so an owner able to
     ///         swap the deployer later could silently change what users
     ///         actually receive when they pay the create fee.
+    ///         report-17 F-4: because the setter is one-way, a wrong address
+    ///         here is unrecoverable — it would revert every future paid and
+    ///         cross-chain creation with no way to correct it short of
+    ///         redeploying the factory and rewiring every integration. So the
+    ///         candidate must prove it is a real deployer bound to THIS
+    ///         factory before the address is latched: it must carry code, and
+    ///         its immutable `factory()` must equal address(this). An EOA, an
+    ///         unrelated contract, or a deployer wired to another factory now
+    ///         reverts instead of bricking creation.
     function setTokenDeployer(address _deployer) external onlyOwner {
         if (_deployer == address(0)) revert ZeroAddress();
         if (tokenDeployer != address(0)) revert DeployerAlreadySet();
+        if (_deployer.code.length == 0) revert DeployerNotContract();
+        if (IMagnetaOFTTokenDeployer(_deployer).factory() != address(this)) {
+            revert DeployerFactoryMismatch();
+        }
         tokenDeployer = _deployer;
         emit TokenDeployerSet(_deployer);
     }
@@ -194,14 +240,26 @@ contract MagnetaOFTStandardFactory is Ownable, ReentrancyGuard {
         //   no selector on any TokenOpsModule version. Discovered on
         //   Base Sepolia testnet 2026-06-08 via the RegistrationFailed
         //   event itself — Sentinelle MEDIUM SC06 paid for itself.)
-        if (tokenOpsModule != address(0)) {
-            // Bound the gas so a malicious/buggy module can't grief token
-            // creation by consuming the whole call (Sentinelle F-10). The
-            // registration is best-effort; failure emits RegistrationFailed.
-            (bool _ok, ) = tokenOpsModule.call{gas: 200000}(
-                abi.encodeWithSelector(0xbb6f82b8, tokenAddress)
-            );
-            if (!_ok) emit RegistrationFailed(tokenAddress);
+        address ops = tokenOpsModule;
+        if (ops != address(0)) {
+            // report-17 F-5: a raw call to an address with NO code returns
+            // success==true, so an EOA or not-yet-deployed module used to be
+            // reported as a successful registration and the token shipped
+            // silently unregistered. Treat "no code" as a failure explicitly.
+            if (ops.code.length == 0) {
+                emit RegistrationFailed(tokenAddress);
+            } else {
+                // Bound the gas so a malicious/buggy module can't grief token
+                // creation by consuming the whole call (Sentinelle F-10). The
+                // registration is best-effort; failure emits RegistrationFailed.
+                // report-17 F-6: selector comes from the interface, so a rename
+                // breaks the build instead of silently failing on-chain.
+                // report-17 F-7: budget is a named constant, documented below.
+                (bool _ok, ) = ops.call{gas: REGISTRATION_GAS_BUDGET}(
+                    abi.encodeCall(ITokenOpsRegister.registerByTokenOwner, (tokenAddress))
+                );
+                if (!_ok) emit RegistrationFailed(tokenAddress);
+            }
         }
     }
 
