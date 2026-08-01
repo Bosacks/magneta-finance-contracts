@@ -12,7 +12,8 @@
 - Lot Safe de décommission écrit : `scripts/safe/optimism-promotionPayment-DECOMMISSION-batch.json` (1 tx `setPricesBatch([1..6],[0×6])`, réversible) — à signer avec le lot Gnosis
 - Groupe `06-post-remediation-diff` ajouté à scope.json (rapport 19 recommandé AVANT la vague mainnet : Gateway+LPModule+TaxClaim+TokenCreation, modifiés après les rescans 15/16)
 - Repo GitHub `Bosacks/Testsites` : existait mais VIDE — Dominique a poussé le dépôt maison (77 commits, tip 8fc67e63 vérifié) ; risque sauvegarde CLOS
-- Décommission GNOSIS exécutée par Dominique : keeper XChainLpReceiver = 0xdEaD **vérifié on-chain** ; le lot OPTIMISM (PromotionPayment) reste À EXÉCUTER (prix 1-6 vérifiés encore vivants sur 2 RPC)
+- Décommissions GNOSIS **et** OPTIMISM exécutées par Dominique, toutes deux **vérifiées on-chain** : keeper XChainLpReceiver = 0xdEaD ; PromotionPayment codes 1-6 = 0 (2 RPC)
+- Testsites : défaut GitHub rebasculé sur security/curve-graduation-keeper, branche ex-master (renommée par GitHub, contenu de juin) supprimée après vérif d'ancestralité — une seule branche restante
 
 ## 2026-07-31 — Rapport 18, durcissement Bex, décommissionnement Gnosis
 
