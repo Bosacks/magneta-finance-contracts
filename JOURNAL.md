@@ -3,6 +3,16 @@
 > Fil chronologique des sessions. Anti-chronologique (plus récent en haut).
 > Voir `~/CLAUDE.md` pour la règle d'édition.
 
+## 2026-08-01 — 18:05 — Rapport 19 dépouillé : 16 findings réels sur 22, mainnet tourne du pré-audit
+
+- Rapport 19 (panel, groupe 06) : 22 findings, 1 CRITICAL + 7 HIGH. Triage : **16 RÉELS, 4 faux positifs, 2 atténués** — chacun revérifié à la main ou on-chain, jamais sur la foi du rapport
+- **F-1 CRITICAL confirmé on-chain** : 6 chaînes sondées (base, arbitrum, optimism, bsc, avalanche, gnosis) → TOUS les modules couche B exposent l'ANCIEN sélecteur `execute` (sans guid), sans `withdrawPendingRefund` ; le mainnet tourne du code **pré-remédiation 13-18**. Bruit à écarter : le scanner mesure aussi `deployments/` (couche A héritée) et `arbitrumSepolia.json` que j'avais marqué DEPRECATED
+- **F-6 est PIRE que le rapport** : le TaxClaimModule déployé n'a même pas `maxSlippageBps` (revert on-chain) et l'UI passe `amountOutMin: 0n` en dur sur ses 3 chemins → plancher de slippage NUL en prod, sandwich exploitable dès $20 (`minUsdc`)
+- **F-10 actif en prod** : `cctpMessenger()` = 0 sur Base alors que l'UI propose la case « Bridge to treasury » → paiement local silencieux, aucun revert
+- Hors rapport (le panel ne voyait pas le site) : le SDK encode `ClaimParams` à **4 champs** contre **5** sur main → déployer TaxClaim durci CASSE le claim frontend ; et `test_SandwichedClaimRevertsOnTheProportionalFloor` teste un routeur malhonnête, pas un sandwich (fausse assurance)
+- Faux positifs écartés : F-5 (frais 0,15 % — la Gateway prélève en natif AVANT le module, vérifié l. 208-229 + on-chain 5e14), F-21, F-19, F-14 (collision de sémantique)
+- Aucun correctif appliqué : arbitrage produit requis (cf. rapport à Dominique)
+
 ## 2026-08-01 — Re-scan gratuit des contrats « fonds » à scan > 3 jours
 
 - Re-scan couche gratuite Sentinelleai (economic+aderyn, EVM only) : launcher+adapters (panel ≤ 28/07) + code modifié après son dernier scan (LPModule permit, TaxClaim porté, Gateway GUID, Bex)
