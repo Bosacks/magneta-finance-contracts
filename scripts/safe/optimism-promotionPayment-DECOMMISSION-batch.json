@@ -1,0 +1,31 @@
+{
+  "version": "1.0",
+  "chainId": "10",
+  "createdAt": 1785593033611,
+  "meta": {
+    "name": "Magneta — DECOMMISSION PromotionPayment (Optimism)",
+    "description": "Neutralise the ghost PromotionPayment at 0x414dC3f0670227Ab3DDAd8B0A52aF7AdebC4a504 by zeroing every active duration code (1-6, currently priced 0.01 to 0.06 ETH), so pay() reverts with 'Unknown duration code' for everyone. Found by the 2026-08-01 free rescan: the contract was dropped from the manifests at the July redeploy wave (it survives only in optimism.json.pre-redeploy-bak) and the Terminal indexer no longer honours PromotionPaid events, yet payments were still live — a user could pay for a promotion that will never be displayed. The deployed bytecode is the PRE-pull-payment version (pay(address,uint8), no withdraw()/accumulatedFees()): it forwards value straight to feeRecipient, so nothing is stuck in the contract (native balance verified 0 on 2026-08-01). One transaction: setPricesBatch([1..6], [0×6]). Reversible at any time by the same owner with non-zero prices. Owner is this Safe; codes 7+ verified already 0.",
+    "txBuilderVersion": "1.17.0",
+    "createdFromSafeAddress": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a",
+    "createdFromOwnerAddress": ""
+  },
+  "transactions": [
+    {
+      "to": "0x414dC3f0670227Ab3DDAd8B0A52aF7AdebC4a504",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [
+          { "internalType": "uint8[]", "name": "codes", "type": "uint8[]" },
+          { "internalType": "uint256[]", "name": "prices", "type": "uint256[]" }
+        ],
+        "name": "setPricesBatch",
+        "payable": false
+      },
+      "contractInputsValues": {
+        "codes": "[1,2,3,4,5,6]",
+        "prices": "[0,0,0,0,0,0]"
+      }
+    }
+  ]
+}

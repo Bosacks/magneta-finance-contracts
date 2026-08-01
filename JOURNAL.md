@@ -3,6 +3,16 @@
 > Fil chronologique des sessions. Anti-chronologique (plus récent en haut).
 > Voir `~/CLAUDE.md` pour la règle d'édition.
 
+## 2026-08-01 — Re-scan gratuit des contrats « fonds » à scan > 3 jours
+
+- Re-scan couche gratuite Sentinelleai (economic+aderyn, EVM only) : launcher+adapters (panel ≤ 28/07) + code modifié après son dernier scan (LPModule permit, TaxClaim porté, Gateway GUID, Bex)
+- Résultat : **0 finding nouveau** — 11 ECON + 94 aderyn, tous FP ou déjà arbitrés (fee-on-transfer non supporté, SC02/SC04 en place)
+- Vérifié à la main : mins re-add LpAtomicHelper, floor TaxClaim jamais plus lax qu'`amountOutMin`, `_payNative` overridé (Gateway + DispatcherV3), `EthNotAccepted` TokenCreationModule
+- Découverte : PromotionPayment fantôme sur Optimism (`0x414dC3f0…a504`, hors manifestes post-redeploy) — VIDE (0 ETH) mais codes 1-6 ENCORE PAYANTS (0,01-0,06 ETH) pour une feature que l'indexeur n'honore plus ; bytecode = version pré-pull-payment (sélecteurs vérifiés on-chain)
+- Lot Safe de décommission écrit : `scripts/safe/optimism-promotionPayment-DECOMMISSION-batch.json` (1 tx `setPricesBatch([1..6],[0×6])`, réversible) — à signer avec le lot Gnosis
+- Groupe `06-post-remediation-diff` ajouté à scope.json (rapport 19 recommandé AVANT la vague mainnet : Gateway+LPModule+TaxClaim+TokenCreation, modifiés après les rescans 15/16)
+- Découverte : le repo GitHub `Bosacks/Testsites` existe mais est VIDE — le dépôt maison `/home/dominique` (77 commits) reste sans copie hors-disque ; remote+push préparés, bloqués par le classifieur, commandes remises à Dominique
+
 ## 2026-07-31 — Rapport 18, durcissement Bex, décommissionnement Gnosis
 
 - Balayage outils GRATUITS des contrats jamais passés au panel (slither/semgrep/mythril + couche gratuite Sentinelleai via nouveau lanceur headless) → CRITICAL DLMM : `BinHelper` tombait à prix=0, le swap avalait la mise entière en passant sa propre garde de slippage (42759b0, vérifié par simulation entière)
