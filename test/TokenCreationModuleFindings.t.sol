@@ -176,14 +176,17 @@ contract TokenCreationModuleFindingsTest is Test {
     // ─── F-24 ─────────────────────────────────────────────────────────────
 
     function test_F24_ReplayedPayloadRevertsOnSecondDelivery() public {
-        // A twice-delivered authenticated CREATE_TOKEN payload (e.g. a
-        // gateway/relayer bug redelivering the same message) must not spawn
-        // a second token.
+        // A twice-delivered authenticated CREATE_TOKEN message must not spawn a
+        // second token. A redelivered LayerZero message always carries its GUID,
+        // so that is the context this asserts — `_ctx` (guid 0) is the LOCAL
+        // direct-call path, where there is no message to redeliver and each call
+        // is separately signed and paid for (Sentinelle report 19 F-12).
         bytes memory payload = _standardPayload("Dup");
-        gw.call(address(mod), _ctx(1), payload);
+        bytes32 guid = keccak256("lz-guid-redelivered");
+        gw.call(address(mod), _ctxGuid(guid), payload);
 
         vm.expectRevert(TokenCreationModule.AlreadyExecuted.selector);
-        gw.call(address(mod), _ctx(1), payload);
+        gw.call(address(mod), _ctxGuid(guid), payload);
     }
 
     function test_F24_IdenticalParamsFromDifferentOriginChainsBothSucceed() public {
@@ -230,18 +233,20 @@ contract TokenCreationModuleFindingsTest is Test {
         gw.call(address(mod), _ctxGuid(guid), payload);
     }
 
-    function test_F22_LocalPathSameParamsSecondCallStillReverts() public {
-        // ctx.guid == 0 (local, non-bridged path) keeps the pre-existing
-        // F-24 composite-key behavior unchanged: two calls sharing the same
-        // origin chain, caller, and params with no message GUID still
-        // collide and the second reverts. This is exactly
-        // test_F24_ReplayedPayloadRevertsOnSecondDelivery above, restated
-        // here for symmetry with the LPAtomicModule findings file.
+    function test_F22_LocalPathSameParamsSecondCallSucceeds() public {
+        // Report 19 F-12: the local composite key carried no nonce, so a creator
+        // submitting byte-identical parameters twice was refused for good — two
+        // tokens with the same name, symbol and supply were impossible to ever
+        // create. The per-caller nonce lifts that without touching the bridged
+        // path, which stays keyed on the GUID.
         bytes memory payload = _standardPayload("LocalDup");
-        gw.call(address(mod), _ctx(1), payload);
+        bytes memory first = gw.call(address(mod), _ctx(1), payload);
+        bytes memory second = gw.call(address(mod), _ctx(1), payload);
 
-        vm.expectRevert(TokenCreationModule.AlreadyExecuted.selector);
-        gw.call(address(mod), _ctx(1), payload);
+        assertTrue(
+            abi.decode(first, (address)) != abi.decode(second, (address)),
+            "identical local creations must yield distinct tokens"
+        );
     }
 
     // ─── F-28 ─────────────────────────────────────────────────────────────

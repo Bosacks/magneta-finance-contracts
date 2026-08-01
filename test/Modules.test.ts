@@ -503,8 +503,8 @@ describe("TaxClaimModule", function () {
 
     it("reverts when nothing to claim (no fees accrued)", async () => {
         const encoded = coder.encode(
-            ["tuple(address token,uint256 amountOutMin,uint256 deadline,bool bridgeToTreasury)"],
-            [[await taxToken.getAddress(), 0n, (await ethers.provider.getBlock("latest"))!.timestamp + 3600, false]]
+            ["tuple(address token,uint256 amountOutMin,uint256 deadline,bool bridgeToTreasury,uint32 destinationDomain)"],
+            [[await taxToken.getAddress(), 1n, (await ethers.provider.getBlock("latest"))!.timestamp + 3600, false, 0]]
         );
         await expect(gateway.connect(admin).executeOperation(OP_CLAIM_TAX_FEES, encoded))
             .to.be.revertedWithCustomError(tax, "NothingToClaim");
@@ -514,8 +514,8 @@ describe("TaxClaimModule", function () {
         // Seed 10 units of token → 10 wei of USDC out (1:1 mock). Below $20.
         await taxToken.seedPending(10n);
         const encoded = coder.encode(
-            ["tuple(address token,uint256 amountOutMin,uint256 deadline,bool bridgeToTreasury)"],
-            [[await taxToken.getAddress(), 0n, (await ethers.provider.getBlock("latest"))!.timestamp + 3600, false]]
+            ["tuple(address token,uint256 amountOutMin,uint256 deadline,bool bridgeToTreasury,uint32 destinationDomain)"],
+            [[await taxToken.getAddress(), 1n, (await ethers.provider.getBlock("latest"))!.timestamp + 3600, false, 0]]
         );
         await expect(gateway.connect(admin).executeOperation(OP_CLAIM_TAX_FEES, encoded))
             .to.be.revertedWithCustomError(tax, "BelowThreshold");
@@ -527,8 +527,8 @@ describe("TaxClaimModule", function () {
         await taxToken.seedPending(gross);
 
         const encoded = coder.encode(
-            ["tuple(address token,uint256 amountOutMin,uint256 deadline,bool bridgeToTreasury)"],
-            [[await taxToken.getAddress(), 0n, (await ethers.provider.getBlock("latest"))!.timestamp + 3600, false]]
+            ["tuple(address token,uint256 amountOutMin,uint256 deadline,bool bridgeToTreasury,uint32 destinationDomain)"],
+            [[await taxToken.getAddress(), 1n, (await ethers.provider.getBlock("latest"))!.timestamp + 3600, false, 0]]
         );
 
         const fee = (gross * 15n) / 10_000n;
@@ -550,10 +550,14 @@ describe("TaxClaimModule", function () {
             6,
             ethers.zeroPadValue(admin.address, 32)
         );
+        // The admin picks the destination domain, so it has to be allow-listed
+        // first — domain 0 is Ethereum, and an unconfigured entry used to mean
+        // exactly that in silence.
+        await tax.setCctpDomain(6, true);
 
         const encoded = coder.encode(
-            ["tuple(address token,uint256 amountOutMin,uint256 deadline,bool bridgeToTreasury)"],
-            [[await taxToken.getAddress(), 0n, (await ethers.provider.getBlock("latest"))!.timestamp + 3600, true]]
+            ["tuple(address token,uint256 amountOutMin,uint256 deadline,bool bridgeToTreasury,uint32 destinationDomain)"],
+            [[await taxToken.getAddress(), 1n, (await ethers.provider.getBlock("latest"))!.timestamp + 3600, true, 6]]
         );
 
         const fee = (gross * 15n) / 10_000n;
@@ -580,6 +584,9 @@ describe("TaxClaimModule", function () {
         it("MEDIUM SC01 — trusted registrar can register, revoke works", async () => {
             const TaxToken = await ethers.getContractFactory("MockTaxToken");
             const t = await TaxToken.deploy("Y", "Y");
+            // Report 19 F-11: registration now refuses a token whose tax revenue
+            // would land anywhere but this module.
+            await t.setMarketingWallet(await tax.getAddress());
 
             await expect(tax.setTrustedRegistrar(admin.address, true))
                 .to.emit(tax, "TrustedRegistrarUpdated")

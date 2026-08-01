@@ -436,6 +436,6 @@ describe("Cross-chain integration", function () {
         // Try to fulfill without CCTP tokens — should revert
         await expect(
             gatewayB.fulfillValueOp(guid)
-        ).to.be.revertedWith("MagnetaGateway: tokens not arrived");
+        ).to.be.revertedWithCustomError(gatewayB, "EarmarkUnderfunded");
     });
 });

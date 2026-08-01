@@ -129,7 +129,7 @@ describe("MagnetaGateway", function () {
             const coder = new ethers.AbiCoder();
             const encoded = coder.encode(
                 [
-                    "tuple(address token,uint256 tokenAmount,uint256 ethAmount,uint256 amountTokenMin,uint256 amountETHMin,uint256 usdcFee,uint256 deadline)"
+                    "tuple(address token,uint256 tokenAmount,uint256 ethAmount,uint256 amountTokenMin,uint256 amountETHMin,uint256 usdcFee,uint256 deadline,bytes permit)"
                 ],
                 [[
                     await token.getAddress(),
@@ -139,6 +139,7 @@ describe("MagnetaGateway", function () {
                     0n,
                     usdcFee,
                     Math.floor(Date.now() / 1000) + 3600,
+                    "0x",
                 ]]
             );
             const params = ethers.concat(["0x00", encoded]); // OpType.CREATE_LP prefix
@@ -171,7 +172,7 @@ describe("MagnetaGateway", function () {
             const coder = new ethers.AbiCoder();
             const encoded = coder.encode(
                 [
-                    "tuple(address token,uint256 tokenAmount,uint256 ethAmount,uint256 amountTokenMin,uint256 amountETHMin,uint256 usdcFee,uint256 deadline)"
+                    "tuple(address token,uint256 tokenAmount,uint256 ethAmount,uint256 amountTokenMin,uint256 amountETHMin,uint256 usdcFee,uint256 deadline,bytes permit)"
                 ],
                 [[
                     await token.getAddress(),
@@ -181,6 +182,7 @@ describe("MagnetaGateway", function () {
                     0n,
                     0n, // usdcFee = 0 → now allowed (native fee replaces the USDC floor)
                     Math.floor(Date.now() / 1000) + 3600,
+                    "0x",
                 ]]
             );
             const params = ethers.concat(["0x00", encoded]);
@@ -208,8 +210,8 @@ describe("MagnetaGateway", function () {
             await token.connect(alice).approve(await lpModule.getAddress(), tokenAmount);
             const coder = new ethers.AbiCoder();
             const encoded = coder.encode(
-                ["tuple(address token,uint256 tokenAmount,uint256 ethAmount,uint256 amountTokenMin,uint256 amountETHMin,uint256 usdcFee,uint256 deadline)"],
-                [[await token.getAddress(), tokenAmount, ethAmount, 0n, 0n, usdcFee, Math.floor(Date.now() / 1000) + 3600]]
+                ["tuple(address token,uint256 tokenAmount,uint256 ethAmount,uint256 amountTokenMin,uint256 amountETHMin,uint256 usdcFee,uint256 deadline,bytes permit)"],
+                [[await token.getAddress(), tokenAmount, ethAmount, 0n, 0n, usdcFee, Math.floor(Date.now() / 1000) + 3600, "0x"]]
             );
             return ethers.concat(["0x00", encoded]);
         }
@@ -473,9 +475,11 @@ describe("MagnetaGateway", function () {
             // Non-owner can't clear.
             await expect(gateway.connect(alice).adminClearPendingValueOp(guid)).to.be.reverted;
 
-            // Owner clears, totalEarmarked drops, pending op gone.
+            // Owner clears, totalEarmarked drops, pending op gone. Report 19
+            // F-17: clearing emits its own event — reusing ValueOpFulfilled told
+            // indexers an op had completed when in fact it owes a refund.
             await expect(gateway.adminClearPendingValueOp(guid))
-                .to.emit(gateway, "ValueOpFulfilled");
+                .to.emit(gateway, "ValueOpCleared");
             expect(await gateway.totalEarmarked()).to.equal(0n);
             const cleared = await gateway.pendingValueOps(guid);
             expect(cleared.bridgedAmount).to.equal(0n);
@@ -488,19 +492,20 @@ describe("MagnetaGateway", function () {
 
         it("adminClearPendingValueOp reverts on unknown guid", async () => {
             await expect(gateway.adminClearPendingValueOp(ethers.id("never-existed")))
-                .to.be.revertedWith("MagnetaGateway: no pending op");
+                .to.be.revertedWithCustomError(gateway, "NoPendingOp");
         });
     });
 
-    describe("F38: fulfillValueOp uses a PER-OP arrival check (liveness DoS fix)", () => {
-        // Pre-patch, fulfillValueOp required `balanceOf(this) >= totalEarmarked`,
-        // i.e. EVERY pending op's bridged USDC had to have landed before ANY op
-        // could be fulfilled. One stuck/never-settling CCTP transfer (or an
-        // attacker queuing a large op that never arrives) inflated
-        // totalEarmarked and blocked every other op whose own funds were already
-        // present. The patch checks `balanceOf(this) >= p.bridgedAmount` so each
-        // op is fulfillable independently, while pulling the funds out in the
-        // same tx preserves the anti-double-spend guarantee.
+    describe("Report 19 F-3: fulfillValueOp preserves every earmark", () => {
+        // F38 had relaxed the check to `balanceOf(this) >= p.bridgedAmount` for
+        // liveness. Report 19 F-3 showed what that bought: bridged USDC is a
+        // fungible pool with no per-op attribution, so op A could be served with
+        // the USDC that arrived for op B — B then reverted "tokens not arrived"
+        // although its own funds HAD landed, and a lost CCTP leg fell on an
+        // innocent third party with no on-chain way to make them whole.
+        // Safety now wins: an op is fulfillable only while the remaining balance
+        // still covers every other earmark. Liveness is restored administratively
+        // by adminRefundPendingValueOp, which pays the stuck caller back.
 
         const OP_VALUE = 0; // CREATE_LP slot, repurposed for the mock module
         let valueModule: any;
@@ -539,52 +544,58 @@ describe("MagnetaGateway", function () {
             endpointSigner = await ethers.getSigner(await endpoint.getAddress()) as any;
         });
 
-        it("fulfills an op whose own funds arrived even while a larger op is still pending", async () => {
-            const big = ethers.id("f38-big-stuck");
-            const small = ethers.id("f38-small-ready");
-            await queueOp(big, 10, 1_000_000n);   // never funded (stuck CCTP)
-            await queueOp(small, 11, 100_000n);   // funds will arrive
+        it("refuses to spend another op's arrived USDC", async () => {
+            const big = ethers.id("f3-big-stuck");
+            const small = ethers.id("f3-small-ready");
+            await queueOp(big, 10, 1_000_000n);   // never funded (stuck CCTP leg)
+            await queueOp(small, 11, 100_000n);
 
-            // totalEarmarked = 1.1M, but only the small op's 100k lands.
             expect(await gateway.totalEarmarked()).to.equal(1_100_000n);
             await usdc.mint(await gateway.getAddress(), 100_000n);
 
-            // Pre-patch this reverted ("tokens not arrived": 100k < 1.1M).
-            const before = await usdc.balanceOf(alice.address);
+            // The 100k on hand cannot be told apart from the big op's money, so
+            // serving `small` here would leave `big` short by exactly that much.
             await expect(gateway.connect(alice).fulfillValueOp(small))
-                .to.emit(gateway, "ValueOpFulfilled");
-
-            expect(await usdc.balanceOf(alice.address)).to.equal(before + 100_000n);
-            expect(await gateway.totalEarmarked()).to.equal(1_000_000n); // big op still reserved
+                .to.be.revertedWithCustomError(gateway, "EarmarkUnderfunded");
         });
 
-        it("blocks an op whose own funds have NOT arrived (no double-spend)", async () => {
-            const big = ethers.id("f38-big-stuck-2");
-            const small = ethers.id("f38-small-ready-2");
+        it("lets the owner refund a stuck op, which unblocks the rest", async () => {
+            const big = ethers.id("f3-big-stuck-2");
+            const small = ethers.id("f3-small-ready-2");
             await queueOp(big, 20, 1_000_000n);
             await queueOp(small, 21, 100_000n);
-
-            // Only the small op's funds are present; the big op cannot borrow them.
             await usdc.mint(await gateway.getAddress(), 100_000n);
-            await expect(gateway.connect(alice).fulfillValueOp(big))
-                .to.be.revertedWith("MagnetaGateway: tokens not arrived");
+
+            // The operator funds the refund from treasury and pays the stuck
+            // caller back — the bridge loss lands on whoever runs the bridge.
+            await usdc.mint(await gateway.getAddress(), 1_000_000n);
+            const aliceBefore = await usdc.balanceOf(alice.address);
+            await expect(gateway.adminRefundPendingValueOp(big))
+                .to.emit(gateway, "ValueOpRefunded");
+            expect(await usdc.balanceOf(alice.address)).to.equal(aliceBefore + 1_000_000n);
+            expect(await gateway.totalEarmarked()).to.equal(100_000n);
+
+            // With the stuck earmark gone, the healthy op goes through.
+            await expect(gateway.connect(alice).fulfillValueOp(small))
+                .to.emit(gateway, "ValueOpFulfilled");
+            expect(await gateway.totalEarmarked()).to.equal(0n);
         });
 
-        it("fulfilling one op drains its funds so a second equal op must wait for its own", async () => {
-            const a = ethers.id("f38-A");
-            const b = ethers.id("f38-B");
+        it("serves two ops once both are funded, and never on partial funding", async () => {
+            const a = ethers.id("f3-A");
+            const b = ethers.id("f3-B");
             await queueOp(a, 30, 100_000n);
             await queueOp(b, 31, 100_000n);
 
-            // Only 100k arrives — enough for exactly ONE of the two ops.
+            // Half the money: neither op may move.
             await usdc.mint(await gateway.getAddress(), 100_000n);
+            await expect(gateway.connect(alice).fulfillValueOp(a))
+                .to.be.revertedWithCustomError(gateway, "EarmarkUnderfunded");
 
-            await gateway.connect(alice).fulfillValueOp(a); // drains balance to 0
-            await expect(gateway.connect(alice).fulfillValueOp(b))
-                .to.be.revertedWith("MagnetaGateway: tokens not arrived");
-
-            // Once B's own funds land, it fulfills too.
+            // Both legs land — A leaves exactly B's earmark behind, then B goes.
             await usdc.mint(await gateway.getAddress(), 100_000n);
+            await expect(gateway.connect(alice).fulfillValueOp(a))
+                .to.emit(gateway, "ValueOpFulfilled");
             await expect(gateway.connect(alice).fulfillValueOp(b))
                 .to.emit(gateway, "ValueOpFulfilled");
             expect(await gateway.totalEarmarked()).to.equal(0n);

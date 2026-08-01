@@ -8,7 +8,6 @@ import "@openzeppelin/contracts/access/Ownable2Step.sol";
 
 import "../interfaces/IModule.sol";
 import "../interfaces/IMagnetaGateway.sol";
-import "../interfaces/IMagnetaSwap.sol";
 
 interface IWETH {
     function deposit() external payable;
@@ -82,9 +81,15 @@ interface IERC2612Permit {
 ///         local chain using a V2-compatible DEX router (BaseSwap on Base,
 ///         SushiSwap on Arbitrum, QuickSwap on Polygon, PancakeSwap on BSC…).
 /// @dev    Called exclusively by MagnetaGateway. Pulls user tokens/native via
-///         the gateway context caller. Magneta markup (0.15% of value) is
-///         taken in USDC and sent to the gateway feeVault on value-moving ops
-///         (CREATE_LP / REMOVE_LP / CREATE_LP_AND_BUY). BURN_LP is
+///         the gateway context caller.
+///
+///         FEES — the local Magneta service fee is collected in NATIVE by
+///         MagnetaGateway.executeOperation (`opServiceFeeNative[op]`, skimmed
+///         to the FeeVault BEFORE this module is called), not by this module.
+///         What remains here is {_collectFee}, a USDC leg that only fires on a
+///         caller-supplied non-zero `usdcFee`; it is a no-op on the ordinary
+///         native-fee path where `usdcFee == 0`. Cross-chain markup is taken
+///         SOURCE-side by MagnetaGateway._collectCrossChainFee. BURN_LP is
 ///         deliberately FEE-EXEMPT (Sentinelle rescan-15 F-7, arbitrated
 ///         2026-07-30): burning LP is value-destructive for the caller and no
 ///         major AMM (Uniswap/Sushi-class, or launchpad graduation burns)
@@ -99,14 +104,18 @@ interface IERC2612Permit {
 contract LPModule is IModule, ReentrancyGuard, Ownable2Step {
     using SafeERC20 for IERC20;
 
-    uint16 public constant FEE_BPS = 15;                   // 0.15%
-    uint256 public constant MIN_LOCAL_FEE_USDC = 100_000;  // $0.10 (6dp) flat floor — fail-closed when no on-chain price
     uint256 public constant BURN_ADDRESS_SALT = 0;
     address public constant DEAD = 0x000000000000000000000000000000000000dEaD;
 
     address public immutable gateway;
     address public immutable router;
     address public immutable usdc;
+    /// @notice Kept as a constructor argument and a public getter for the
+    ///         deployment scripts and off-chain wiring checks that assert every
+    ///         module points at the right MagnetaSwap. No code path in this
+    ///         module reads it since the native-fee migration removed the USDC
+    ///         price lookup; dropping it would change the constructor ABI and
+    ///         every per-chain deploy manifest.
     address public immutable magnetaSwap;
 
     event LPCreated(address indexed caller, address indexed token, uint256 amountToken, uint256 amountETH, uint256 liquidity);
@@ -144,6 +153,17 @@ contract LPModule is IModule, ReentrancyGuard, Ownable2Step {
     ///         originChainId == block.chainid) could enter the bridged
     ///         branch WITHOUT ever passing through the DVN re-check.
     error InconsistentLpRoutingContext();
+    /// @notice Thrown when an op whose only token leg is a V2 PAIR token is
+    ///         dispatched with `ctx.tokenSource != address(0)`. Sentinelle
+    ///         report-19 F-9: `_burnLP` and `_removeLP` pull from
+    ///         `ctx.tokenSource` whenever it is set, but the gateway only ever
+    ///         stages bridged USDC (or a launch token) there — it never holds
+    ///         or approves pair tokens. Such a dispatch used to fail deep in
+    ///         `safeTransferFrom` on a missing allowance, spending the user's
+    ///         service fee on an op that could never settle; reject it up front
+    ///         with a name that says which context was wrong.
+    /// @param  op The op that was dispatched with an unusable tokenSource.
+    error UnexpectedTokenSource(IMagnetaGateway.OpType op);
 
     /// @notice Minimum attested DVN quorum the gateway must surface for this
     ///         module to wire up. Mitigates Kelp-DAO-class single-validator
@@ -225,8 +245,15 @@ contract LPModule is IModule, ReentrancyGuard, Ownable2Step {
             }
             return _createLP(ctx, inner);
         } else if (op == IMagnetaGateway.OpType.REMOVE_LP) {
+            // F-9: both of these ops move a V2 PAIR token, which the gateway
+            // never bridges, holds or approves — so a non-zero tokenSource can
+            // only be an incoherent context. CREATE_LP_AND_BUY is deliberately
+            // NOT covered: its token leg is the launch token, which the gateway
+            // does legitimately stage on the bridged path.
+            if (ctx.tokenSource != address(0)) revert UnexpectedTokenSource(op);
             return _removeLP(ctx, inner);
         } else if (op == IMagnetaGateway.OpType.BURN_LP) {
+            if (ctx.tokenSource != address(0)) revert UnexpectedTokenSource(op);
             return _burnLP(ctx, inner);
         } else if (op == IMagnetaGateway.OpType.CREATE_LP_AND_BUY) {
             return _createLPAndBuy(ctx, inner);
@@ -360,8 +387,9 @@ contract LPModule is IModule, ReentrancyGuard, Ownable2Step {
         address pair = IUniswapV2Factory(IUniswapV2Router02(router).factory()).getPair(p.token, weth);
         require(pair != address(0), "no pair");
 
-        address src = ctx.tokenSource != address(0) ? ctx.tokenSource : ctx.caller;
-        IERC20(pair).safeTransferFrom(src, DEAD, p.liquidity);
+        // execute() rejects a non-zero tokenSource for BURN_LP (F-9), so the
+        // pair tokens can only ever come from the caller.
+        IERC20(pair).safeTransferFrom(ctx.caller, DEAD, p.liquidity);
         emit LPBurned(ctx.caller, p.token, p.liquidity);
         return abi.encode(p.liquidity);
     }
@@ -538,36 +566,6 @@ contract LPModule is IModule, ReentrancyGuard, Ownable2Step {
         if (amount == 0) return;
         if (ctx.originChainId != block.chainid) return;
         IERC20(usdc).safeTransferFrom(ctx.caller, ctx.feeVault, amount);
-    }
-
-    /// @dev DEPRECATED / NO LONGER CALLED (native-fee migration): the local
-    ///      Magneta fee is now collected in NATIVE by the Gateway, so this USDC
-    ///      floor is not invoked. Retained (not deleted) so it can be re-enabled
-    ///      if a chain ever needs a USDC fallback, and to avoid an unused-state
-    ///      cascade on `magnetaSwap`. Not a live guard anymore.
-    /// @dev F53: enforce the 0.15% Magneta markup floor for LOCAL value ops.
-    ///      Without this, a local caller (originChainId == block.chainid) could
-    ///      pass usdcFee = 0 and _collectFee would early-return, evading the fee
-    ///      entirely. We derive the op's USD value on-chain instead of trusting
-    ///      the caller-supplied fee: the native side (`ethAmount`) is priced into
-    ///      USDC via MagnetaSwap, and a balanced two-sided LP add deposits ~equal
-    ///      value on each side, so total value ≈ 2× the native value. The floor
-    ///      is then value × FEE_BPS / 10_000, matching MagnetaGateway's
-    ///      _collectCrossChainFee convention. Cross-chain ops are untouched (the
-    ///      markup was already collected source-side).
-    function _requireLocalFee(Context calldata ctx, uint256 ethAmount, uint256 suppliedFee) internal view {
-        if (ctx.originChainId != block.chainid) return;
-        if (ethAmount == 0) return;
-        address weth = IUniswapV2Router02(router).WETH();
-        // MagnetaSwap.getAmountOut returns 0 (no revert) when WETH/USDC is not
-        // whitelisted or has no pool — which is the case on most chains. Applying
-        // only the quoted fee would then floor at 0 and re-open the evasion, so we
-        // ALWAYS enforce a flat minimum: the guard fails CLOSED on those chains.
-        uint256 nativeUsd = IMagnetaSwap(magnetaSwap).getAmountOut(weth, usdc, ethAmount);
-        uint256 valueUsd = nativeUsd * 2; // balanced LP: token side ≈ native side
-        uint256 expectedFee = (valueUsd * FEE_BPS) / 10_000;
-        if (expectedFee < MIN_LOCAL_FEE_USDC) expectedFee = MIN_LOCAL_FEE_USDC;
-        require(suppliedFee >= expectedFee, "LPModule: fee below minimum");
     }
 
     /// @dev F7: refund unconsumed token / native back to `to`, mirroring the

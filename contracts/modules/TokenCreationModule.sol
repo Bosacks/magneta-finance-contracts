@@ -91,7 +91,6 @@ contract TokenCreationModule is IModule, ReentrancyGuard, Ownable2Step {
 
     error OnlyGateway();
     error UnsupportedTemplate();
-    error UnsupportedOp();
     error FactoryNotSet();
     error InvalidPayload();
     /// @notice F-23 — mirrors LPAtomicModule.EthNotAccepted. IModule mandates
@@ -116,10 +115,27 @@ contract TokenCreationModule is IModule, ReentrancyGuard, Ownable2Step {
     ///         LPAtomicModule's corrected key — `ctx.guid` alone when
     ///         non-zero (the LayerZero GUID of the authenticated message,
     ///         unique by LZ spec), falling back to the composite key
-    ///         (origin chain + caller + template kind + inner params) only
-    ///         for the local, non-bridged `executeOperation` path where
-    ///         `ctx.guid == 0`. See execute() for details.
+    ///         (origin chain + caller + template kind + inner params + the
+    ///         caller's local nonce) only for the local, non-bridged
+    ///         `executeOperation` path where `ctx.guid == 0`. See execute()
+    ///         for details.
     mapping(bytes32 => bool) public executedPayloads;
+
+    /// @notice Number of LOCAL (`ctx.guid == 0`) creations this caller has
+    ///         already had executed by this module. Folded into the local
+    ///         replay key so a caller can legitimately create the same token
+    ///         twice; read it off-chain to precompute that key.
+    /// @dev    report-19 F-12: the local key used to be a pure function of
+    ///         (originChainId, caller, kind, inner) with no operation
+    ///         identifier, and `executedPayloads` has no reset. Two
+    ///         byte-identical local CREATE_TOKEN submissions from one creator
+    ///         — same name, symbol, URI, supply and flags — therefore made the
+    ///         second one revert with {AlreadyExecuted} FOREVER, on the most
+    ///         common path (`Gateway.executeOperation`). Deliberately NOT
+    ///         applied to the bridged path: there `ctx.guid` is the LZ
+    ///         message identifier, and folding in a mutable per-caller counter
+    ///         would make a replayed GUID hash to a fresh key and execute.
+    mapping(address => uint256) public localCreationNonce;
 
     constructor(
         address _gateway,
@@ -213,6 +229,19 @@ contract TokenCreationModule is IModule, ReentrancyGuard, Ownable2Step {
 
     /// @inheritdoc IModule
     /// @dev `params` layout: `bytes1 templateKind || abi.encode(...kind-specific...)`
+    ///
+    /// @dev F-22: this module does NOT re-assert that the op it was dispatched
+    ///      for is `OpType.CREATE_TOKEN`, and cannot — {IModule.Context} carries
+    ///      no `opType` field, so the information never reaches here. Routing is
+    ///      the gateway's responsibility: `_modules[op]` is a one-way owner-set
+    ///      mapping, `onlyGateway` above is the only caller restriction, and a
+    ///      gateway that dispatched the wrong op to this address would be
+    ///      misconfigured at the registry level rather than exploitable through
+    ///      it. Closing the gap properly means adding `opType` to `Context`,
+    ///      which changes `execute`'s calldata layout for EVERY module — out of
+    ///      scope here, tracked instead of silently absorbed. The residual
+    ///      surface is bounded by the template selector below: anything that is
+    ///      not a known {TemplateKind} is rejected with {UnsupportedTemplate}.
     function execute(Context calldata ctx, bytes calldata params)
         external
         payable
@@ -253,13 +282,29 @@ contract TokenCreationModule is IModule, ReentrancyGuard, Ownable2Step {
         // GUID of the authenticated message, unique by LZ spec) so two
         // genuinely distinct messages from the same origin chain with
         // byte-identical params now BOTH execute instead of the second
-        // colliding; a replayed/duplicated GUID still reverts. Local direct
-        // calls carry no GUID (ctx.guid == 0) and fall back to the composite
-        // key mirroring LPAtomicModule (F-20): origin chain + caller +
-        // template kind + inner params.
-        bytes32 payloadHash = ctx.guid != bytes32(0)
-            ? ctx.guid
-            : keccak256(abi.encode(ctx.originChainId, ctx.caller, kind, inner));
+        // colliding; a replayed/duplicated GUID still reverts.
+        //
+        // report-19 F-12: local direct calls carry no GUID, and on that path a replay
+        // is not something a third party can mount — `ctx.caller` is the
+        // gateway's own msg.sender, so "submitting the same payload twice"
+        // IS a second creation the user paid for and asked for. The key
+        // therefore consumes a per-caller nonce, which both keeps the
+        // composite key unique across identical submissions and preserves
+        // the guard's shape.
+        bytes32 payloadHash;
+        if (ctx.guid != bytes32(0)) {
+            payloadHash = ctx.guid;
+        } else {
+            payloadHash = keccak256(
+                abi.encode(
+                    ctx.originChainId,
+                    ctx.caller,
+                    kind,
+                    inner,
+                    localCreationNonce[ctx.caller]++
+                )
+            );
+        }
         if (executedPayloads[payloadHash]) revert AlreadyExecuted();
         executedPayloads[payloadHash] = true;
 

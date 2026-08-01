@@ -86,6 +86,13 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
     ///         Default 1 native unit (mirrors MagnetaBundler.maxFeePerTx).
     uint256 public maxOpServiceFeeNative = 1 ether;
 
+    /// @notice Hard ceiling on {maxOpServiceFeeNative} itself. Without it the
+    ///         owner-settable bound bounded nothing: raise it, then charge it.
+    ///         10 native units — well above the 1-unit default so chains with
+    ///         a cheap native token keep room to configure a real fee, and far
+    ///         below any amount a user would tolerate paying by accident.
+    uint256 public constant MAX_OP_SERVICE_FEE_NATIVE_CAP = 10 ether;
+
     /// @notice Circle CCTP TokenMessenger for burning/minting USDC cross-chain.
     ITokenMessenger public cctpMessenger;
 
@@ -140,6 +147,19 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
     error CctpNotConfigured();
     error CctpDomainNotConfigured(uint32 eid);
     error UsdcRotationWithPendingOps(uint256 pending);
+    /// @dev F-3: serving this op would leave the gateway unable to cover the
+    ///      USDC still earmarked for the OTHER pending ops.
+    error EarmarkUnderfunded(uint256 available, uint256 earmarked);
+    /// @dev F-15: a zero-amount value op is indistinguishable from an absent
+    ///      record for every downstream reader; refuse it at the door.
+    error ZeroBridgedAmount();
+    /// @dev F-16: authenticated payload whose version byte this gateway does
+    ///      not implement. Reverting keeps the LZ message replayable.
+    error UnsupportedPayloadVersion(uint8 version);
+    /// @dev F-2: attested DVN quorum below the protocol floor.
+    error DvnQuorumBelowMinimum(uint8 requested);
+    /// @dev F-18: requested fee ceiling above the hard-coded cap.
+    error MaxOpServiceFeeAboveCap(uint256 requested);
 
     /// @notice Canonical human guardian (back-compat view). Kept in sync with
     ///         {isPauser} by {setPauseGuardian}. Prefer {addPauser}/{removePauser}.
@@ -161,6 +181,14 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
     event ServiceFeeCollected(address indexed caller, OpType indexed op, uint256 amount);
     event ValueOpPending(bytes32 indexed guid, OpType indexed op, address indexed caller, address token, uint256 amount);
     event ValueOpFulfilled(bytes32 indexed guid, OpType indexed op, address indexed caller);
+    /// @notice F-17: a pending op was dropped by the owner WITHOUT running a
+    ///         module and WITHOUT reimbursing anyone. Distinct from
+    ///         {ValueOpFulfilled} precisely because an indexer must not book it
+    ///         as accomplished — `amount` is a debt owed to `caller`.
+    event ValueOpCleared(bytes32 indexed guid, OpType indexed op, address indexed caller, uint256 amount);
+    /// @notice F-3: a pending op was cancelled by the owner and its bridged
+    ///         amount returned to `caller` in `token` on this chain.
+    event ValueOpRefunded(bytes32 indexed guid, OpType indexed op, address indexed caller, address token, uint256 amount);
     event CctpConfigUpdated(address messenger, uint32 localDomain);
     event UsdcSet(address indexed usdc);
     event EidCctpDomainSet(uint32 indexed eid, uint32 indexed cctpDomain);
@@ -353,27 +381,33 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
     ///         2026-05-25 SC01 MEDIUM — acknowledged, behaviour intentional.)
     function fulfillValueOp(bytes32 _guid) external override nonReentrant whenNotPaused {
         PendingValueOp memory p = pendingValueOps[_guid];
-        require(p.bridgedAmount > 0, "MagnetaGateway: no pending op");
+        // F-15: `createdAt` is the existence marker. `bridgedAmount > 0` was
+        // one, which made a zero-amount record permanently unerasable.
+        if (p.createdAt == 0) revert NoPendingOp();
 
-        // F38: PER-OP arrival check (was global `available >= totalEarmarked`).
+        // F-3: EARMARK-PRESERVING arrival check (reverts F38's per-op check).
         //
-        // The old global check required EVERY pending op's bridged USDC to have
-        // landed before ANY op could be fulfilled, so one stuck/delayed CCTP
-        // transfer (or an attacker queuing a large op that never settles, which
-        // inflates totalEarmarked) blocked every other op whose own funds had
-        // already arrived — a liveness DoS.
+        // F38 weakened this to `available >= p.bridgedAmount` for liveness. The
+        // cost was that the gateway's USDC became one fungible unattributed
+        // pool: op A could be served with the USDC that CCTP minted for op B,
+        // after which B reverted "tokens not arrived" although ITS funds had in
+        // fact landed. A lost CCTP leg was thereby socialised onto whichever
+        // innocent op happened to be last in the queue.
         //
-        // Instead, an op is fulfillable as soon as ITS OWN bridgedAmount is
-        // present in the gateway. Double-spend across concurrent ready ops is
-        // still impossible: fulfilling this op pulls its USDC out of the gateway
-        // in THIS same transaction (forceApprove + module.execute below), and we
-        // decrement totalEarmarked before the external call (CEI). So if two ops
-        // of 100 each share only 100 arrived USDC, the first to fulfill drains
-        // the balance to 0 and the second reverts here until its own funds land.
-        // totalEarmarked is retained purely as the rescue/accounting bound (see
-        // rescueERC20) — it no longer gates fulfillment.
+        // Safety is chosen over liveness here: after serving this op the
+        // remaining balance must still cover the earmarks of the ops that
+        // remain. Since `totalEarmarked >= p.bridgedAmount`, that reduces to
+        // `available >= totalEarmarked` — every pending op's funds must be
+        // present, so no op can ever spend another's.
+        //
+        // The liveness hole F38 complained about (one stuck leg freezing all
+        // the others) is closed administratively instead of by weakening the
+        // accounting: see {adminRefundPendingValueOp}, which cancels the stuck
+        // op AND pays its caller back, dropping totalEarmarked to a level the
+        // arrived funds do cover. The loss then lands on the operator, who
+        // controls the bridge, rather than on an unrelated user.
         uint256 available = IERC20(p.bridgedToken).balanceOf(address(this));
-        require(available >= p.bridgedAmount, "MagnetaGateway: tokens not arrived");
+        if (available < totalEarmarked) revert EarmarkUnderfunded(available, totalEarmarked);
 
         address module = _modules[p.op];
         if (module == address(0)) revert ModuleNotSet(p.op);
@@ -624,6 +658,14 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
              /* address payloadBridgedToken */, uint256 bridgedAmount) =
                 abi.decode(_payload, (uint8, OpType, address, bytes, address, uint256));
 
+            // F-15: a zero-amount record used to be accepted, counted in
+            // pendingValueOpCount, and then rejected by BOTH exits (which
+            // tested `bridgedAmount > 0` for existence) — permanently
+            // unerasable even by the owner, so `setUsdc` reverted forever.
+            // Reverting here rolls back `processedGuid[_guid]` too, so the
+            // message stays replayable rather than being silently burned.
+            if (bridgedAmount == 0) revert ZeroBridgedAmount();
+
             pendingValueOpCount += 1;
             pendingValueOps[_guid] = PendingValueOp({
                 op: op,
@@ -636,6 +678,15 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
             totalEarmarked += bridgedAmount;
 
             emit ValueOpPending(_guid, op, caller, address(usdc), bridgedAmount);
+
+        } else {
+            // F-16: `processedGuid[_guid]` is written BEFORE this dispatch, so
+            // falling through without an `else` consumed the LZ message for
+            // good while executing and recording nothing — an authenticated
+            // payload from a newer sibling gateway would vanish in silence.
+            // Reverting rolls that write back and leaves the message replayable
+            // once this gateway is upgraded to understand the version.
+            revert UnsupportedPayloadVersion(version);
         }
     }
 
@@ -667,8 +718,28 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
         return _requiredDVNCount;
     }
 
-    /// @inheritdoc IMagnetaGateway
+    /// @notice Protocol floor for the attested DVN quorum. Six modules assert
+    ///         `gateway.requiredDVNCount() >= 2` (their own `MIN_DVN_QUORUM`),
+    ///         so 0 and 1 were values the owner could set only to invalidate
+    ///         every one of those assertions at once.
+    uint8 public constant MIN_ATTESTED_DVN_COUNT = 2;
+
+    /// @notice Set the attested DVN quorum floor. Owner-only, minimum 2.
+    /// @dev    HONEST SCOPE (F-2): this is an OPERATOR ATTESTATION and nothing
+    ///         more. It does not read, verify or constrain the actual
+    ///         LayerZero ULN configuration — a gateway wired to a single DVN
+    ///         can still be attested at 2 here, and this setter cannot detect
+    ///         it. The real receive-DVN quorum is configured out-of-band via
+    ///         the Safe batches in `scripts/safe/2dvn-*.json`; this value must
+    ///         be updated to match after any such change, and downgrading it
+    ///         also requires redeploying every module that asserts >= 2.
+    ///
+    ///         The minimum enforced below therefore buys exactly one thing:
+    ///         the owner can no longer silently retract the attestation that
+    ///         the modules were deployed against. It is NOT evidence that two
+    ///         DVNs are live.
     function setRequiredDVNCount(uint8 newCount) external override onlyOwner {
+        if (newCount < MIN_ATTESTED_DVN_COUNT) revert DvnQuorumBelowMinimum(newCount);
         uint8 previous = _requiredDVNCount;
         _requiredDVNCount = newCount;
         emit RequiredDVNCountSet(previous, newCount);
@@ -743,9 +814,30 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
     }
 
     /// @notice Owner (Safe) sets the upper bound for {setOpServiceFeeNative}.
-    ///         Lowering it does not retroactively change fees already set.
+    /// @dev    F-18. Two defects made the old "fat-finger guard" cosmetic:
+    ///         the bound itself was unbounded (the owner could raise it to
+    ///         type(uint256).max and then charge that), and lowering it left
+    ///         every already-configured higher fee live, so the ceiling never
+    ///         actually described what users could be charged.
+    ///
+    ///         Now the ceiling is itself capped by {MAX_OP_SERVICE_FEE_NATIVE_CAP},
+    ///         and lowering it clamps the fees that exceed it in the same call.
+    ///         The clamp loop is bounded by the OpType enum, whose length is
+    ///         derived rather than hard-coded — appending an op (the enum is
+    ///         append-only) keeps this exhaustive with no edit here.
     function setMaxOpServiceFeeNative(uint256 maxFee) external onlyOwner {
+        if (maxFee > MAX_OP_SERVICE_FEE_NATIVE_CAP) revert MaxOpServiceFeeAboveCap(maxFee);
         maxOpServiceFeeNative = maxFee;
+
+        uint256 n = uint256(type(OpType).max) + 1;
+        for (uint256 i; i < n; ++i) {
+            OpType op = OpType(i);
+            if (opServiceFeeNative[op] > maxFee) {
+                opServiceFeeNative[op] = maxFee;
+                emit OpServiceFeeNativeUpdated(op, maxFee);
+            }
+        }
+
         emit MaxOpServiceFeeNativeUpdated(maxFee);
     }
 
@@ -869,10 +961,15 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
     function _collectCrossChainFee(uint256 valueUsdc6d, uint256 nDestinations) internal {
         require(address(usdc) != address(0), "MagnetaGateway: usdc not set");
 
+        // F-13: the mode is decided by `valueUsdc6d` ALONE. The old chain
+        // folded the rate into the mode test (`valueUsdc6d > 0 && bps > 0`),
+        // so setting the value fee to zero did not zero the charge on a value
+        // op — it fell through to the command branch and billed
+        // `crossChainCommandFee * nDestinations` instead.
         uint256 fee;
-        if (valueUsdc6d > 0 && crossChainValueFeeBps > 0) {
+        if (valueUsdc6d > 0) {
             fee = (valueUsdc6d * crossChainValueFeeBps) / 10_000;
-        } else if (crossChainCommandFee > 0) {
+        } else {
             // MG-3: command fee is per destination, not flat per call.
             fee = crossChainCommandFee * nDestinations;
         }
@@ -885,17 +982,64 @@ contract MagnetaGateway is IMagnetaGateway, OApp, Ownable2Step, ReentrancyGuard,
     /// @notice Owner-only escape hatch for a pending value op that can never
     ///         be fulfilled (e.g. CCTP attestation lost; module misconfigured
     ///         when the op was queued; pre-MG-7 ops with the wrong bridgedToken).
-    /// @dev    Clears the pending op and decrements totalEarmarked, freeing
-    ///         the corresponding USDC for rescueERC20. Does NOT refund the
-    ///         caller directly — the operator is expected to reimburse off-
-    ///         chain (or use rescueERC20 to send the USDC back).
+    /// @dev    Clears the pending op and decrements totalEarmarked, freeing the
+    ///         corresponding USDC for rescueERC20. Does NOT refund the caller —
+    ///         the debt is settled off-chain. Prefer
+    ///         {adminRefundPendingValueOp}, which settles it on-chain; this
+    ///         variant exists for the case where the funds genuinely never
+    ///         arrived and the operator reimburses by another route.
+    ///
+    ///         F-17: emits {ValueOpCleared}, NOT {ValueOpFulfilled}. It used to
+    ///         emit the latter — the exact event of a real execution — so an
+    ///         indexer booked as accomplished an op for which no module ran and
+    ///         nobody was paid.
     function adminClearPendingValueOp(bytes32 guid) external onlyOwner {
         PendingValueOp memory p = pendingValueOps[guid];
-        require(p.bridgedAmount > 0, "MagnetaGateway: no pending op");
+        // F-15: existence is `createdAt != 0`, not `bridgedAmount > 0`.
+        if (p.createdAt == 0) revert NoPendingOp();
         totalEarmarked -= p.bridgedAmount;
         delete pendingValueOps[guid];
         pendingValueOpCount -= 1;
-        emit ValueOpFulfilled(guid, p.op, p.caller);
+        emit ValueOpCleared(guid, p.op, p.caller, p.bridgedAmount);
+    }
+
+    /// @notice Owner-only: cancel a pending value op AND return its bridged
+    ///         amount to the caller, on-chain, in the op's bridged token.
+    /// @dev    F-3's liveness counterpart. {fulfillValueOp} now refuses to
+    ///         serve an op unless the gateway can still cover every remaining
+    ///         earmark, so a permanently stuck leg would otherwise freeze the
+    ///         whole queue — the objection F38 raised when it removed that
+    ///         check. This is the exit that keeps safety without the freeze:
+    ///         cancelling the stuck op drops totalEarmarked back to a level the
+    ///         funds that DID arrive can cover, and the other ops proceed.
+    ///
+    ///         Before this existed the operator could not settle anything
+    ///         on-chain: {adminClearPendingValueOp} pays nothing, and
+    ///         {rescueERC20} is blocked by its own earmark guard for as long as
+    ///         the balance sits below totalEarmarked — which is exactly the
+    ///         situation a lost CCTP leg creates.
+    ///
+    ///         THE TRANSFER IS NOT OPTIONAL. If the gateway does not hold the
+    ///         amount, this reverts, and the operator must top the gateway up
+    ///         out of treasury first. That is the intended incentive: the party
+    ///         that controls the bridge absorbs a bridge loss, instead of it
+    ///         being socialised onto whichever user's op was served last.
+    ///
+    ///         CAVEAT: `caller` is the address that sent the op on the ORIGIN
+    ///         chain, replayed verbatim here. For an EOA that is the same
+    ///         party; for a contract caller the same address on THIS chain may
+    ///         be a different (or unowned) account. Verify the recipient before
+    ///         refunding a contract-initiated op.
+    function adminRefundPendingValueOp(bytes32 guid) external onlyOwner nonReentrant {
+        PendingValueOp memory p = pendingValueOps[guid];
+        if (p.createdAt == 0) revert NoPendingOp();
+
+        totalEarmarked -= p.bridgedAmount;
+        delete pendingValueOps[guid];
+        pendingValueOpCount -= 1;
+
+        IERC20(p.bridgedToken).safeTransfer(p.caller, p.bridgedAmount);
+        emit ValueOpRefunded(guid, p.op, p.caller, p.bridgedToken, p.bridgedAmount);
     }
 
     /// @dev Override OAppSender._payNative to relax the default strict

@@ -81,6 +81,18 @@ contract MockV2Router {
         IERC20(path[path.length - 1]).safeTransfer(to, msg.value);
     }
 
+    /// @dev Quotes the same 1:1 rate the swap functions settle at, so a caller
+    ///      that derives a slippage floor from the quote can actually clear it.
+    function getAmountsOut(uint amountIn, address[] calldata path)
+        external
+        pure
+        returns (uint[] memory amounts)
+    {
+        amounts = new uint[](path.length);
+        amounts[0] = amountIn;
+        amounts[path.length - 1] = amountIn;
+    }
+
     function swapExactTokensForTokens(
         uint amountIn,
         uint /*amountOutMin*/,

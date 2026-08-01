@@ -77,25 +77,51 @@ async function main() {
   }
 
   const depositAmt = 100_000_000n; // 100 USDC (6 dec)
+  // Assert the DELTA, not the absolute balance: this smoke runs against a
+  // long-lived testnet reserve that already holds deposits from earlier runs.
+  const collBefore = await lending.getUserCollateral(deployer.address, usdcAddr);
+  const suppliedBefore = await lending.getTotalSupplied(usdcAddr);
+
   await (await usdc.mint(deployer.address, depositAmt)).wait();
   await (await usdc.approve(await lending.getAddress(), depositAmt)).wait();
   await (await lending.deposit(usdcAddr, depositAmt)).wait();
 
-  const coll = await lending.getUserCollateral(deployer.address, usdcAddr);
-  const totalSupplied = await lending.getTotalSupplied(usdcAddr);
-  if (coll !== depositAmt || totalSupplied !== depositAmt) {
-    throw new Error(`Lending deposit mismatch: coll=${coll} total=${totalSupplied}`);
+  // Public Base Sepolia RPCs answer from a stale block for a few seconds after
+  // a tx, so the read right after `deposit` can still show the old value.
+  let coll = 0n;
+  let totalSupplied = 0n;
+  for (let i = 1; i <= 8; i++) {
+    coll = await lending.getUserCollateral(deployer.address, usdcAddr);
+    totalSupplied = await lending.getTotalSupplied(usdcAddr);
+    if (coll === collBefore + depositAmt && totalSupplied === suppliedBefore + depositAmt) break;
+    if (i === 8) {
+      throw new Error(
+        `Lending deposit mismatch: coll ${collBefore}→${coll}, total ${suppliedBefore}→${totalSupplied}, expected +${depositAmt}`
+      );
+    }
+    await new Promise((r) => setTimeout(r, 5000));
   }
-  console.log(`  ✓ deposit 100 USDC → collateral=${coll} totalSupplied=${totalSupplied}`);
+  console.log(`  ✓ deposit 100 USDC → collateral +${coll - collBefore} totalSupplied +${totalSupplied - suppliedBefore}`);
 
   const balBefore = await usdc.balanceOf(deployer.address);
   await (await lending.withdraw(usdcAddr, coll)).wait();
-  const balAfter = await usdc.balanceOf(deployer.address);
-  if (balAfter - balBefore !== depositAmt) {
-    throw new Error(`Lending withdraw mismatch: got ${balAfter - balBefore}`);
+
+  // The withdrawal empties the whole position, which may exceed this run's own
+  // deposit — earlier smoke runs leave collateral behind. Expect `coll` back.
+  let balAfter = balBefore;
+  let collAfter = coll;
+  for (let i = 1; i <= 8; i++) {
+    balAfter = await usdc.balanceOf(deployer.address);
+    collAfter = await lending.getUserCollateral(deployer.address, usdcAddr);
+    if (balAfter - balBefore === coll && collAfter === 0n) break;
+    if (i === 8) {
+      throw new Error(
+        `Lending withdraw mismatch: got ${balAfter - balBefore}, expected ${coll}; residual collateral ${collAfter}`
+      );
+    }
+    await new Promise((r) => setTimeout(r, 5000));
   }
-  const collAfter = await lending.getUserCollateral(deployer.address, usdcAddr);
-  console.log(`  ✓ full withdraw → +100 USDC back, residual collateral=${collAfter}`);
+  console.log(`  ✓ full withdraw → +${coll} USDC back, residual collateral=${collAfter}`);
 
   console.log(`\nSMOKE: ALL GREEN`);
 }

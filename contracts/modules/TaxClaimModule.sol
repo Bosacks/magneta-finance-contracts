@@ -63,13 +63,11 @@ contract TaxClaimModule is IModule, ReentrancyGuard, Ownable2Step {
     /// @notice Fraction of the router's own quote the swap must actually
     ///         return, in bps. 9700 = at most 3% slippage.
     ///
-    /// @dev    `minUsdc` is an ABSOLUTE $20 floor and bounds nothing
-    ///         proportionally: a claim worth $50,000 sandwiched down to $21
-    ///         passes it. That mattered because the client cannot compute a
-    ///         sensible `amountOutMin` — it cannot read this module's router,
-    ///         its path, or the fee amount before `withdrawFees()` runs — so
-    ///         the production UI hard-codes `amountOutMin: 0`. The bound has to
-    ///         live here or it does not exist.
+    /// @dev    Secondary bound only. `quoted` is read in the same transaction
+    ///         as the swap, so a sandwich moves both by the same factor and
+    ///         this ratio holds while the claim is drained. It catches a
+    ///         mispriced path or a thin pool, not an attacker. The bound that
+    ///         binds is `ClaimParams.amountOutMin`.
     uint16 public maxSlippageBps = 9_700;
 
     address public immutable gateway;
@@ -121,6 +119,8 @@ contract TaxClaimModule is IModule, ReentrancyGuard, Ownable2Step {
     event MaxSlippageUpdated(uint16 previous, uint16 current);
     event Rescued(address indexed token, address indexed to, uint256 amount);
     event CctpDomainUpdated(uint32 indexed domain, bool enabled);
+    event PermissionlessTokenRegistered(address indexed token, address indexed admin, address indexed by);
+    event MarketingWalletRepaired(address indexed token);
 
     error OnlyGateway();
     error NotRegistered();
@@ -131,6 +131,10 @@ contract TaxClaimModule is IModule, ReentrancyGuard, Ownable2Step {
     error BurnDidNotConsumeApproval();
     error NotAContract(address addr);
     error DomainNotEnabled(uint32 domain);
+    error ZeroAmountOutMin();
+    error CctpNotConfigured();
+    error MarketingWalletNotModule(address current);
+    error TokenOwnerUnusable(address tokenOwner);
 
     /// @notice Minimum attested DVN quorum the gateway must surface for this
     ///         module to wire up. Mitigates Kelp-DAO-class single-validator
@@ -152,12 +156,27 @@ contract TaxClaimModule is IModule, ReentrancyGuard, Ownable2Step {
 
     // ───────────────────── admin ─────────────────────
 
+    /// @notice Assert that the token's fee revenue actually lands on this
+    ///         module before anything is registered against it.
+    ///
+    /// @dev `MagnetaERC20OFT.withdrawFees()` (l.308-314) is `onlyOwner` and
+    ///      pays `marketingWallet != address(0) ? marketingWallet : owner()`.
+    ///      So an UNSET marketing wallet is safe — but only while this module
+    ///      is the owner, which is also the only way `withdrawFees()` is
+    ///      callable at all. Any other value routes the claim's proceeds to a
+    ///      third party; the swap and fee split downstream would still report
+    ///      success on whatever happened to be sitting here.
+    function _assertRevenueLandsHere(address token) private view {
+        address mw = IMagnetaManagedTokenTax(token).marketingWallet();
+        if (mw == address(this)) return;
+        if (mw == address(0) && IMagnetaManagedTokenTax(token).owner() == address(this)) return;
+        revert MarketingWalletNotModule(mw);
+    }
+
     /// @notice Register a token with this module as its revenue sink.
-    /// @dev Token owner must have set `marketingWallet` = address(this) so the
-    ///      fees withdrawn via token.withdrawFees() land here. Sentinelle
-    ///      MEDIUM SC01: hardened the auth check — soft self-attestation
-    ///      via marketingWallet replaced with an explicit owner /
-    ///      trusted-registrar gate.
+    /// @dev Reserved for factories and dispatchers, which know the creator's
+    ///      address before ownership settles. Prefer `registerByTokenOwner`:
+    ///      this path takes `admin` on trust from the registrar.
     function registerToken(address token, address admin) external {
         require(token != address(0) && admin != address(0), "zero address");
         require(tokenAdmin[token] == address(0), "already registered");
@@ -165,8 +184,46 @@ contract TaxClaimModule is IModule, ReentrancyGuard, Ownable2Step {
             msg.sender == owner() || trustedRegistrars[msg.sender],
             "not authorized"
         );
+        _assertRevenueLandsHere(token);
         tokenAdmin[token] = admin;
         emit TokenRegistered(token, admin);
+    }
+
+    /// @notice Permissionless registration that derives the admin from the
+    ///         token itself.
+    ///
+    /// @dev Front-running is pointless: the caller has no influence over which
+    ///      address is stored, only over when. Refused when `owner()` is this
+    ///      module, because the admin would then be an address no gateway
+    ///      `ctx.caller` can ever equal — a registration that bricks the token
+    ///      and only `unregisterToken` can undo. That configuration (module
+    ///      owns the token so it may call the `onlyOwner` `withdrawFees()`) is
+    ///      the one the header describes, so it is the normal case for a
+    ///      hand-managed token and must go through `registerToken`.
+    function registerByTokenOwner(address token) external nonReentrant {
+        require(token != address(0), "zero address");
+        require(tokenAdmin[token] == address(0), "already registered");
+        address admin = IMagnetaManagedTokenTax(token).owner();
+        if (admin == address(0) || admin == address(this)) revert TokenOwnerUnusable(admin);
+        _assertRevenueLandsHere(token);
+        tokenAdmin[token] = admin;
+        emit TokenRegistered(token, admin);
+        emit PermissionlessTokenRegistered(token, admin, msg.sender);
+    }
+
+    /// @notice Re-point a token's marketing wallet at this module.
+    ///
+    /// @dev Recovery path for a token whose ownership has already moved here
+    ///      with `marketingWallet` pointing somewhere else. `setMarketingWallet`
+    ///      is `onlyOwner` on the token, so once the module holds ownership no
+    ///      human can reach it and every future `withdrawFees()` pays the wrong
+    ///      address — permanently, and silently, since the claim still succeeds
+    ///      on this module's own balance.
+    function repairMarketingWallet(address token) external onlyOwner {
+        IMagnetaManagedTokenTax(token).setMarketingWallet(address(this));
+        address mw = IMagnetaManagedTokenTax(token).marketingWallet();
+        if (mw != address(this)) revert MarketingWalletNotModule(mw);
+        emit MarketingWalletRepaired(token);
     }
 
     /// @notice Owner-managed allow-list for `registerToken` callers. Wire
@@ -241,7 +298,17 @@ contract TaxClaimModule is IModule, ReentrancyGuard, Ownable2Step {
 
     struct ClaimParams {
         address token;
-        uint256 amountOutMin;    // USDC slippage floor the caller accepts
+        /// @dev USDC floor the caller accepts. Must be non-zero, and must be
+        ///      derived from a quote taken in an EARLIER block than the claim.
+        ///      The module's own `maxSlippageBps` bound cannot replace it: that
+        ///      quote is read inside this transaction, so a sandwich depresses
+        ///      the quote and the output together and the ratio between them
+        ///      survives untouched. A floor fixed before the transaction was
+        ///      broadcast does not move, so beating it requires holding the
+        ///      pool away from its real price from one block into the next —
+        ///      which an atomic sandwich, opening and closing inside a single
+        ///      block, cannot do.
+        uint256 amountOutMin;
         uint256 deadline;
         bool    bridgeToTreasury; // true = CCTP burn, false = keep on local chain
         /// @dev CCTP domain to receive the proceeds. The point of the bridge is
@@ -269,6 +336,7 @@ contract TaxClaimModule is IModule, ReentrancyGuard, Ownable2Step {
         require(msg.value == 0, "TaxClaim: no native value expected");
 
         ClaimParams memory p = abi.decode(params, (ClaimParams));
+        if (p.amountOutMin == 0) revert ZeroAmountOutMin();
         address admin = tokenAdmin[p.token];
         if (admin == address(0)) revert NotRegistered();
         if (ctx.caller != admin) revert NotAdmin();
@@ -290,38 +358,34 @@ contract TaxClaimModule is IModule, ReentrancyGuard, Ownable2Step {
         if (tokensWithdrawn == 0) revert NothingToClaim();
 
         // 2. Swap token → WETH → USDC on the local V2 router.
-        //
-        // Sentinelle HIGH SC02 — use the router's return value
-        // (`amounts[amounts.length - 1]`) as the authoritative swap
-        // output rather than the balanceOf delta. The delta pattern was
-        // safe here too (usdcBefore captures any donation) but the return
-        // value is cleaner and matches the SwapModule pattern. Donation
-        // USDC is invisible to the fee/bridge math either way.
         IERC20(p.token).forceApprove(router, tokensWithdrawn);
         address[] memory path = new address[](3);
         path[0] = p.token;
         path[1] = IV2RouterSwapper(router).WETH();
         path[2] = usdc;
 
-        // Proportional floor derived from the router's OWN quote, taken in the
-        // same call. The caller's `amountOutMin` still applies when it is
-        // stricter; it is never allowed to be laxer than this bound.
         uint256 quoted = IV2RouterSwapper(router).getAmountsOut(tokensWithdrawn, path)[path.length - 1];
         uint256 floorOut = (quoted * maxSlippageBps) / 10_000;
         if (p.amountOutMin > floorOut) floorOut = p.amountOutMin;
 
-        uint256[] memory amounts = IV2RouterSwapper(router).swapExactTokensForTokens(
+        uint256 usdcBefore = IERC20(usdc).balanceOf(address(this));
+        IV2RouterSwapper(router).swapExactTokensForTokens(
             tokensWithdrawn,
             floorOut,
             path,
             address(this),
             p.deadline
         );
-        uint256 usdcGross = amounts[amounts.length - 1];
+        // Everything downstream — fee split, payout, CCTP burn — is sized off
+        // this delta, never off the router's return value: a router is free to
+        // report an output it did not transfer, and `usdcBefore` also excludes
+        // any USDC donated to this module beforehand.
+        uint256 usdcGross = IERC20(usdc).balanceOf(address(this)) - usdcBefore;
 
-        // The router already enforced `floorOut`, but a non-standard router
-        // could report an output it did not deliver. Assert against the balance
-        // actually gained rather than trusting the return value alone.
+        // A router that consumed less than it was approved leaves a standing
+        // allowance on this module's token balance.
+        IERC20(p.token).forceApprove(router, 0);
+
         if (usdcGross < floorOut) revert SlippageExceeded(usdcGross, floorOut);
 
         // 3. Enforce $20 threshold.
@@ -336,7 +400,13 @@ contract TaxClaimModule is IModule, ReentrancyGuard, Ownable2Step {
         }
 
         bool bridged = false;
-        if (p.bridgeToTreasury && cctpMessenger != address(0)) {
+        if (p.bridgeToTreasury) {
+            // An unconfigured messenger used to fall through to the local
+            // payout: the admin asked for delivery on another chain, got the
+            // funds here, and nothing in the receipt said so beyond a `bridged`
+            // flag nobody reads. Misconfiguration is not a payout mode.
+            if (cctpMessenger == address(0)) revert CctpNotConfigured();
+
             // Mint to the ADMIN on the destination domain, not to a global
             // recipient. `adminNet` is the token owner's revenue — the
             // protocol's cut is `magnetaFee`, already sent above. Burning the

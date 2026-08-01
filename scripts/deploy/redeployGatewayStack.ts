@@ -74,6 +74,29 @@ async function main() {
   const gatewayAddr = await gateway.getAddress();
   console.log(`   ✓ MagnetaGateway: ${gatewayAddr}`);
 
+  // Every module constructor asserts `gateway.requiredDVNCount() >= 2`, and a
+  // fresh Gateway starts at 0 — so this has to happen before step 2 or every
+  // module deploy reverts with "DVN quorum". deployAll.ts and
+  // redeployGatewayWave.ts already did this; this script never did.
+  // Public Base Sepolia RPCs serve a stale block right after a deploy, so the
+  // first read of a just-deployed contract can come back empty.
+  const readRetry = async <T>(fn: () => Promise<T>, label: string): Promise<T> => {
+    for (let i = 1; i <= 8; i++) {
+      try { return await fn(); }
+      catch (e) {
+        if (i === 8) throw e;
+        console.log(`   ${label} read lagging (${i}/8), waiting 5s…`);
+        await new Promise((r) => setTimeout(r, 5000));
+      }
+    }
+    throw new Error("unreachable");
+  };
+
+  if ((await readRetry(() => gateway.requiredDVNCount(), "requiredDVNCount")) < 2) {
+    await (await gateway.setRequiredDVNCount(2)).wait();
+    console.log("   ✓ requiredDVNCount: 2");
+  }
+
   // ─── 2. Deploy modules pointing to new Gateway ────────────────────────
   console.log("\n── 2. Deploy modules ──");
 
