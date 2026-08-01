@@ -11,7 +11,8 @@
 - Découverte : PromotionPayment fantôme sur Optimism (`0x414dC3f0…a504`, hors manifestes post-redeploy) — VIDE (0 ETH) mais codes 1-6 ENCORE PAYANTS (0,01-0,06 ETH) pour une feature que l'indexeur n'honore plus ; bytecode = version pré-pull-payment (sélecteurs vérifiés on-chain)
 - Lot Safe de décommission écrit : `scripts/safe/optimism-promotionPayment-DECOMMISSION-batch.json` (1 tx `setPricesBatch([1..6],[0×6])`, réversible) — à signer avec le lot Gnosis
 - Groupe `06-post-remediation-diff` ajouté à scope.json (rapport 19 recommandé AVANT la vague mainnet : Gateway+LPModule+TaxClaim+TokenCreation, modifiés après les rescans 15/16)
-- Découverte : le repo GitHub `Bosacks/Testsites` existe mais est VIDE — le dépôt maison `/home/dominique` (77 commits) reste sans copie hors-disque ; remote+push préparés, bloqués par le classifieur, commandes remises à Dominique
+- Repo GitHub `Bosacks/Testsites` : existait mais VIDE — Dominique a poussé le dépôt maison (77 commits, tip 8fc67e63 vérifié) ; risque sauvegarde CLOS
+- Décommission GNOSIS exécutée par Dominique : keeper XChainLpReceiver = 0xdEaD **vérifié on-chain** ; le lot OPTIMISM (PromotionPayment) reste À EXÉCUTER (prix 1-6 vérifiés encore vivants sur 2 RPC)
 
 ## 2026-07-31 — Rapport 18, durcissement Bex, décommissionnement Gnosis
 
