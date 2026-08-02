@@ -1,0 +1,33 @@
+{
+  "version": "1.0",
+  "chainId": "43114",
+  "createdAt": 1785682656525,
+  "meta": {
+    "name": "Magneta \u2014 grant sentinel pauser on avalanche",
+    "description": "Register the Sentinelle circuit-breaker address 0x46D838E6C269c458c8017CC04C8015CbAf78DB8a as a pauser on the MagnetaGateway at 0x4d1862859542db8082Ed83AA67508eC7eE753189. The breaker trips only on three deterministic conditions (owner is no longer the Safe, a registered module falls outside the signed manifest, or a watched contract's runtime bytecode changes) and can call nothing but pause(). Blast radius is bounded by the contract itself: pause() is open to a pauser but unpause() is onlyOwner, so a stolen breaker key can only halt the protocol \u2014 never reopen it, never move funds. Revoke at any time with removePauser.",
+    "txBuilderVersion": "1.17.0",
+    "createdFromSafeAddress": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a",
+    "createdFromOwnerAddress": ""
+  },
+  "transactions": [
+    {
+      "to": "0x4d1862859542db8082Ed83AA67508eC7eE753189",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [
+          {
+            "internalType": "address",
+            "name": "account",
+            "type": "address"
+          }
+        ],
+        "name": "addPauser",
+        "payable": false
+      },
+      "contractInputsValues": {
+        "account": "0x46D838E6C269c458c8017CC04C8015CbAf78DB8a"
+      }
+    }
+  ]
+}
