@@ -1,3 +1,15 @@
+## 2026-08-02 — Audit économique des 4 moteurs de liquidité + DLMM fermée sur 20 chaînes
+
+- Audit économique (3 agents, périmètres disjoints, chaque finding porteur revérifié par moi dans le code et on-chain) : courbe, MagnetaPool/Swap, MultiPool, adaptateurs
+- **CRITICAL courbe** : `finalizeGraduation` passé 7 jours met `amountTokenMin` ET `amountETHMin` à **0** (l.423-425) → dépôt V2 au ratio d'une paire amorçable à la poussière. Reproduit : +148,5 ETH pour 1 ETH engagé, ou 149,5 ETH balayés vers le feeVault (l.452)
+- Aggravant STRUCTUREL : la bande compare au prix terminal `nativeRaised/tokensSold` alors que les mins dérivent de `nativeRaised` sur `totalSupply−curveAllocation` → **deux ratios incompatibles, le chemin honnête est inatteignable** ; le délai de 7 j n'est pas un filet, c'est la porte
+- Le test `H-1` du dépôt EXÉCUTE cette attaque et la déclare réussie (n'assère qu'un événement, jamais un solde)
+- **Correctif adaptateurs jamais déployé** : `pullMeasured` (f401f9a, 27/07) fait 2 `balanceOf` — absents du bytecode vivant sur sei/avalanche, manifestes du 21/07. 3e occurrence du jour d'un correctif mergé qui n'atteint pas la chaîne
+- MagnetaPool : frais 0,3 % contournables (`swap` sans restriction d'appelant), pas de plafond d'impact. **Sa math est saine** — le défaut est l'emplacement des frais, pas le modèle. MultiPool non déployé
+- **Tout est latent** : 0 pool AMM sur 5 chaînes, 0 courbe, 0 pool DLMM
+- ⛔ **20/20 MagnetaFactory PAUSÉES** (vérifié on-chain) — `createDLMMPool` était ouverte sur 20 chaînes, pas 3. Aucun lot Safe requis (guardian déjà pauser), coût produit nul (le site n'appelle pas la factory)
+- Marge EIP-170 mesurée AVANT d'écrire le correctif : CurveFactory 19 274 o, marge 5 302 — la refonte a la place
+
 # Journal — magneta-finance-contracts
 
 > Fil chronologique des sessions. Anti-chronologique (plus récent en haut).
