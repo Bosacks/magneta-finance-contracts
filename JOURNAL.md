@@ -3,6 +3,17 @@
 > Fil chronologique des sessions. Anti-chronologique (plus récent en haut).
 > Voir `~/CLAUDE.md` pour la règle d'édition.
 
+## 2026-08-01 — 19:59 — Rapport 19 remédié + vague Base Sepolia (a5db67e)
+
+- 16 findings corrigés en 4 périmètres disjoints : TaxClaim (plancher de slippage réel + delta de solde au lieu du retour routeur + reset d'allowance + revert au lieu du paiement local + `registerToken` vérifié avec chemin de réparation), Gateway (earmarks préservés + `adminRefundPendingValueOp` + montant nul rejeté + version inconnue rejetée + plancher DVN + plafond de frais), TokenCreation (nonce local), LPModule (code mort + tokenSource)
+- Arbitrage F-3 : **sûreté > vivacité** — une op n'est servie que si le solde restant couvre tous les autres engagements ; la vivacité revient par le remboursement admin, qui fait porter la perte du bridge à l'opérateur et non à un tiers
+- Suites : forge **367/367**, hardhat racine **513/513**, tokens **189/189**
+- 2 tests épinglaient le bug F-12 (« le second appel local reverte toujours ») → récrits après avoir vérifié que le rejeu sur GUID reste couvert ailleurs
+- 8 échecs hardhat étaient **pré-existants et invisibles** : le commit permit du 31/07 a ajouté un champ à `CreateLPParams`, et `MockV2Router` n'implémentait pas `getAmountsOut` que le durcissement TaxClaim appelle — la remédiation 15-18 a été mergée avec une suite rouge
+- **DÉCOUVERTE : `MagnetaFactory` = 27 132 o > EIP-170.** Elle embarque `new MagnetaDLMM(...)` : mon correctif CRITICAL DLMM du 31/07 l'a fait dépasser → **le fix DLMM est INDÉPLOYABLE**. Base Sepolia sert encore 20 518 o (version d'avant). Remède = déployeur séparé, comme la factory de tokens
+- Base Sepolia redéployé en bloc : Gateway `0xec7beC25`, LPModule `0x87B6c972`, SwapModule `0x016f4409`, TokenOpsModule `0x402f6a8D`, TaxClaim `0x2e7732Bd` ; sélecteurs neufs vérifiés on-chain, `setRequiredDVNCount(1)` rejeté par ma garde (0x4345069c), smoke **ALL GREEN**
+- 2 défauts de scripts corrigés, vus seulement en réel : `redeployGatewayStack.ts` ne réglait jamais le quorum DVN (tout module revertait) ; le smoke lisait des blocs rassis et n'était jouable qu'une fois (assertions passées en deltas)
+
 ## 2026-08-01 — 18:05 — Rapport 19 dépouillé : 16 findings réels sur 22, mainnet tourne du pré-audit
 
 - Rapport 19 (panel, groupe 06) : 22 findings, 1 CRITICAL + 7 HIGH. Triage : **16 RÉELS, 4 faux positifs, 2 atténués** — chacun revérifié à la main ou on-chain, jamais sur la foi du rapport
