@@ -1,0 +1,94 @@
+{
+  "version": "1.0",
+  "chainId": "8453",
+  "createdAt": 1785782186994,
+  "meta": {
+    "name": "Magneta \u2014 Base cutover: accept ownership of the new stack",
+    "description": "Accept ownership of the Gateway and its four modules redeployed on 2026-08-03 with the report 13-21 hardening, and re-grant the MagnetaSwap fee exemption to the new LPModule. Ownable2Step: the deployer has already called transferOwnership, so this Safe accepting is the second half \u2014 until it runs the deployer still owns them. Fees were restored to the exact pre-existing schedule before this batch (17/17 verified on chain across three RPCs); accepting ownership does not change them. MagnetaFactory is deliberately NOT in this batch: it is above the EIP-170 limit and could not be redeployed, so the paused one stays in place.",
+    "txBuilderVersion": "1.17.0",
+    "createdFromSafeAddress": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a",
+    "createdFromOwnerAddress": ""
+  },
+  "transactions": [
+    {
+      "to": "0x85796D9Bc7f11AaCc7C214992f92fc0FC6126eD4",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [
+          {
+            "internalType": "address",
+            "name": "account",
+            "type": "address"
+          },
+          {
+            "internalType": "bool",
+            "name": "exempt",
+            "type": "bool"
+          }
+        ],
+        "name": "setFeeExempt",
+        "payable": false
+      },
+      "contractInputsValues": {
+        "account": "0xAD3bB9f20eC820fAc01B7259F6FAdD791fDBcA64",
+        "exempt": "true"
+      }
+    },
+    {
+      "to": "0x6BBFbC488a93A19179b34aC3A57977C343eeA5c1",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [],
+        "name": "acceptOwnership",
+        "payable": false
+      },
+      "contractInputsValues": {}
+    },
+    {
+      "to": "0xAD3bB9f20eC820fAc01B7259F6FAdD791fDBcA64",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [],
+        "name": "acceptOwnership",
+        "payable": false
+      },
+      "contractInputsValues": {}
+    },
+    {
+      "to": "0xF2043F5eDe70de75cBB1461CC2C9C142D4Ac217b",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [],
+        "name": "acceptOwnership",
+        "payable": false
+      },
+      "contractInputsValues": {}
+    },
+    {
+      "to": "0x647Ba6efa1871D1A5e65ec1946306503488A7F12",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [],
+        "name": "acceptOwnership",
+        "payable": false
+      },
+      "contractInputsValues": {}
+    },
+    {
+      "to": "0x1a033eC618Ec03211559D08FC184743Ca9F4291F",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [],
+        "name": "acceptOwnership",
+        "payable": false
+      },
+      "contractInputsValues": {}
+    }
+  ]
+}
