@@ -30,8 +30,11 @@ describe("MagnetaStakingRewards", function () {
     // Fund the user with staking tokens.
     await stakingToken.transfer(user.address, ethers.parseEther("1000"));
 
-    // Fund the pool with reward tokens for payouts.
-    await rewardsToken.transfer(await staking.getAddress(), REWARD_FUND);
+    // Approve the pool to PULL its reward funding. notifyRewardAmount pulls
+    // rather than trusting a prior transfer, so that a creator cannot promise
+    // rewards backed by someone else's donation — these pools are funded by
+    // whoever created them, not by an operator who knows the convention.
+    await rewardsToken.approve(await staking.getAddress(), REWARD_FUND * 20n);
   });
 
   describe("Deployment", function () {
@@ -134,11 +137,27 @@ describe("MagnetaStakingRewards", function () {
       expect(await staking.periodFinish()).to.be.gt(0);
     });
 
-    it("reverts when the reward exceeds the funded balance", async function () {
-      // Contract holds REWARD_FUND; ask for far more than that.
+    it("cannot promise a reward the owner cannot actually fund", async function () {
+      // Under the pull model, over-promising is not caught by a balance check
+      // after the fact — it is impossible, because the tokens have to arrive.
+      // Ask for more than the owner holds and the pull itself fails.
+      const ownerBalance = await rewardsToken.balanceOf(owner.address);
+      await rewardsToken.approve(await staking.getAddress(), ownerBalance * 2n);
       await expect(
-        staking.notifyRewardAmount(REWARD_FUND * 10n)
-      ).to.be.revertedWith("reward > balance");
+        staking.notifyRewardAmount(ownerBalance + 1n)
+      ).to.be.reverted;
+    });
+
+    it("ignores a donation: the stream tracks what was pulled, not the balance", async function () {
+      // The Venus pattern. A stranger donating to the pool must not let the
+      // owner stream rewards they never funded.
+      await rewardsToken.transfer(await staking.getAddress(), REWARD_FUND * 5n);
+
+      const funded = ethers.parseEther("3000");
+      await staking.notifyRewardAmount(funded);
+
+      const duration = await staking.rewardsDuration();
+      expect(await staking.rewardRate()).to.equal(funded / duration);
     });
 
     it("is owner-only", async function () {

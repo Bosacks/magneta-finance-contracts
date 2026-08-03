@@ -217,27 +217,56 @@ contract MagnetaStakingRewards is Ownable2Step, ReentrancyGuard, Pausable {
     // ─── Owner functions ──────────────────────────────────────────────────
 
     /**
-     * @notice Top up the reward pool. Caller must have transferred at least
-     *         `reward` rewardsToken to this contract before calling. The new
-     *         reward streams over `rewardsDuration` from now; if the previous
-     *         period hasn't finished, its remaining rewards are added in.
+     * @notice Top up the reward pool. The caller approves `reward` and this
+     *         function PULLS it. The new reward streams over `rewardsDuration`
+     *         from now; if the previous period hasn't finished, its remaining
+     *         rewards are added in.
+     *
+     * @dev It used to require the owner to transfer first and merely checked
+     *      `rewardsToken.balanceOf(this)` afterwards. That is the Synthetix
+     *      convention, and it is fine between operators — but these pools are
+     *      created by ordinary users who fund their own rewards, and it fails
+     *      them twice. A creator who calls this without transferring first
+     *      gets an opaque revert. Worse, since the check only looked at the
+     *      contract's BALANCE, a stranger's donation let a creator promise
+     *      rewards they never funded: the pool cannot tell "the owner paid"
+     *      from "someone else did".
+     *
+     *      Pulling makes the accounting true. The contract now counts what it
+     *      actually received, so donations sit inert instead of backing a
+     *      promise, and the funding is one visible step after the approval.
+     *
+     *      The received amount is measured across the transfer: a
+     *      fee-on-transfer reward token delivers less than requested, and
+     *      streaming the requested figure would promise more than the pool
+     *      holds. Same rule as stake().
      */
     function notifyRewardAmount(uint256 reward) external onlyOwner updateReward(address(0)) {
+        require(reward > 0, "zero reward");
+
+        uint256 balanceBefore = rewardsToken.balanceOf(address(this));
+        rewardsToken.safeTransferFrom(msg.sender, address(this), reward);
+        uint256 received = rewardsToken.balanceOf(address(this)) - balanceBefore;
+        require(received > 0, "nothing received");
+
         if (block.timestamp >= periodFinish) {
-            rewardRate = reward / rewardsDuration;
+            rewardRate = received / rewardsDuration;
         } else {
             uint256 remaining = periodFinish - block.timestamp;
             uint256 leftover  = remaining * rewardRate;
-            rewardRate = (reward + leftover) / rewardsDuration;
+            rewardRate = (received + leftover) / rewardsDuration;
         }
 
-        // Sanity check — owner must have actually funded the contract
+        // The pool must still hold everything it has now promised, including
+        // any unstreamed remainder of the previous period. Kept as a belt to
+        // the pull's braces: it also catches a rounding or duration change
+        // that would over-commit the balance.
         uint256 balance = rewardsToken.balanceOf(address(this));
         require(rewardRate <= balance / rewardsDuration, "reward > balance");
 
         lastUpdateTime = block.timestamp;
         periodFinish   = block.timestamp + rewardsDuration;
-        emit RewardAdded(reward, periodFinish);
+        emit RewardAdded(received, periodFinish);
     }
 
     /// @notice Change the period length. Only allowed when there's no active
