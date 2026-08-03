@@ -167,12 +167,21 @@ contract MagnetaStakingRewards is Ownable2Step, ReentrancyGuard, Pausable {
     ///         blocks new fund entry during an emergency pause. `withdraw`,
     ///         `getReward` and `exit` below are NOT paused, so stakers can
     ///         always leave and claim. See {pause}.
+    /// @dev Credits what ARRIVED, not what was asked for. Crediting `amount`
+    ///      before the transfer makes the accounting exceed the real balance
+    ///      for any fee-on-transfer token — and every Magneta launchpad token
+    ///      is taxed — so `_totalSupply` would outgrow what the contract holds
+    ///      and the last staker out could not be paid. Same defect class as the
+    ///      adapters' measured pull (AdapterPull.pullMeasured).
     function stake(uint256 amount) external nonReentrant whenNotPaused updateReward(msg.sender) {
         require(amount > 0, "zero amount");
-        _totalSupply += amount;
-        _balances[msg.sender] += amount;
+        uint256 balanceBefore = stakingToken.balanceOf(address(this));
         stakingToken.safeTransferFrom(msg.sender, address(this), amount);
-        emit Staked(msg.sender, amount);
+        uint256 received = stakingToken.balanceOf(address(this)) - balanceBefore;
+        require(received > 0, "nothing received");
+        _totalSupply += received;
+        _balances[msg.sender] += received;
+        emit Staked(msg.sender, received);
     }
 
     /// @notice Withdraw staked tokens. Deliberately NOT gated by
