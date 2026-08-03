@@ -170,6 +170,11 @@ contract MagnetaCurvePool is ReentrancyGuard {
     /// @notice Native (wei) set aside for refunds when refund mode opened —
     ///         a snapshot of `nativeRaised`. Frozen so a partially-drained pot
     ///         cannot reprice the holders who claim last.
+    /// @notice Block at which the destination pair was last observed out of
+    ///         band. Refund mode needs an observation strictly older than the
+    ///         block it is entered in, so the manipulation cannot be atomic.
+    uint256 public outOfBandFlaggedAt;
+
     uint256 public refundNativePot;
 
     /// @notice Tokens outstanding in holders' hands when refund mode opened —
@@ -206,6 +211,7 @@ contract MagnetaCurvePool is ReentrancyGuard {
     /// @notice Emitted when the launch is abandoned and holders may redeem.
     ///         `nativePot / tokenPot` is the fixed redemption price.
     event RefundModeEntered(address indexed pair, uint256 nativePot, uint256 tokenPot);
+    event PairFlaggedOutOfBand(uint256 blockNumber);
 
     /// @notice Emitted on each holder redemption in refund mode.
     event Refunded(address indexed holder, uint256 tokensBurned, uint256 nativeOut);
@@ -237,6 +243,11 @@ contract MagnetaCurvePool is ReentrancyGuard {
     ///         now (pair empty or already within band), so the launch is not
     ///         stuck and must not be torn down.
     error GraduationStillViable();
+    /// @dev Refund mode was requested without a prior out-of-band observation.
+    error PairNotFlagged();
+    /// @dev The out-of-band observation is from this block; it must be older so
+    ///      a repair has somewhere to happen.
+    error FlagTooRecent();
     error NotRefunding();
     error RefundTransferFailed();
 
@@ -526,6 +537,14 @@ contract MagnetaCurvePool is ReentrancyGuard {
             require(ok, "leftover native transfer failed");
         }
 
+        // Report 21: every wei counted by `nativeRaised` has just left — into
+        // the LP, or swept to the feeVault. Leaving the figure standing made
+        // `nativeReserve()` keep quoting a balance the pool no longer holds, so
+        // any integrator reading it after graduation was told a number that had
+        // stopped being true. Trading is closed by then, so nothing inside this
+        // contract acted on it; a getter that lies is a defect on its own.
+        nativeRaised = 0;
+
         emit Graduated(pair, usedNative, usedToken, lp);
     }
 
@@ -556,10 +575,35 @@ contract MagnetaCurvePool is ReentrancyGuard {
     ///         money goes back to the people who paid it.
     ///
     ///         One-way. Graduation is closed for good once this succeeds.
+    function flagPairOutOfBand() external nonReentrant {
+        if (!graduated) revert NotReadyToGraduate();
+        if (graduationFinalized) revert AlreadyFinalized();
+        if (block.timestamp <= graduatedAt + GRADUATION_RESCUE_DELAY) revert RescueDelayNotElapsed();
+
+        (, uint256 reserveNative, uint256 reserveToken) = _pairReserves();
+        if ((reserveNative | reserveToken) == 0) revert GraduationStillViable();
+        if (_withinBand(reserveNative, reserveToken, nativeRaised, totalSupplyToken - curveAllocation)) {
+            revert GraduationStillViable();
+        }
+
+        outOfBandFlaggedAt = block.number;
+        emit PairFlaggedOutOfBand(block.number);
+    }
+
     function enterRefundMode() external nonReentrant {
         if (!graduated) revert NotReadyToGraduate();
         if (graduationFinalized) revert AlreadyFinalized();
         if (block.timestamp <= graduatedAt + GRADUATION_RESCUE_DELAY) revert RescueDelayNotElapsed();
+
+        // Report 21: the out-of-band condition must have been observed in an
+        // EARLIER block. Reading it only here let an attacker skew the pair and
+        // liquidate the launch in one transaction, leaving no instant in which
+        // anyone could repair the pair — the claim that others could step in was
+        // an economic hope, not something the code enforced. Requiring the
+        // manipulation to survive a block boundary makes the repair window real,
+        // and repairing makes the band check below revert.
+        if (outOfBandFlaggedAt == 0) revert PairNotFlagged();
+        if (block.number <= outOfBandFlaggedAt) revert FlagTooRecent();
 
         uint256 nativePot = nativeRaised;
         uint256 tokenPot  = tokensSold;

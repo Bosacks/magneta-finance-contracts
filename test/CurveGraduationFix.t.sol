@@ -289,6 +289,23 @@ contract CurveGraduationFixTest is Test {
         return _seedPair(from, tokenAmount, nativeAmount);
     }
 
+    /// @dev Top a griefed pair back up to the launch ratio — what a rescuer does
+    ///      during the observation window. Works off balances rather than
+    ///      getReserves so token ordering cannot skew it.
+    function _repairPairToLaunchRatio() internal {
+        address pairAddr = factory.getPair(address(token), address(weth));
+        uint256 reserveToken = token.balanceOf(pairAddr);
+        uint256 target = (reserveToken * pool.nativeRaised()) / TOKEN_FOR_LP;
+        uint256 have   = weth.balanceOf(pairAddr);
+        if (target > have) {
+            uint256 top = target - have;
+            vm.deal(address(this), address(this).balance + top);
+            weth.deposit{value: top}();
+            weth.transfer(pairAddr, top);
+        }
+        MiniPair(pairAddr).sync();
+    }
+
     receive() external payable {}
 
     /*//////////////////////////////////////////////////////////////
@@ -402,7 +419,18 @@ contract CurveGraduationFixTest is Test {
         _graduate();
         pair = _seedPair(attacker, token.balanceOf(attacker), 0.001 ether);
         vm.warp(block.timestamp + pool.GRADUATION_RESCUE_DELAY() + 1);
-        vm.prank(keeper);
+        _flagAndEnterRefund(keeper);
+    }
+
+    /// @dev Report 21: entering refund now takes two blocks — an out-of-band
+    ///      observation, then the transition in a LATER block. Reading the pair
+    ///      only at entry let an attacker skew it and liquidate the launch
+    ///      atomically, leaving no instant in which anyone could repair it.
+    function _flagAndEnterRefund(address who) internal {
+        vm.prank(who);
+        pool.flagPairOutOfBand();
+        vm.roll(block.number + 1);
+        vm.prank(who);
         pool.enterRefundMode();
     }
 
@@ -429,8 +457,7 @@ contract CurveGraduationFixTest is Test {
         pair; // reserves only matter for the out-of-band check
 
         vm.warp(block.timestamp + pool.GRADUATION_RESCUE_DELAY() + 1);
-        vm.prank(keeper);
-        pool.enterRefundMode();
+        _flagAndEnterRefund(keeper);
 
         assertTrue(pool.refundMode(), "refund mode not set");
         assertEq(pool.refundNativePot(), raise, "pot != raise");
@@ -478,6 +505,8 @@ contract CurveGraduationFixTest is Test {
         _seedPair(buyer2, token.balanceOf(buyer2) / 10, 0.001 ether);
 
         vm.warp(block.timestamp + pool.GRADUATION_RESCUE_DELAY() + 1);
+        pool.flagPairOutOfBand();
+        vm.roll(block.number + 1);
         pool.enterRefundMode();
 
         uint256 pot = pool.refundNativePot();
@@ -531,6 +560,8 @@ contract CurveGraduationFixTest is Test {
         // the smaller number.
         _seedPair(attacker, attackerTokens, 0.001 ether);
         vm.warp(block.timestamp + pool.GRADUATION_RESCUE_DELAY() + 1);
+        pool.flagPairOutOfBand();
+        vm.roll(block.number + 1);
         pool.enterRefundMode();
         // His tokens are in the pair he donated to; he holds nothing to claim.
         assertEq(token.balanceOf(attacker), 0, "griefer kept a claimable bag");
@@ -540,6 +571,50 @@ contract CurveGraduationFixTest is Test {
     }
 
     /// @notice Refund mode is one-way and cannot be re-entered or undone.
+    /// @notice Report 21 said the plainest thing about the previous design: the
+    ///         claim that "anyone can repair the pair" was an economic hope, not
+    ///         something the code enforced. Skewing the pair and liquidating the
+    ///         launch fitted in ONE transaction, so there was no instant in
+    ///         which a rescuer could act. This asserts the window is real now.
+    function test_RefundMode_CannotBeForcedAtomically() public {
+        _buy(attacker, 1 ether);
+        _graduate();
+        _seedPair(attacker, token.balanceOf(attacker), 0.001 ether);
+        vm.warp(block.timestamp + pool.GRADUATION_RESCUE_DELAY() + 1);
+
+        // Same block as the observation: refused.
+        vm.startPrank(attacker);
+        pool.flagPairOutOfBand();
+        vm.expectRevert(MagnetaCurvePool.FlagTooRecent.selector);
+        pool.enterRefundMode();
+        vm.stopPrank();
+
+        assertFalse(pool.refundMode(), "refund entered in the flagging block");
+        assertFalse(pool.graduationFinalized(), "launch closed atomically");
+    }
+
+    /// @notice And the window is not decorative: repairing the pair during it
+    ///         defeats the transition outright.
+    function test_RepairDuringTheWindowDefeatsTheRefund() public {
+        _buy(attacker, 1 ether);
+        _graduate();
+        _seedPair(attacker, token.balanceOf(attacker), 0.001 ether);
+        vm.warp(block.timestamp + pool.GRADUATION_RESCUE_DELAY() + 1);
+
+        vm.prank(attacker);
+        pool.flagPairOutOfBand();
+
+        // A rescuer moves the pair back into band in the next block.
+        vm.roll(block.number + 1);
+        _repairPairToLaunchRatio();
+
+        vm.prank(attacker);
+        vm.expectRevert(MagnetaCurvePool.GraduationStillViable.selector);
+        pool.enterRefundMode();
+
+        assertFalse(pool.refundMode(), "a repaired launch was still liquidated");
+    }
+
     function test_RefundMode_IsIrreversible() public {
         _griefAndEnterRefund();
 
@@ -576,12 +651,17 @@ contract CurveGraduationFixTest is Test {
         // Empty pair: finalizeGraduation would go through right now.
         vm.prank(attacker);
         vm.expectRevert(MagnetaCurvePool.GraduationStillViable.selector);
-        pool.enterRefundMode();
+        pool.flagPairOutOfBand();
 
         // Seeded, but at the launch ratio: still viable, still refused.
         _seedAtLaunchRatio(buyer, token.balanceOf(buyer) / 100);
         vm.prank(attacker);
         vm.expectRevert(MagnetaCurvePool.GraduationStillViable.selector);
+        pool.flagPairOutOfBand();
+
+        // And the transition itself refuses without a prior observation.
+        vm.prank(attacker);
+        vm.expectRevert(MagnetaCurvePool.PairNotFlagged.selector);
         pool.enterRefundMode();
 
         // And the launch does complete.
@@ -605,6 +685,8 @@ contract CurveGraduationFixTest is Test {
 
         // Refund is available right now...
         uint256 snap = vm.snapshotState();
+        pool.flagPairOutOfBand();
+        vm.roll(block.number + 1);
         pool.enterRefundMode();
         assertTrue(pool.refundMode(), "refund unavailable on a griefed pair");
         vm.revertToState(snap);
@@ -620,8 +702,13 @@ contract CurveGraduationFixTest is Test {
         weth.transfer(address(pair), topUp);
         pair.sync();
 
-        // Refund is now off the table and migration works.
+        // Refund is now off the table: the observation itself refuses on a pair
+        // that is back in band, so no one can even start the two-step.
         vm.expectRevert(MagnetaCurvePool.GraduationStillViable.selector);
+        pool.flagPairOutOfBand();
+
+        // And the transition alone gets nowhere without one.
+        vm.expectRevert(MagnetaCurvePool.PairNotFlagged.selector);
         pool.enterRefundMode();
 
         pool.finalizeGraduation();
