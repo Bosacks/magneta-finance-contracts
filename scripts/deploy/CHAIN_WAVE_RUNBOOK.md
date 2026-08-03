@@ -10,8 +10,13 @@ code. Every step here exists because skipping it cost something real.
    wave; without this snapshot you are guessing. Read each value through TWO
    RPCs — Base's public endpoint returned unreadable values twice mid-operation,
    and a single read would have recorded a fee of zero as fact.
-2. **Check the deployer can pay.** ~5.5M gas for the Gateway plus four modules.
-   Arbitrum, Cronos and Linea were short on 2026-08-03.
+2. **Check the deployer can pay.** Run `scripts/ops/waveFundingReport.ts`; it
+   prices every chain at once. A wave costs **~12M gas** — measured, not
+   guessed: the five contracts total 50,976 bytes of runtime code and code
+   deposit alone is 200 gas/byte, i.e. 10.2M before a constructor runs. An
+   earlier 5.5M figure was half the truth. Fund with
+   `scripts/ops/gasTopUpViaLifi.ts` (our own bridge is ERC-20 only and cannot
+   deliver native gas — see that file's header).
 3. **Back up `deployments-b/<net>.json`.** The wave rewrites it.
 
 ## The wave
