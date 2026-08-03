@@ -69,6 +69,20 @@ contract MagnetaCurveFactory is Ownable2Step, ReentrancyGuard {
     // These pools still emit the official CurveTokenCreated event and appear
     // in the launchpad UI, lending them false legitimacy. Owner can re-tune
     // bounds for cheap-native chains.
+    /// @notice Share of the supply that must sit on the curve, in basis points.
+    ///         Reports 20 and 21 both flagged that `0 < curveAllocation <
+    ///         totalSupply` admits degenerate launches: an allocation of 1 leaves
+    ///         the curve with nothing to sell, and `totalSupply - 1` leaves the
+    ///         post-graduation pair with nothing to trade. Both pass every other
+    ///         check and still emit the canonical launch event, so an indexer
+    ///         cannot tell them from a real launch. The band brackets the
+    ///         pump.fun split (80/20) rather than pinning it, leaving creators
+    ///         room without letting them ship a launch that cannot work.
+    ///         Constants, not storage: the factory is 20,176 bytes and the
+    ///         remaining EIP-170 margin is worth more than a tunable.
+    uint256 public constant MIN_CURVE_ALLOC_BPS = 5_000;  // 50%
+    uint256 public constant MAX_CURVE_ALLOC_BPS = 9_500;  // 95%
+
     uint256 public minVirtualNativeReserve = 0.01 ether;
     uint256 public maxTotalSupply          = type(uint128).max;
     uint256 public minGraduationThreshold  = 0.1 ether;
@@ -237,7 +251,8 @@ contract MagnetaCurveFactory is Ownable2Step, ReentrancyGuard {
         // Economic-parameter sanity.
         require(totalSupply > 0,                                              "zero supply");
         require(totalSupply <= maxTotalSupply,                                "supply too large");
-        require(curveAllocation > 0 && curveAllocation < totalSupply,         "bad alloc");
+        require(curveAllocation * 10_000 >= totalSupply * MIN_CURVE_ALLOC_BPS, "alloc too small");
+        require(curveAllocation * 10_000 <= totalSupply * MAX_CURVE_ALLOC_BPS, "alloc too large");
         require(virtualNativeReserve >= minVirtualNativeReserve,              "virtual too small");
         require(graduationThreshold  >= minGraduationThreshold,               "threshold too small");
         // F80: cap the graduation threshold and keep it above the virtual reserve,

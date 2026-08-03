@@ -172,6 +172,37 @@ contract MagnetaCurveFactoryValidationTest is Test {
     // only excluded address(0), so an EOA could be programmed as the sink
     // for every future pool's 1% per-trade fee.
 
+    /// Reports 20 and 21 both flagged that the allocation was bounded only by
+    /// `0 < curveAllocation < totalSupply`. An allocation of 1 leaves the curve
+    /// with nothing to sell; `totalSupply - 1` leaves the graduated pair with
+    /// nothing to trade. Both used to pass every check and emit the canonical
+    /// launch event, so nothing downstream could tell them from a real launch.
+    function test_DegenerateAllocationsAreRejected() public {
+        uint256 supply = 1_000_000 ether;
+
+        // Nothing on the curve.
+        vm.prank(CREATOR);
+        vm.expectRevert(bytes("alloc too small"));
+        factory.createCurveToken("T", "T", "uri", supply, 1, 1 ether, 2 ether);
+
+        // Nothing left for the pair.
+        vm.prank(CREATOR);
+        vm.expectRevert(bytes("alloc too large"));
+        factory.createCurveToken("T", "T", "uri", supply, supply - 1, 1 ether, 2 ether);
+
+        // Just inside each edge, and the pump.fun split in the middle, all pass.
+        uint256[3] memory ok = [
+            (supply * factory.MIN_CURVE_ALLOC_BPS()) / 10_000,
+            (supply * 8_000) / 10_000,
+            (supply * factory.MAX_CURVE_ALLOC_BPS()) / 10_000
+        ];
+        for (uint256 i; i < ok.length; ++i) {
+            vm.prank(CREATOR);
+            (address t, ) = factory.createCurveToken("T", "T", "uri", supply, ok[i], 1 ether, 2 ether);
+            assertTrue(t != address(0), "a legitimate split was rejected");
+        }
+    }
+
     function test_F33_ProposeFeeVaultRevertsOnEOA() public {
         address eoa = makeAddr("eoaFeeVault");
         vm.prank(OWNER);
