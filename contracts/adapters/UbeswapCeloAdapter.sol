@@ -4,6 +4,7 @@ pragma solidity ^0.8.20;
 import { IERC20 }            from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { SafeERC20 }         from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { ReentrancyGuard }   from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import { Ownable2Step }      from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import "./AdapterPull.sol";
 
 /// @title UbeswapCeloAdapter
@@ -44,7 +45,7 @@ interface IUbeswapRouter {
     ) external returns (uint256[] memory);
 }
 
-contract UbeswapCeloAdapter is ReentrancyGuard {
+contract UbeswapCeloAdapter is ReentrancyGuard, Ownable2Step {
     using SafeERC20 for IERC20;
     using AdapterPull for IERC20;
 
@@ -54,6 +55,23 @@ contract UbeswapCeloAdapter is ReentrancyGuard {
     IUbeswapRouter public immutable ube;
     address public immutable factory;
     address public immutable WETH;
+
+    // ─── Events ───────────────────────────────────────────────────────────
+
+    /// @dev Emitted on every rescue. `BexBerachainAdapter.sweep` emits nothing,
+    ///      which is the one place this adapter deliberately does MORE than the
+    ///      reference: the same file's `setPair` docblock argues admin actions
+    ///      must be observable by magneta-listener, and a rescue is the most
+    ///      privileged action either contract has. Ownership model, guards and
+    ///      revert conditions are otherwise identical to Bex's.
+    event Swept(address indexed token, address indexed to, uint256 amount);
+    event SweptNative(address indexed to, uint256 amount);
+
+    // ─── Errors ───────────────────────────────────────────────────────────
+
+    error ZeroAddress();
+    error ZeroAmount();
+    error SweepFailed();
 
     constructor(address _ube) {
         require(_ube != address(0), "UbeAdapter: zero router");
@@ -185,5 +203,61 @@ contract UbeswapCeloAdapter is ReentrancyGuard {
         require(ok, "UbeAdapter: celo send failed");
     }
 
+    // ─── Rescue ───────────────────────────────────────────────────────────
+
+    /// @notice Owner-only recovery of ERC20 value stranded on this adapter.
+    ///         Same shape as `BexBerachainAdapter.sweep`: whole balance, named
+    ///         recipient, reverts on a zero balance rather than emitting a
+    ///         no-op.
+    /// @dev    This is a net, not a treasury. The adapter holds nothing between
+    ///         calls, so anything reachable here is residue: a donation, dust
+    ///         from a rebasing token that credited more than `pullMeasured`
+    ///         attributed to the caller, or a transfer sent to the wrong
+    ///         address. Before this function existed such value was
+    ///         unrecoverable by anyone, permanently.
+    /// @dev    `nonReentrant` is load-bearing, not decoration. User funds are
+    ///         only ever on this contract WITHIN a single transaction (between
+    ///         `pullMeasured` and the router call, or between the router's
+    ///         payout and the native forward at the end of
+    ///         `swapExactTokensForETH`). The only way for the owner to reach
+    ///         into that window is to re-enter mid-operation from a token with
+    ///         a transfer callback — which is exactly what the shared
+    ///         ReentrancyGuard status refuses. Across transactions there is
+    ///         nothing in flight to take, so no further guard (pause flag,
+    ///         timelock on the sweep itself) buys anything the guard does not
+    ///         already give. Exercised by `test/AdapterRescue.t.sol`.
+    /// @dev    CELO CAVEAT: on Celo the GoldToken precompile's ERC20 ledger and
+    ///         the chain's native balance are the SAME state, so
+    ///         `sweep(CELO, to)` and `sweepNative(to)` move the same value by
+    ///         two different mechanisms. Either works; whichever runs first
+    ///         leaves the other reverting `ZeroAmount`. For any other token the
+    ///         two are independent.
+    function sweep(address token, address to) external onlyOwner nonReentrant {
+        if (token == address(0) || to == address(0)) revert ZeroAddress();
+        uint256 bal = IERC20(token).balanceOf(address(this));
+        if (bal == 0) revert ZeroAmount();
+        emit Swept(token, to, bal);
+        IERC20(token).safeTransfer(to, bal);
+    }
+
+    /// @notice Owner-only recovery of native value stranded on this adapter.
+    /// @dev    `BexBerachainAdapter` has no native counterpart because its
+    ///         `receive()` only accepts WBERA unwraps. This adapter's
+    ///         `receive()` is open — the CELO precompile credits it on every
+    ///         inbound ERC20 transfer — so native can land here from anyone
+    ///         and, until now, stayed forever. See the CELO caveat on `sweep`.
+    function sweepNative(address to) external onlyOwner nonReentrant {
+        if (to == address(0)) revert ZeroAddress();
+        uint256 bal = address(this).balance;
+        if (bal == 0) revert ZeroAmount();
+        emit SweptNative(to, bal);
+        (bool ok, ) = payable(to).call{value: bal}("");
+        if (!ok) revert SweepFailed();
+    }
+
+    /// @notice Open by necessity: an inbound CELO ERC20 transfer IS an inbound
+    ///         native transfer on Celo, so this contract must accept value to
+    ///         be able to hold CELO at all. Anything else that arrives is
+    ///         recoverable via `sweepNative`.
     receive() external payable {}
 }

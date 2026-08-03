@@ -4,6 +4,7 @@ pragma solidity ^0.8.20;
 import { IERC20 }            from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { SafeERC20 }         from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { ReentrancyGuard }   from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import { Ownable2Step }      from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import "./AdapterPull.sol";
 
 /// @title MoeRouterAdapter
@@ -51,13 +52,30 @@ interface IMoeRouter {
     ) external returns (uint256[] memory);
 }
 
-contract MoeRouterAdapter is ReentrancyGuard {
+contract MoeRouterAdapter is ReentrancyGuard, Ownable2Step {
     using SafeERC20 for IERC20;
     using AdapterPull for IERC20;
 
     IMoeRouter public immutable moe;
     address public immutable factory;
     address public immutable WETH;
+
+    // ─── Events ───────────────────────────────────────────────────────────
+
+    /// @dev Emitted on every rescue. `BexBerachainAdapter.sweep` emits nothing,
+    ///      which is the one place this adapter deliberately does MORE than the
+    ///      reference: the same file's `setPair` docblock argues admin actions
+    ///      must be observable by magneta-listener, and a rescue is the most
+    ///      privileged action either contract has. Ownership model, guards and
+    ///      revert conditions are otherwise identical to Bex's.
+    event Swept(address indexed token, address indexed to, uint256 amount);
+    event SweptNative(address indexed to, uint256 amount);
+
+    // ─── Errors ───────────────────────────────────────────────────────────
+
+    error ZeroAddress();
+    error ZeroAmount();
+    error SweepFailed();
 
     constructor(address _moe) {
         require(_moe != address(0), "MoeAdapter: zero router");
@@ -168,5 +186,54 @@ contract MoeRouterAdapter is ReentrancyGuard {
         IERC20(path[0]).forceApprove(address(moe), 0);
     }
 
+    // ─── Rescue ───────────────────────────────────────────────────────────
+
+    /// @notice Owner-only recovery of ERC20 value stranded on this adapter.
+    ///         Same shape as `BexBerachainAdapter.sweep`: whole balance, named
+    ///         recipient, reverts on a zero balance rather than emitting a
+    ///         no-op.
+    /// @dev    This is a net, not a treasury. The adapter holds nothing between
+    ///         calls, so anything reachable here is residue: a donation, dust
+    ///         from a rebasing token that credited more than `pullMeasured`
+    ///         attributed to the caller, or a transfer sent to the wrong
+    ///         address. Before this function existed such value was
+    ///         unrecoverable by anyone, permanently.
+    /// @dev    `nonReentrant` is load-bearing, not decoration. User funds are
+    ///         only ever on this contract WITHIN a single transaction (between
+    ///         `pullMeasured` and the router call, or between the router's
+    ///         native refund and the caller's). The only way for the owner to
+    ///         reach into that window is to re-enter mid-operation from a token
+    ///         with a transfer callback — which is exactly what the shared
+    ///         ReentrancyGuard status refuses. Across transactions there is
+    ///         nothing in flight to take, so no further guard (pause flag,
+    ///         timelock on the sweep itself) buys anything the guard does not
+    ///         already give. Exercised by `test/AdapterRescue.t.sol`.
+    function sweep(address token, address to) external onlyOwner nonReentrant {
+        if (token == address(0) || to == address(0)) revert ZeroAddress();
+        uint256 bal = IERC20(token).balanceOf(address(this));
+        if (bal == 0) revert ZeroAmount();
+        emit Swept(token, to, bal);
+        IERC20(token).safeTransfer(to, bal);
+    }
+
+    /// @notice Owner-only recovery of native value stranded on this adapter.
+    /// @dev    `BexBerachainAdapter` has no native counterpart because its
+    ///         `receive()` only accepts WBERA unwraps. This adapter's
+    ///         `receive()` is open — Merchant Moe refunds unused MNT through it
+    ///         — so native can land here from anyone and, until now, stayed
+    ///         forever. Same ownership model and same `nonReentrant` reasoning
+    ///         as `sweep` above.
+    function sweepNative(address to) external onlyOwner nonReentrant {
+        if (to == address(0)) revert ZeroAddress();
+        uint256 bal = address(this).balance;
+        if (bal == 0) revert ZeroAmount();
+        emit SweptNative(to, bal);
+        (bool ok, ) = payable(to).call{value: bal}("");
+        if (!ok) revert SweepFailed();
+    }
+
+    /// @notice Open by necessity: Merchant Moe refunds unused native to the
+    ///         caller of `addLiquidityNative`, which is this contract. Anything
+    ///         else that arrives is recoverable via `sweepNative`.
     receive() external payable {}
 }

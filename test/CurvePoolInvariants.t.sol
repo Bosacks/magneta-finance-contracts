@@ -56,9 +56,12 @@ contract CurveHandler is Test {
     /// Ghost: largest single-trade k drop observed, so the bound is visible
     /// rather than merely asserted.
     uint256 public ghost_maxKDrop;
-    /// Ghost: totalNativeBought went down. Must stay 0 — it is the monotonic
+    /// Ghost: the graduation gate went down. Must stay 0 — it is the monotonic
     /// graduation gate (F84); a sell lowers nativeRaised but must NOT lower it,
     /// otherwise the threshold could be crossed, un-crossed and re-crossed.
+    /// The gate is now the HIGH-WATER MARK of nativeRaised (peakNativeRaised)
+    /// rather than the cumulative sum of buy legs; a maximum over history is
+    /// monotonic just the same, so the property this ghost watches is unchanged.
     uint256 public ghost_gateWentBackwards;
     /// Ghost: a trade succeeded after graduation. Must stay 0.
     uint256 public ghost_tradedAfterGraduation;
@@ -86,8 +89,8 @@ contract CurveHandler is Test {
             uint256 bound = isBuy ? pool.nativeReserve() : pool.tokenReserve();
             if (drop > bound) ghost_kDroppedBeyondRounding += 1;
         }
-        if (pool.totalNativeBought() < lastGate) ghost_gateWentBackwards += 1;
-        lastGate = pool.totalNativeBought();
+        if (pool.peakNativeRaised() < lastGate) ghost_gateWentBackwards += 1;
+        lastGate = pool.peakNativeRaised();
         if (wasGraduated) ghost_tradedAfterGraduation += 1;
     }
 
@@ -146,7 +149,7 @@ contract CurveHandler is Test {
 ///         C-3  tokensSold never exceeds the curve allocation, so tokenReserve()
 ///              cannot underflow and the curve cannot sell tokens it does not
 ///              hold.
-///         C-4  totalNativeBought is monotonic (the F84 graduation gate) and no
+///         C-4  peakNativeRaised is monotonic (the F84 graduation gate) and no
 ///              trade is ever accepted after graduation.
 ///         C-5  Token conservation: what the pool still holds plus what it has
 ///              sold equals the allocation it started with.
@@ -207,7 +210,7 @@ contract CurvePoolInvariantTest is Test {
 
     /// C-4
     function invariant_GraduationGateIsMonotonic() public view {
-        assertEq(handler.ghost_gateWentBackwards(), 0, "totalNativeBought decreased");
+        assertEq(handler.ghost_gateWentBackwards(), 0, "peakNativeRaised decreased");
     }
 
     function invariant_NoTradeAfterGraduation() public view {
