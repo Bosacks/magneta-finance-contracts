@@ -4,7 +4,7 @@
   "deployer": "0x620684F822da9adF36F41e3554791D889947e25E",
   "feeVault": "0x68109132Ecf7540A0A983e1Aaa7DebC469d9d68b",
   "pauseGuardian": "0x92F440Bc1f1FaBD6D3e6256491631E07857F4260",
-  "timestamp": "2026-08-01T23:31:15.547Z",
+  "timestamp": "2026-08-03T17:22:27.517Z",
   "chainConfig": {
     "lzEndpoint": "0x6EDCE65403992e310A62460808c4b910D972f10f",
     "lzEid": 40245,
@@ -19,24 +19,25 @@
     "MagnetaLending": "0x58953ea5E7FC796BC69f61BECBF43065b54735DA",
     "MagnetaFactory": "0x953AC37Fac1eaBBEb15Bb566670c86102EF5B686",
     "MagnetaBundler": "0x633adAD304Cb528FDc6E3B0F424eb82C01F4c406",
-    "MagnetaGateway": "0xec7beC256170959a6484e8B72D2C1660EeBbaA29",
+    "MagnetaGateway": "0x8dBafB3a7D1808552e12E12F0a32d649Bd8bC56e",
     "MagnetaBridgeOApp": "0xe89Be453f395863442E87F21cD49A69a90e75389",
-    "LPModule": "0x87B6c972A34b825c68870AaDdf2129aE9C75c9d8",
-    "SwapModule": "0x016f440909bD06622DaC41498b98C9deeA5B0670",
-    "TaxClaimModule": "0x2e7732BdbE75Ac2fDC6b9aac19A42E7F4bE7e7C5",
-    "TokenOpsModule": "0x402f6a8DEA2247B185d98924cB576bd516DdcF4a",
+    "LPModule": "0x66da506ca456A9Ff589594d419a75dEf6a1dc23A",
+    "SwapModule": "0x7d9aE8edBC9F4A56817d377d65ad23BA83488702",
+    "TaxClaimModule": "0x6bbde361f0D0406F12F11727dE9919a6e9725A9C",
+    "TokenOpsModule": "0x98bc37e7B67a1943901725c55acEe905d3a76Bd0",
     "MagnetaRouterRegistry": "0x38B252B7A8C8DAB3E58444b7925E03c44ae92C9A",
     "MagnetaLpAtomicHelper": "0x51A36718a610ae7e9D2b867FF30ABfc83FA147D5",
     "LPAtomicModule": "0x569E74019761A5F987FC19f36f060e76f81687F3",
     "MagnetaServiceFee": "0xaD70586B2Ed26AE4C6610C1cA1213cc2936D94cE",
-    "MagnetaCurveFactory": "0xe805577f1BD2FdebC34F4Bd99F377463CeDCD2fb",
-    "MagnetaGateway_old": "0x62A1e83E51b6Bb1f746B443cB4e17B80c30a9D1C",
-    "LPModule_old": "0x891771AD6C48FfbFd2d0859678913665Cad36b88",
-    "SwapModule_old": "0x83A3841a3dC53D82012DC23991F41D57Cf1EDb4e",
-    "TokenOpsModule_old": "0xd6Fa6F6F4346AFFaE4230F0106083b58134BB261",
-    "TaxClaimModule_old": "0xd96449043337e7440Cc62638CAf46c853e374DBA"
+    "MagnetaCurveFactory": "0xf656aDe7E63c778723a5E6d6C3239A10f67B6Ce2",
+    "MagnetaGateway_old": "0xec7beC256170959a6484e8B72D2C1660EeBbaA29",
+    "LPModule_old": "0x87B6c972A34b825c68870AaDdf2129aE9C75c9d8",
+    "SwapModule_old": "0x016f440909bD06622DaC41498b98C9deeA5B0670",
+    "TokenOpsModule_old": "0x402f6a8DEA2247B185d98924cB576bd516DdcF4a",
+    "TaxClaimModule_old": "0x2e7732BdbE75Ac2fDC6b9aac19A42E7F4bE7e7C5"
   },
   "notes": [
-    "2026-08-01 — Gateway-stack redeployed for _payNative override (MG-6 patch). Previous addresses kept as *_old."
+    "2026-08-01 — Gateway-stack redeployed for _payNative override (MG-6 patch). Previous addresses kept as *_old.",
+    "2026-08-03 — Gateway-stack redeployed for _payNative override (MG-6 patch). Previous addresses kept as *_old."
   ]
 }
