@@ -316,7 +316,11 @@ describe("MagnetaCurvePool — graduation DoS fix (finalizeGraduation)", functio
       await ethers.provider.send("evm_increaseTime", [Number(delay) + 1]);
       await ethers.provider.send("evm_mine", []);
 
-      // Permissionless — a bystander opens it.
+      // Permissionless — a bystander opens it. Two steps since report 21: the
+      // out-of-band state must be observed in an EARLIER block, so skewing the
+      // pair and liquidating the launch can no longer happen atomically.
+      await pool.connect(owner).flagPairOutOfBand();
+      await ethers.provider.send("evm_mine", []);
       await expect(pool.connect(owner).enterRefundMode())
         .to.emit(pool, "RefundModeEntered");
       expect(await pool.refundMode()).to.equal(true);
@@ -363,9 +367,14 @@ describe("MagnetaCurvePool — graduation DoS fix (finalizeGraduation)", functio
       await ethers.provider.send("evm_mine", []);
 
       // Pair is empty → finalizeGraduation would go through right now, so a
-      // griefer cannot use refund mode to tear the launch down.
-      await expect(pool.connect(attacker).enterRefundMode())
+      // griefer cannot use refund mode to tear the launch down. The refusal
+      // now lands on the observation, which is what judges viability.
+      await expect(pool.connect(attacker).flagPairOutOfBand())
         .to.be.revertedWithCustomError(pool, "GraduationStillViable");
+
+      // And the transition alone gets nowhere without one.
+      await expect(pool.connect(attacker).enterRefundMode())
+        .to.be.revertedWithCustomError(pool, "PairNotFlagged");
 
       await expect(pool.connect(attacker).finalizeGraduation()).to.emit(pool, "Graduated");
       expect(await pool.graduationFinalized()).to.equal(true);
