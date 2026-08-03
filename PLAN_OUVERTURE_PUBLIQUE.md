@@ -104,10 +104,41 @@ gros volume, puis le reste.
 
 ---
 
-## Ce que je ne peux pas trancher seul
+## Les deux fonctions X — tranché le 2026-08-03
 
-- **X Based Token** : on l'ouvre, ou il reste verrouillé et on aligne le menu ?
-- **XCommentExporter** : on déploie le backend X/Twitter, ou on le retire de
-  Convenient Tools pour l'ouverture ?
-- **Ordre** : commencer par la CurveFactory de Base seule pour valider la
-  procédure, ou attaquer directement les vagues complètes chaîne par chaîne ?
+Décision : les deux restent derrière « Soon », mais doivent être **complètes et
+vérifiées**, de sorte qu'il ne reste qu'à payer l'abonnement X pour les ouvrir.
+
+**X Based Token — conforme.** `app/api/tweets/route.ts` est complet et soigné :
+limitation de débit, validation des identifiants contre l'injection de grammaire
+de requête, appel réel à `tweets/search/recent`, et un 503 explicite quand la
+clé manque — il ne fabrique jamais de données. Il ne lui manque que
+`TWITTER_BEARER_TOKEN`. Menu aligné sur la page (`comingSoon: true`, commit
+0d2a6875) : la barre latérale annonçait une fonction que la page refusait.
+
+**XCommentExporter — PAS conforme.** Trois manques indépendants de la clé :
+1. il appelle un backend séparé jamais déployé
+   (`NEXT_PUBLIC_API_URL || 'http://localhost:8080/api'`, route
+   `/twitter/comments`) — à réécrire en route Next, comme `/api/tweets` ;
+2. l'état `format` (csv/json/txt) n'est **jamais lu** par `handleExport` — le
+   sélecteur ne fait rien ;
+3. il n'exporte aucun fichier : il fait un `console.log` et affiche
+   « Check Console ».
+
+Payer l'abonnement ne le rendrait donc pas fonctionnel. C'est un vrai poste de
+développement, à faire avant l'ouverture si on veut tenir la règle « il ne
+reste qu'à payer ».
+
+### ⚠️ Le montant de 100 $/mois est à revérifier
+D'après les sources publiques (2026-08-03), le palier **Basic est passé de 100 $
+à 200 $/mois en octobre 2024**, et les nouveaux comptes basculent par défaut sur
+un modèle **à l'usage** (~0,001 $ la ressource lue). La recherche récente sur
+7 jours — `GET /2/tweets/search/recent`, dont dépendent **les deux** fonctions —
+reste incluse dans Basic. À confirmer dans la console développeur X avant de
+budgéter : ce n'est pas une information que je peux garantir à jour.
+
+## Ordre retenu
+
+CurveFactory de **Base seule** d'abord : Base est déjà à moitié faite, il n'y
+manque que ce contrat, et c'est un galop d'essai à faible enjeu pour valider la
+procédure étendue avant de l'appliquer aux dix-huit autres chaînes.
