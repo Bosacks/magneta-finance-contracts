@@ -1,0 +1,33 @@
+{
+  "version": "1.0",
+  "chainId": "8453",
+  "createdAt": 1785784187132,
+  "meta": {
+    "name": "Magneta \u2014 grant the breaker's pauser on the NEW Base Gateway",
+    "description": "Re-grant the circuit breaker's pauser role on the Base Gateway redeployed 2026-08-03 (0x6BBFbC488a93A19179b34aC3A57977C343eeA5c1). The key is registered on the RETIRED Gateway only, so since the cutover the breaker has been unable to act on Base \u2014 the redeploy silently removed a safety net rather than any single mistake doing it. Same key, same one-way capability: pause() is open to a pauser, unpause() is onlyOwner, and removePauser revokes at will. Run this on every chain right after its wave, before the site is cut over to it.",
+    "txBuilderVersion": "1.17.0",
+    "createdFromSafeAddress": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a",
+    "createdFromOwnerAddress": ""
+  },
+  "transactions": [
+    {
+      "to": "0x6BBFbC488a93A19179b34aC3A57977C343eeA5c1",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [
+          {
+            "internalType": "address",
+            "name": "account",
+            "type": "address"
+          }
+        ],
+        "name": "addPauser",
+        "payable": false
+      },
+      "contractInputsValues": {
+        "account": "0x46D838E6C269c458c8017CC04C8015CbAf78DB8a"
+      }
+    }
+  ]
+}
