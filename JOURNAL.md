@@ -1,3 +1,17 @@
+## 2026-08-03 — Modèle pump.fun : part créateur, AMM de graduation maison, chemin prouvé on-chain
+
+- **Le launchpad n'était PAS dans le périmètre de la vague** : `redeployGatewayWave.ts` liste `MagnetaCurveFactory` comme SEPARATE — Base était « finie » et tournait encore une factory sans le correctif CRITICAL du rapport 21
+- Modèle pump.fun adopté (leur grille du 20/05/2026) : commission **1,25 % = 0,95 protocole + 0,30 créateur**, création gratuite hors gaz. Frais créateur **accumulés et réclamés**, jamais poussés — un créateur-contrat refusant le natif bloquerait sinon tous les échanges de sa propre courbe
+- **AMM de graduation déployé** sur Base Sepolia (factory `0xFfce1501…`, routeur `0x9cb70bd7…`, `setFeeTo(FeeVault)` appliqué) : les graduations cessent de céder 100 % du volume secondaire à BaseSwap/QuickSwap ; 0,05 % de chaque swap revient désormais au FeeVault à perpétuité
+- `INIT_CODE_PAIR_HASH` vérifié **empiriquement** contre la factory déployée (créer une paire, comparer au CREATE2) : sans ça, `pairFor` viserait des adresses vides et **toutes les graduations reverteraient** sans message
+- Déploiement du core V2 obligatoirement via **Hardhat** : l'artefact Foundry du même source aux mêmes réglages hashe différemment (métadonnées)
+- Chemin de l'argent **prouvé on-chain** : courbe → répartition 3e11/9,5e11 wei exacte → graduation → paire sur l'AMM Magneta → 140,53 LP au DEAD → pool vidé → frais créateur réclamés
+- **Staking : 2 défauts réels corrigés** — `stake()` créditait le demandé et non le reçu ; `notifyRewardAmount` ne tirait pas les fonds (motif Venus, qu'une donation d'un tiers permettait d'exploiter). Le menu « Stake to Earn » du DEX est ACTIF et les 20 factories déployées portent encore l'ancien code
+- Suite Testsites **débloquée** : elle ne compilait pas du tout (3 tests morts) ; 208/210 après resynchronisation de 11 contrats et 19 tests en retard sur main
+- `maxPriceImpactBps` absent des contrats des **deux** dépôts — sa seule spécification survivante préservée en `test/attic` avec un README qui interdit de la jeter
+- Financement rechiffré sur des tailles mesurées : **26,3M gas/chaîne**, ~108 $ au total. Linea en représente la moitié (plancher de 1 gwei, confirmé sur 2 RPC)
+- XCommentExporter terminé (backend `/api/x-comments`, format effectif, vrai téléchargement) ; surveillance VPS réparée : discord-bot mort depuis le 29/07 (93 618 redémarrages), 0 unité en échec
+
 ## 2026-08-02 — Audit économique des 4 moteurs de liquidité + DLMM fermée sur 20 chaînes
 
 - Audit économique (3 agents, périmètres disjoints, chaque finding porteur revérifié par moi dans le code et on-chain) : courbe, MagnetaPool/Swap, MultiPool, adaptateurs
