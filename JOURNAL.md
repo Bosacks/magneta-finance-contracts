@@ -8,7 +8,7 @@
 - Chemin de l'argent **prouvé on-chain** : courbe → répartition 3e11/9,5e11 wei exacte → graduation → paire sur l'AMM Magneta → 140,53 LP au DEAD → pool vidé → frais créateur réclamés
 - **Staking : 2 défauts réels corrigés** — `stake()` créditait le demandé et non le reçu ; `notifyRewardAmount` ne tirait pas les fonds (motif Venus, qu'une donation d'un tiers permettait d'exploiter). Le menu « Stake to Earn » du DEX est ACTIF et les 20 factories déployées portent encore l'ancien code
 - Suite Testsites **débloquée** : elle ne compilait pas du tout (3 tests morts) ; 208/210 après resynchronisation de 11 contrats et 19 tests en retard sur main
-- `maxPriceImpactBps` absent des contrats des **deux** dépôts — sa seule spécification survivante préservée en `test/attic` avec un README qui interdit de la jeter
+- **`maxPriceImpactBps` réimplémenté** depuis la seule spécification survivante (un test de `test/attic` qui ne compilait plus) : passe ses 3 assertions **sans qu'aucune ne soit modifiée**. Impact dérivé des réserves, plafonné à 100 %, défaut à 0. 4e occurrence du motif « validé on-chain, jamais commité, perdu au redéploiement suivant »
 - Financement rechiffré sur des tailles mesurées : **26,3M gas/chaîne**, ~108 $ au total. Linea en représente la moitié (plancher de 1 gwei, confirmé sur 2 RPC)
 - XCommentExporter terminé (backend `/api/x-comments`, format effectif, vrai téléchargement) ; surveillance VPS réparée : discord-bot mort depuis le 29/07 (93 618 redémarrages), 0 unité en échec
 
