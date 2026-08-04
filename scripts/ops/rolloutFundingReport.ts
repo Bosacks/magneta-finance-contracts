@@ -13,6 +13,9 @@
  *   - MagnetaStakingFactory — the deployed one credits the requested stake
  *     instead of the received one, and lets a creator promise rewards funded by
  *     a stranger's donation. "Stake to Earn" is live in the DEX today.
+ *   - MagnetaSwap — carries maxPriceImpactBps again. The cap was validated
+ *     on-chain 2026-06-20, never committed, and silently lost in every redeploy
+ *     since; only a test in Testsites' attic still described it.
  *
  * Sizes are MEASURED, from the deployed bytecode on Base Sepolia and from
  * forge --sizes. Code deposit alone is 200 gas/byte, which is what an earlier
@@ -27,6 +30,7 @@ const SIZES = {
   v2Factory:          13_859, // embeds the pair creation code
   v2Router:           17_944,
   stakingFactory:      7_615, // measured from the factory deployed on Base
+  magnetaSwap:         7_603, // anti-sandwich cap, re-implemented 2026-08-03
 };
 
 /** Deposit + a constructor/init allowance, matching the 12M figure the Gateway
@@ -39,6 +43,7 @@ const COMPONENTS = [
   { key: "v2Factory",      label: "AMM de graduation — factory" },
   { key: "v2Router",       label: "AMM de graduation — routeur" },
   { key: "stakingFactory", label: "StakingFactory (2 correctifs)" },
+  { key: "magnetaSwap",    label: "MagnetaSwap (plafond anti-sandwich)" },
 ] as const;
 
 const TOTAL_GAS = COMPONENTS.reduce((a, c) => a + gasFor(SIZES[c.key]), 0);

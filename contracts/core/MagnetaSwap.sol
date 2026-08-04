@@ -17,6 +17,12 @@ interface IMagnetaPoolSwap {
     function getPool(address token0, address token1, uint24 fee) external view returns (uint256);
     function swap(uint256 poolId, address tokenIn, uint256 amountIn, uint256 amountOutMin, address to, uint256 deadline) external returns (uint256);
     function getAmountOut(uint256 poolId, address tokenIn, uint256 amountIn) external view returns (uint256);
+    /// Generated getter for MagnetaPool's `pools` mapping. Needed for the
+    /// price-impact cap, which has to see the reserves the trade will move.
+    function pools(uint256 poolId) external view returns (
+        address token0, address token1, uint24 fee,
+        uint256 liquidity, uint256 reserve0, uint256 reserve1, bool exists
+    );
 }
 
 contract MagnetaSwap is IMagnetaSwap, Ownable2Step, ReentrancyGuard {
@@ -35,6 +41,25 @@ contract MagnetaSwap is IMagnetaSwap, Ownable2Step, ReentrancyGuard {
 
     // Addresses exempt from swap fee (e.g. LPModule for cross-chain conversions)
     mapping(address => bool) public feeExempt;
+
+    /// @notice Largest price impact a single swap may cause, in basis points.
+    ///         Zero disables the check, which is the default and preserves the
+    ///         previous behaviour exactly.
+    ///
+    /// @dev A sandwich needs an outsized front-run to move the price before the
+    ///      victim's trade lands. Capping impact does not detect the attack —
+    ///      it removes the move the attack depends on, which is cheaper and
+    ///      cannot be evaded by splitting across addresses (each leg is capped
+    ///      independently, and splitting across blocks gives the victim's trade
+    ///      time to land).
+    ///
+    ///      Re-implemented 2026-08-03 from test/attic/MagnetaSwapSlippageCap.t.sol,
+    ///      the only surviving specification: the cap was validated on-chain on
+    ///      2026-06-20 and lost in the 07-28 redeploy because it had never been
+    ///      committed. Every redeploy since has silently shipped without it.
+    uint256 public maxPriceImpactBps;
+
+    event MaxPriceImpactUpdated(uint256 oldBps, uint256 newBps);
 
     // Paused state
     bool public paused;
@@ -111,6 +136,8 @@ contract MagnetaSwap is IMagnetaSwap, Ownable2Step, ReentrancyGuard {
         uint256 poolId = poolContract.getPool(tokenIn, tokenOut, 30);
         require(poolId > 0, "MagnetaSwap: no corresponding pool found");
 
+        _enforcePriceImpact(poolId, tokenIn, amountToSwap);
+
         // Approve pool (forceApprove resets then sets, safe for tokens that require 0 first)
         IERC20(tokenIn).forceApprove(address(poolContract), amountToSwap);
 
@@ -126,6 +153,38 @@ contract MagnetaSwap is IMagnetaSwap, Ownable2Step, ReentrancyGuard {
 
         emit Swap(msg.sender, tokenIn, tokenOut, amountIn, amountOut, to);
         return amountOut;
+    }
+
+    /// @dev Reverts when `amountIn` would move the pool further than the cap.
+    ///
+    ///      On a constant-product pool the marginal price moves from
+    ///      reserveOut/reserveIn to reserveOut/(reserveIn + amountIn), so the
+    ///      impact is exactly amountIn / (reserveIn + amountIn). Derived from
+    ///      the reserves rather than from a probe quote: a probe would need an
+    ///      arbitrary size and would misprice low-decimal tokens.
+    ///
+    ///      A pool with no reserves is left alone — the first deposit has no
+    ///      price to move, and reverting there would brick pool creation.
+    function _enforcePriceImpact(uint256 poolId, address tokenIn, uint256 amountIn) internal view {
+        uint256 cap = maxPriceImpactBps;
+        if (cap == 0) return;
+
+        (address token0, , , , uint256 reserve0, uint256 reserve1, ) = poolContract.pools(poolId);
+        uint256 reserveIn = tokenIn == token0 ? reserve0 : reserve1;
+        if (reserveIn == 0) return;
+
+        uint256 impactBps = (amountIn * 10_000) / (reserveIn + amountIn);
+        require(impactBps <= cap, "MagnetaSwap: price impact too high");
+    }
+
+    /// @notice Set the price-impact cap in basis points; 0 disables it.
+    /// @dev Bounded at 100% because a cap above that can never bind — leaving
+    ///      it settable would let a fat-fingered value read as "enabled" while
+    ///      allowing everything through, which is worse than off.
+    function setMaxPriceImpactBps(uint256 bps) external onlyOwner {
+        require(bps <= 10_000, "MagnetaSwap: cap above 100%");
+        emit MaxPriceImpactUpdated(maxPriceImpactBps, bps);
+        maxPriceImpactBps = bps;
     }
 
     /**
