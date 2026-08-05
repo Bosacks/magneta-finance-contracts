@@ -49,11 +49,37 @@ contract MagnetaSwapSlippageCap is Test {
         return out;
     }
 
-    // Baseline: cap disabled (default) → the big front-run goes through.
-    function test_noCap_frontRunSucceeds() public {
-        assertEq(swap.maxPriceImpactBps(), 0, "cap should default to disabled");
+    // A fresh deployment is ARMED at 10% (2026-08-04): shipping the cap
+    // disabled and relying on a post-deploy call is what left every redeploy
+    // since 2026-06-20 unprotected — the setter appeared in no deploy script.
+    function test_capIsArmedOnDeploy() public {
+        assertEq(swap.maxPriceImpactBps(), 1_000, "fresh deploy should be armed at 10%");
+        // The sandwich-sized front-run (~17% impact) is refused out of the box.
+        vm.startPrank(ATTACKER);
+        tokenA.approve(address(swap), 200_000e18);
+        vm.expectRevert(bytes("MagnetaSwap: price impact too high"));
+        swap.swap(address(tokenA), address(tokenB), 200_000e18, 0, ATTACKER, block.timestamp);
+        vm.stopPrank();
+    }
+
+    // Disabling the ROUTER's cap alone is no longer enough: MagnetaPool carries
+    // its own cap since 2026-08-04, so it still refuses the trade. Documents
+    // the defence-in-depth — an operator has to disable BOTH layers on purpose.
+    function test_disablingRouterCapAlone_stillBlockedByPool() public {
+        swap.setMaxPriceImpactBps(0);
+        vm.startPrank(ATTACKER);
+        tokenA.approve(address(swap), 200_000e18);
+        vm.expectRevert(bytes("MagnetaPool: price impact too high"));
+        swap.swap(address(tokenA), address(tokenB), 200_000e18, 0, ATTACKER, block.timestamp);
+        vm.stopPrank();
+    }
+
+    // Both layers off → the historical behaviour, kept as the owner's escape hatch.
+    function test_bothCapsDisabled_frontRunSucceeds() public {
+        swap.setMaxPriceImpactBps(0);
+        pool.setMaxPriceImpactBps(0);
         uint256 out = _frontRun(200_000e18); // ~17% impact on 1M reserves
-        assertGt(out, 0, "front-run should succeed with no cap");
+        assertGt(out, 0, "front-run should succeed once both caps are disabled");
     }
 
     // Cap ON (3%) → the same sandwich-sized front-run REVERTS.

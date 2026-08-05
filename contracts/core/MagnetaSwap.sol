@@ -92,11 +92,19 @@ contract MagnetaSwap is IMagnetaSwap, Ownable2Step, ReentrancyGuard {
         _;
     }
 
+    /// @notice Price-impact cap a fresh deployment starts with, in bps (10%).
+    /// @dev Armed in the constructor for the same reason as MagnetaPool's: this
+    ///      cap shipped disabled-by-default and no deploy script ever called
+    ///      the setter, so every redeploy since 2026-06-20 ran without it.
+    uint256 public constant DEFAULT_MAX_PRICE_IMPACT_BPS = 1_000;
+
     constructor(address _feeRecipient, address _poolContract) {
         require(_feeRecipient != address(0), "MagnetaSwap: invalid fee recipient");
         require(_poolContract != address(0), "MagnetaSwap: invalid pool contract");
         feeRecipient = _feeRecipient;
         poolContract = IMagnetaPoolSwap(_poolContract);
+        maxPriceImpactBps = DEFAULT_MAX_PRICE_IMPACT_BPS;
+        emit MaxPriceImpactUpdated(0, DEFAULT_MAX_PRICE_IMPACT_BPS);
     }
 
     /**

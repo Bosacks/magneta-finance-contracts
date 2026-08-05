@@ -57,7 +57,10 @@ contract MagnetaPoolDirectSwapCap is Test {
     // front-run the router rejects still lands when aimed at the pool.
     function test_routerCapAlone_isBypassedByDirectPoolCall() public {
         swap.setMaxPriceImpactBps(300);
-        assertEq(pool.maxPriceImpactBps(), 0, "pool cap defaults to disabled");
+        // Disable the pool cap explicitly to recreate the pre-fix world: only
+        // the router capped. (Fresh deploys are armed at 10% since 2026-08-04,
+        // so this hole is no longer reachable by accident.)
+        pool.setMaxPriceImpactBps(0);
 
         // Same trade through the router: rejected.
         vm.startPrank(ATTACKER);
@@ -121,11 +124,20 @@ contract MagnetaPoolDirectSwapCap is Test {
         pool.setMaxPriceImpactBps(300);
     }
 
-    /// Default stays 0 so existing deployments keep their exact behaviour until
-    /// the owner opts in — same semantics as the router's cap.
-    function test_capDefaultsToDisabled() public {
-        assertEq(pool.maxPriceImpactBps(), 0);
+    /// A fresh pool is ARMED at 10%: the fix must not depend on anyone
+    /// remembering a post-deploy call. The owner keeps the escape hatch.
+    function test_capIsArmedOnDeploy() public {
+        assertEq(pool.maxPriceImpactBps(), 1_000, "fresh deploy should be armed at 10%");
+        vm.startPrank(ATTACKER);
+        tokenA.approve(address(pool), 400_000e18);
+        vm.expectRevert("MagnetaPool: price impact too high");
+        pool.swap(poolId, address(tokenA), 400_000e18, 0, ATTACKER, block.timestamp);
+        vm.stopPrank();
+    }
+
+    function test_ownerCanDisable() public {
+        pool.setMaxPriceImpactBps(0);
         uint256 out = _directSwap(400_000e18);
-        assertGt(out, 0, "with the cap off, behaviour is unchanged");
+        assertGt(out, 0, "with the cap explicitly off, behaviour is unchanged");
     }
 }

@@ -158,11 +158,23 @@ contract MagnetaPool is ERC721, ERC721Enumerable, Ownable2Step, Pausable, Reentr
         address to
     );
 
+    /// @notice Price-impact cap a fresh deployment starts with, in bps (10%).
+    /// @dev Armed in the constructor ON PURPOSE. A cap that ships disabled and
+    ///      relies on someone remembering a post-deploy call is the exact
+    ///      pattern that left every redeploy since 2026-06-20 unprotected —
+    ///      `setMaxPriceImpactBps` appeared in NO deploy script. 10% blocks the
+    ///      outsized front-run a sandwich needs (30-40% moves) while leaving
+    ///      ordinary trades, including on thin early pools, untouched. The
+    ///      owner can retune or disable it afterwards.
+    uint256 public constant DEFAULT_MAX_PRICE_IMPACT_BPS = 1_000;
+
     constructor(address _owner) ERC721("Magneta Pool Position", "MAGPOOL") {
         require(_owner != address(0), "MagnetaPool: invalid owner");
         _transferOwnership(_owner);
         poolCreationEnabled = true;
         liquidityAdditionEnabled = true;
+        maxPriceImpactBps = DEFAULT_MAX_PRICE_IMPACT_BPS;
+        emit MaxPriceImpactUpdated(0, DEFAULT_MAX_PRICE_IMPACT_BPS);
     }
 
     /**
