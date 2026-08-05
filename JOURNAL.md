@@ -1,3 +1,12 @@
+## 2026-08-04 (2) — Plafonds ARMÉS par constructeur + flux Scope prouvé
+
+- `setMaxPriceImpactBps` n'apparaissait dans AUCUN script de déploiement : le plafond partait à 0 partout. Pool ET routeur démarrent désormais à **10 %** (constructeur) ; le owner garde le setter pour ajuster/désactiver
+- La suite routeur prouve maintenant que désactiver le plafond du ROUTEUR seul ne suffit plus (le pool refuse) — il faut désactiver les DEUX couches volontairement
+- Suite MEV : désactive explicitement les 2 plafonds (elle mesure l'économie d'un sandwich NON atténué ; sinon elle cesserait silencieusement de vérifier ses invariants)
+- 405/405 forge, 517 hardhat passing
+- Slither sur MagnetaPool/MagnetaSwap : aucune nouvelle alerte introduite (les remontées portent sur du code pré-existant protégé par `nonReentrant`)
+- ⚠️ PIÈGE e2e : le wallet de test est un **compte intelligent EIP-7702** (code `0xef0100…`), ses tx sont relayées → **le nonce de l'EOA ne bouge jamais**. 3 achats réels ont été comptés comme échecs par un détecteur basé sur le nonce. Vérifier l'EFFET (solde/réserve), jamais le nonce
+
 ## 2026-08-04 — Plafond anti-sandwich rendu incontournable (MagnetaPool)
 
 - `MagnetaSwap.maxPriceImpactBps` ne liait que les appelants passant par le routeur : `MagnetaPool.swap` est `external` sans restriction → un sandwicheur appelait le pool en direct et échappait au plafond ET à la commission de service. Le plafond était décoratif pour qui lit les contrats
