@@ -1,3 +1,10 @@
+## 2026-08-04 — Plafond anti-sandwich rendu incontournable (MagnetaPool)
+
+- `MagnetaSwap.maxPriceImpactBps` ne liait que les appelants passant par le routeur : `MagnetaPool.swap` est `external` sans restriction → un sandwicheur appelait le pool en direct et échappait au plafond ET à la commission de service. Le plafond était décoratif pour qui lit les contrats
+- Plafond porté DANS le pool (même formule, mêmes sémantiques 0=désactivé, owner-settable, borné à 100 %) → vaut pour tout appelant
+- Défaut laissé à 0 : les pools déployés gardent leur comportement exact. **Les déploiements doivent appeler `setMaxPriceImpactBps` sur le POOL en plus du routeur** pour l'armer
+- `test/MagnetaPoolDirectSwapCap.t.sol` : un test prouve le contournement (routeur seul plafonné), les autres prouvent sa fermeture ; 7/7, forge 402/402, hardhat 517 passing
+
 ## 2026-08-03 — Modèle pump.fun : part créateur, AMM de graduation maison, chemin prouvé on-chain
 
 - **Le launchpad n'était PAS dans le périmètre de la vague** : `redeployGatewayWave.ts` liste `MagnetaCurveFactory` comme SEPARATE — Base était « finie » et tournait encore une factory sans le correctif CRITICAL du rapport 21
