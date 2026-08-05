@@ -82,7 +82,17 @@ contract MagnetaPool is ERC721, ERC721Enumerable, Ownable2Step, Pausable, Reentr
     bool public poolCreationEnabled;
     bool public liquidityAdditionEnabled;
 
+    /// @notice Maximum price impact a single swap may cause, in basis points.
+    ///         0 disables the check.
+    /// @dev    This MUST live here and not only in MagnetaSwap. `swap` below is
+    ///         `external` with no caller restriction, so a router-only cap is
+    ///         bypassed by calling the pool directly — which also skips the
+    ///         router's service fee. Enforcing it at the pool makes the cap
+    ///         hold for every caller, router or not.
+    uint256 public maxPriceImpactBps;
+
     // Events
+    event MaxPriceImpactUpdated(uint256 oldBps, uint256 newBps);
     event PoolCreated(
         uint256 indexed poolId,
         address indexed token0,
@@ -466,6 +476,16 @@ contract MagnetaPool is ERC721, ERC721Enumerable, Ownable2Step, Pausable, Reentr
      * implementation until full AMM math is implemented.
      * @param enabled Whether to enable pool creation for public
      */
+    /// @notice Set the pool-level price-impact cap in basis points; 0 disables it.
+    /// @dev Bounded at 100% for the same reason as MagnetaSwap's setter: a cap
+    ///      above that can never bind, so it would read as "enabled" while
+    ///      allowing everything through — worse than plainly off.
+    function setMaxPriceImpactBps(uint256 bps) external onlyOwner {
+        require(bps <= 10_000, "MagnetaPool: cap above 100%");
+        emit MaxPriceImpactUpdated(maxPriceImpactBps, bps);
+        maxPriceImpactBps = bps;
+    }
+
     function setPoolCreationEnabled(bool enabled) external onlyOwner {
         poolCreationEnabled = enabled;
         emit PoolCreationEnabled(enabled);
@@ -548,6 +568,17 @@ contract MagnetaPool is ERC721, ERC721Enumerable, Ownable2Step, Pausable, Reentr
         uint256 reserveOut = isToken0 ? pool.reserve1 : pool.reserve0;
         
         require(reserveIn > 0 && reserveOut > 0, "MagnetaPool: insufficient liquidity");
+
+        // Price-impact cap, enforced here so calling the pool directly cannot
+        // escape it. Measured on the reserve BEFORE this swap moves it, same
+        // formula as MagnetaSwap._enforcePriceImpact so both layers agree.
+        {
+            uint256 cap = maxPriceImpactBps;
+            if (cap != 0) {
+                uint256 impactBps = (amountIn * 10_000) / (reserveIn + amountIn);
+                require(impactBps <= cap, "MagnetaPool: price impact too high");
+            }
+        }
 
         uint256 feeBps = pool.fee;
         uint256 amountInWithFee = amountIn * (10000 - feeBps);
