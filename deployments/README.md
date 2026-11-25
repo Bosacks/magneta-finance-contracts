@@ -35,6 +35,13 @@ Each JSON file follows [`Deployment`](./index.ts):
 3. Run `pnpm ts-node scripts/verify-deployed.ts <network>` to confirm
    every address has code and the admin matches.
 
+## Superseded addresses
+
+`../deployments-legacy/` keeps mainnet addresses that are no longer in a
+`<network>.json` but still have code on-chain: contracts replaced by a later
+redeploy, or recovered from a retired server. These files are a record only.
+The loader below never reads them, because it reads this directory only.
+
 ## Consuming from another repo
 
 ```ts
