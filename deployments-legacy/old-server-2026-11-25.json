@@ -1,0 +1,115 @@
+{
+  "description": "Mainnet addresses that were missing from deployments/*.json on main. They were recovered from the working copy of this repository on the retired server 216.106.176.191 (checked out at b29f91e, with uncommitted deployments/*.json edits) before the server was shut down. They are kept here as a record only. Nothing loads this file: deployments/index.ts reads deployments/ only.",
+  "recoveredAt": "2026-11-25",
+  "verifiedOnChain": "2026-11-25. Code is present at every address and the native balance is 0; ownerOnChain is the value owner() returned. The same address can appear on two chains because the deployer used the same nonce on each.",
+  "entries": [
+    {
+      "network": "berachain",
+      "chainId": "80094",
+      "contract": "MagnetaStakingFactory",
+      "address": "0x10efBB3d858D8945eC4BF334cBDC510E507Fb788",
+      "ownerOnChain": "0x620684F822da9adF36F41e3554791D889947e25E",
+      "inGitHistory": "in deployments/berachain.json until 328c71c",
+      "note": "Staking factory from the stack before the 2026-07-01 redeploy wave. 0 pools on every chain (checked 2026-11-10). Owned by the retired deployer key 0x6206…e25E, which leaked in 2026-08."
+    },
+    {
+      "network": "sei",
+      "chainId": "1329",
+      "contract": "MagnetaStakingFactory",
+      "address": "0x13aCEF62C3cff1A8D81da08086EE2a234C21c847",
+      "ownerOnChain": "0x620684F822da9adF36F41e3554791D889947e25E",
+      "inGitHistory": "in deployments/sei.json until 328c71c",
+      "note": "Staking factory from the stack before the 2026-07-01 redeploy wave. 0 pools on every chain (checked 2026-11-10). Owned by the retired deployer key 0x6206…e25E, which leaked in 2026-08."
+    },
+    {
+      "network": "monad",
+      "chainId": "143",
+      "contract": "MagnetaStakingFactory",
+      "address": "0x603c95Ca27dA7f164ebD736aB63c7dA6363fa056",
+      "ownerOnChain": "0x620684F822da9adF36F41e3554791D889947e25E",
+      "inGitHistory": "in deployments/monad.json until 8f912be",
+      "note": "Staking factory from the stack before the 2026-07-01 redeploy wave. 0 pools on every chain (checked 2026-11-10). Owned by the retired deployer key 0x6206…e25E, which leaked in 2026-08."
+    },
+    {
+      "network": "gnosis",
+      "chainId": "100",
+      "contract": "MagnetaStakingFactory",
+      "address": "0x603c95Ca27dA7f164ebD736aB63c7dA6363fa056",
+      "ownerOnChain": "0x620684F822da9adF36F41e3554791D889947e25E",
+      "inGitHistory": "in deployments/gnosis.json until 328c71c",
+      "note": "Staking factory from the stack before the 2026-07-01 redeploy wave. 0 pools on every chain (checked 2026-11-10). Owned by the retired deployer key 0x6206…e25E, which leaked in 2026-08."
+    },
+    {
+      "network": "base",
+      "chainId": "8453",
+      "contract": "TaxClaimModule_old",
+      "address": "0x960b5818609EF6588b7F09FC59c37B891441fA93",
+      "ownerOnChain": "0x620684F822da9adF36F41e3554791D889947e25E",
+      "inGitHistory": null,
+      "note": "Superseded TaxClaimModule. Owned by the retired deployer key 0x6206…e25E."
+    },
+    {
+      "network": "arbitrum",
+      "chainId": "42161",
+      "contract": "MagnetaBundler",
+      "address": "0xAC5b2e2cbe6502Ba348a1e7abaac071169612D9C",
+      "ownerOnChain": "0x4AeA3A398Db41b45e146c08131aD27c75b02EC2F",
+      "inGitHistory": "in deployments/arbitrum.json until ba243c0",
+      "note": "Bundler from before the 2026-07-01 wave; deployments/arbitrum.json now lists its replacement. Owned by the legacy Safe 0x4AeA…EC2F."
+    },
+    {
+      "network": "polygon",
+      "chainId": "137",
+      "contract": "LPModule_old_4",
+      "address": "0xB04C79B92938a584A0C63DA8F93A0e1E3634536a",
+      "ownerOnChain": "0x620684F822da9adF36F41e3554791D889947e25E",
+      "inGitHistory": null,
+      "note": "Fourth superseded LPModule. Owned by the retired deployer key 0x6206…e25E."
+    },
+    {
+      "network": "bsc",
+      "chainId": "56",
+      "contract": "MAG",
+      "address": "0xcdF3e1377Cfcbfe5336D79344DC074433F6854AE",
+      "ownerOnChain": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a",
+      "inGitHistory": "in deployments/bsc.json until 8f912be",
+      "note": "MAG token (symbol() returns MAG), owned by the Safe 0xC4c9…717a. Also listed in tokens/deployments-mag/<network>.json."
+    },
+    {
+      "network": "avalanche",
+      "chainId": "43114",
+      "contract": "MagnetaStakingFactory",
+      "address": "0xcdF3e1377Cfcbfe5336D79344DC074433F6854AE",
+      "ownerOnChain": "0x620684F822da9adF36F41e3554791D889947e25E",
+      "inGitHistory": "in deployments/avalanche.json until 328c71c",
+      "note": "Staking factory from the stack before the 2026-07-01 redeploy wave. 0 pools on every chain (checked 2026-11-10). Owned by the retired deployer key 0x6206…e25E, which leaked in 2026-08."
+    },
+    {
+      "network": "polygon",
+      "chainId": "137",
+      "contract": "LPSourceWrapper",
+      "address": "0xf9f0046520ffCfbb2E59987b30961F50FAC24d7E",
+      "ownerOnChain": null,
+      "inGitHistory": null,
+      "note": "No owner() function. Referenced by magneta-finance-tokens lib/constants/gatewayChains.ts."
+    },
+    {
+      "network": "linea",
+      "chainId": "59144",
+      "contract": "MagnetaStakingFactory",
+      "address": "0xFc0c499c6a59014EB63c3CDaC7A382d9A2EED6EF",
+      "ownerOnChain": "0x620684F822da9adF36F41e3554791D889947e25E",
+      "inGitHistory": "in deployments/linea.json until 328c71c",
+      "note": "Staking factory from the stack before the 2026-07-01 redeploy wave. 0 pools on every chain (checked 2026-11-10). Owned by the retired deployer key 0x6206…e25E, which leaked in 2026-08."
+    },
+    {
+      "network": "unichain",
+      "chainId": "130",
+      "contract": "MAG",
+      "address": "0xFc0c499c6a59014EB63c3CDaC7A382d9A2EED6EF",
+      "ownerOnChain": "0xC4c96aF54cdE078dc993d6948199b0AF8cD6717a",
+      "inGitHistory": "in deployments/unichain.json until 328c71c",
+      "note": "MAG token (symbol() returns MAG), owned by the Safe 0xC4c9…717a. Also listed in tokens/deployments-mag/<network>.json."
+    }
+  ]
+}
